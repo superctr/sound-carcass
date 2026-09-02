@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stddef.h>
 #include "xp.h"
 
 static const int16_t interp_weights[3][128] = {
@@ -684,13 +685,415 @@ static void dsp_frame_start(xp_t *xp)
 	exchange_serial(xp);
 }
 
+void xp_schedule(xp_t *xp)
+{
+	const xp_slot_t *s = xp->slots;
+	xp_sched_t *o = xp->sched;
+	uint8_t reads[XP_DSP_SLOTS], loads[XP_DSP_SLOTS];
+	int strobes = 0;
+
+	for (int i = 0; i < XP_DSP_SLOTS; i++)
+	{
+		reads[i] = s[i].eram_op == 1 || s[i].col == 0x20;
+		loads[i] = s[i].st == 1 && s[i].word < 0xf0;
+	}
+	for (int i = 0; i < XP_DSP_SLOTS; i++)
+	{
+		o[i].lands = reads[(i - 2) & 0xff];
+		o[i].latch_fresh = 0;
+		for (int k = 0; k < 4; k++)
+			o[i].latch_fresh |= reads[(i - 2 - k) & 0xff];
+		o[i].now_valid = loads[i];
+		o[i].gain_load = s[i].st == 1 && s[i].word >= 0xf0;
+		o[i].r_use = loads[i];
+		for (int k = 1; k <= 3 && !o[i].r_use; k++)
+			o[i].r_use = loads[(i - k) & 0xff];
+		o[i].strobe = 0xff;
+		if (s[i].ext == 1)
+			o[i].strobe = (uint8_t)(strobes++ & 1);
+	}
+}
+
+#if (defined SLJIT_64BIT_ARCHITECTURE && SLJIT_64BIT_ARCHITECTURE)
+
+#define XP_REG_ACC SLJIT_S1
+#define XP_REG_PPREV SLJIT_S2
+#define XP_REG_ABEF SLJIT_S3
+#define XP_REG_ABP SLJIT_S4
+#define XP_REG_ERAM SLJIT_S5
+
+#define CELL(field) SLJIT_MEM1(SLJIT_S0), (sljit_sw)offsetof(xp_t, field)
+#define IRAM_WORD(word) SLJIT_MEM1(SLJIT_S0), (sljit_sw)(offsetof(xp_t, iram) + (size_t)(word) * 4)
+
+static void e_sext(jit_builder_t *b, sljit_s32 reg)
+{
+	sljit_emit_op1(b->c, SLJIT_MOV_S32, reg, 0, reg, 0);
+}
+
+static void e_mov(jit_builder_t *b, sljit_s32 dst, sljit_s32 src, sljit_sw srcw)
+{
+	sljit_emit_op1(b->c, SLJIT_MOV, dst, 0, src, srcw);
+}
+
+static void e_load(jit_builder_t *b, sljit_s32 dst, sljit_s32 mem, sljit_sw memw)
+{
+	sljit_emit_op1(b->c, SLJIT_MOV_S32, dst, 0, mem, memw);
+}
+
+static void e_store(jit_builder_t *b, sljit_s32 mem, sljit_sw memw, sljit_s32 src)
+{
+	sljit_emit_op1(b->c, SLJIT_MOV32, mem, memw, src, 0);
+}
+
+static void e_add(jit_builder_t *b, sljit_s32 dst, sljit_s32 a, sljit_s32 bb, sljit_sw bw)
+{
+	sljit_emit_op2(b->c, SLJIT_ADD, dst, 0, a, 0, bb, bw);
+	e_sext(b, dst);
+}
+
+/* dst = s32((a * c + 0x1000) >> 13) */
+static void e_mul13(jit_builder_t *b, sljit_s32 dst, sljit_s32 a, sljit_s32 c, sljit_sw cw)
+{
+	sljit_emit_op2(b->c, SLJIT_MUL, dst, 0, a, 0, c, cw);
+	sljit_emit_op2(b->c, SLJIT_ADD, dst, 0, dst, 0, SLJIT_IMM, 0x1000);
+	sljit_emit_op2(b->c, SLJIT_ASHR, dst, 0, dst, 0, SLJIT_IMM, 13);
+	e_sext(b, dst);
+}
+
+static void e_wrap24(jit_builder_t *b, sljit_s32 reg)
+{
+	sljit_emit_op2(b->c, SLJIT_SHL, reg, 0, reg, 0, SLJIT_IMM, 8);
+	e_sext(b, reg);
+	sljit_emit_op2(b->c, SLJIT_ASHR, reg, 0, reg, 0, SLJIT_IMM, 8);
+}
+
+/* R3 = ((offset + cursor) & 0xffff) * 4, an ERAM byte offset */
+static void e_eram_index(jit_builder_t *b, uint16_t offset)
+{
+	sljit_emit_op1(b->c, SLJIT_MOV_U16, SLJIT_R3, 0, CELL(dsp.cursor));
+	sljit_emit_op2(b->c, SLJIT_ADD, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, offset);
+	sljit_emit_op2(b->c, SLJIT_AND, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 0xffff);
+	sljit_emit_op2(b->c, SLJIT_SHL, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 2);
+}
+
+/* R0 = the slot's operand; R1 holds the word read this slot when now_valid */
+static void e_operand(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o)
+{
+	switch (s->col >> 4)
+	{
+	case 1:
+		e_mov(b, SLJIT_R0, XP_REG_ACC, 0);
+		return;
+	case 3:
+		if (o->latch_fresh)
+		{
+			e_load(b, SLJIT_R0, CELL(dsp.latch));
+			return;
+		}
+		if (s->st == 1)
+		{
+			if (o->now_valid)
+				e_mov(b, SLJIT_R0, SLJIT_R1, 0);
+			else
+				e_mov(b, SLJIT_R0, SLJIT_IMM, 0);
+			return;
+		}
+		if (s->st == 2)
+		{
+			e_load(b, SLJIT_R0, CELL(dsp.latch));
+			return;
+		}
+		break;
+	default:
+		break;
+	}
+	if (o->r_use)
+		e_load(b, SLJIT_R0, CELL(dsp.r));
+	else
+		e_mov(b, SLJIT_R0, SLJIT_IMM, 0);
+}
+
+/* R2 = "now_valid ? now : 0" */
+static void e_now(jit_builder_t *b, const xp_sched_t *o, sljit_s32 dst)
+{
+	if (o->now_valid)
+		e_mov(b, dst, SLJIT_R1, 0);
+	else
+		e_mov(b, dst, SLJIT_IMM, 0);
+}
+
+/* the ALU: acc in XP_REG_ACC, the previous product in XP_REG_PPREV, this slot's product left in R2 */
+static void e_execute(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o)
+{
+	const int nibble = s->col & 0xf;
+	e_operand(b, s, o);
+
+	if (s->col == 0x30 && s->cram <= 0x000f)
+	{
+		e_now(b, o, SLJIT_R2);
+		switch (s->cram & 0xf)
+		{
+		case 0:
+		case 2:
+			e_load(b, SLJIT_R3, CELL(dsp.mem));
+			e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_R3, 0);
+			break;
+		case 4:
+			e_load(b, XP_REG_ACC, CELL(dsp.mem));
+			break;
+		case 5:
+			e_mov(b, XP_REG_ACC, XP_REG_PPREV, 0);
+			break;
+		case 9:
+			e_load(b, SLJIT_R3, CELL(dsp.mem));
+			e_add(b, XP_REG_ACC, SLJIT_R3, XP_REG_PPREV, 0);
+			break;
+		default:
+			e_add(b, XP_REG_ACC, XP_REG_ACC, XP_REG_PPREV, 0);
+			break;
+		}
+		return;
+	}
+
+	if (s->col == 0x30 && (s->cram & 0x3e80) == 0x0280)
+	{
+		const int code = s->cram & 0xf;
+		const int select = (s->cram >> 4) & 3;
+		e_load(b, SLJIT_R4, CELL(dsp.gain));
+
+		if (code == 5)
+		{
+			if (select == 1)
+				e_mov(b, SLJIT_R3, (s->st == 3) ? XP_REG_ACC : XP_REG_ABP, 0);
+			else if (select == 2)
+				e_load(b, SLJIT_R3, CELL(dsp.mem));
+			else if (o->latch_fresh || o->now_valid)
+				e_mov(b, SLJIT_R3, SLJIT_R0, 0);
+			else
+				e_load(b, SLJIT_R3, CELL(dsp.mem));
+			e_mul13(b, SLJIT_R2, SLJIT_R3, SLJIT_R4, 0);
+			e_mov(b, XP_REG_ACC, XP_REG_PPREV, 0);
+			return;
+		}
+
+		if (code == 3 && select == 2)
+		{
+			e_load(b, SLJIT_R3, CELL(dsp.mem));
+			e_mul13(b, SLJIT_R2, SLJIT_R3, SLJIT_R4, 0);
+		}
+		else if (code == 1 && select == 2)
+		{
+			if (o->now_valid)
+				e_mov(b, SLJIT_R3, SLJIT_R1, 0);
+			else if (o->r_use)
+				e_load(b, SLJIT_R3, CELL(dsp.r));
+			else
+				e_mov(b, SLJIT_R3, SLJIT_IMM, 0);
+			e_mul13(b, SLJIT_R2, SLJIT_R3, SLJIT_R4, 0);
+		}
+		else if ((code == 1 || code == 3) && select == 3)
+			e_mul13(b, SLJIT_R2, SLJIT_R0, SLJIT_R4, 0);
+		else if (code == 1 || code == 2 || code == 3)
+			e_mul13(b, SLJIT_R2, XP_REG_ACC, SLJIT_R4, 0);
+		else
+			e_mov(b, SLJIT_R2, SLJIT_R0, 0);
+
+		if (code == 2 || code == 3)
+			e_add(b, XP_REG_ACC, XP_REG_ACC, XP_REG_PPREV, 0);
+		else
+		{
+			e_mul13(b, SLJIT_R3, XP_REG_ACC, SLJIT_R4, 0);
+			e_add(b, XP_REG_ACC, SLJIT_R3, XP_REG_PPREV, 0);
+		}
+		return;
+	}
+
+	if (s->col == 0x30 && (s->cram == 0x1001 || s->cram == 0x2801 || s->cram == 0x0231 || s->cram == 0x0325))
+	{
+		e_mov(b, SLJIT_R2, SLJIT_IMM, 0);
+		switch (s->cram)
+		{
+		case 0x1001:
+			e_wrap24(b, XP_REG_ACC);
+			break;
+		case 0x2801:
+		{
+			e_wrap24(b, XP_REG_ACC);
+			sljit_emit_op2(b->c, SLJIT_SUB, SLJIT_R3, 0, SLJIT_IMM, 0, XP_REG_ACC, 0);
+			struct sljit_jump *positive = sljit_emit_cmp(b->c, SLJIT_SIG_GREATER_EQUAL, XP_REG_ACC, 0, SLJIT_IMM, 0);
+			e_mov(b, XP_REG_ACC, SLJIT_R3, 0);
+			sljit_set_label(positive, sljit_emit_label(b->c));
+			break;
+		}
+		case 0x0231:
+			e_now(b, o, SLJIT_R3);
+			e_load(b, SLJIT_R4, CELL(dsp.latch));
+			sljit_emit_op2(b->c, SLJIT_SUB, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_R3, 0);
+			e_sext(b, SLJIT_R4);
+			sljit_emit_op1(b->c, SLJIT_MOV_U16, SLJIT_R0, 0, CELL(dsp.fraction));
+			sljit_emit_op2(b->c, SLJIT_MUL, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_R0, 0);
+			sljit_emit_op2(b->c, SLJIT_ASHR, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, 12);
+			e_sext(b, SLJIT_R4);
+			e_add(b, XP_REG_ACC, SLJIT_R3, SLJIT_R4, 0);
+			break;
+		default:
+			break;
+		}
+		return;
+	}
+
+	if (s->col == 0x0c)
+	{
+		e_load(b, SLJIT_R3, CELL(dsp.serial_in));
+		e_mul13(b, SLJIT_R2, SLJIT_R3, SLJIT_IMM, s->coefficient);
+		return;
+	}
+
+	if (nibble == 0 && s->col != 0x30)
+		e_mov(b, SLJIT_R2, SLJIT_R0, 0);
+	else
+		e_mul13(b, SLJIT_R2, SLJIT_R0, SLJIT_IMM, s->coefficient);
+
+	switch (s->col)
+	{
+	case 0x11:
+		if (o->now_valid)
+			e_mov(b, XP_REG_ACC, SLJIT_R1, 0);
+		return;
+	case 0x14:
+		e_load(b, XP_REG_ACC, CELL(dsp.mem));
+		return;
+	case 0x0f:
+		e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_IMM, s->raw);
+		return;
+	case 0x1f:
+		e_load(b, SLJIT_R3, CELL(dsp.mem));
+		e_add(b, XP_REG_ACC, SLJIT_R3, SLJIT_IMM, s->raw);
+		return;
+	case 0x2f:
+		e_add(b, XP_REG_ACC, XP_REG_PPREV, SLJIT_IMM, s->raw);
+		return;
+	case 0x20:
+	case 0x21:
+		return;
+	case 0x32:
+		e_add(b, XP_REG_ACC, XP_REG_ACC, XP_REG_PPREV, 0);
+		return;
+	default:
+		break;
+	}
+
+	switch (nibble)
+	{
+	case 0:
+	case 3:
+		e_add(b, XP_REG_ACC, XP_REG_ACC, XP_REG_PPREV, 0);
+		break;
+	case 5:
+		e_mov(b, XP_REG_ACC, XP_REG_PPREV, 0);
+		break;
+	case 9:
+		e_load(b, SLJIT_R3, CELL(dsp.mem));
+		e_add(b, XP_REG_ACC, SLJIT_R3, XP_REG_PPREV, 0);
+		break;
+	default:
+		break;
+	}
+}
+
+static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t *o)
+{
+	e_mov(b, XP_REG_ABP, XP_REG_ABEF, 0);
+	e_mov(b, XP_REG_ABEF, XP_REG_ACC, 0);
+
+	if (o->lands)
+	{
+		e_load(b, SLJIT_R3, CELL(dsp.pend[i & 1]));
+		e_store(b, CELL(dsp.latch), SLJIT_R3);
+	}
+	if (s->eram_op == 1)
+	{
+		e_eram_index(b, s->eram_offset);
+		e_load(b, SLJIT_R3, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0);
+		e_store(b, CELL(dsp.pend[i & 1]), SLJIT_R3);
+	}
+	if (s->col == 0x20)
+	{
+		sljit_emit_op1(b->c, SLJIT_MOV_U16, SLJIT_R3, 0, CELL(dsp.cursor));
+		sljit_emit_op2(b->c, SLJIT_ASHR, SLJIT_R4, 0, XP_REG_ACC, 0, SLJIT_IMM, 12);
+		sljit_emit_op2(b->c, SLJIT_ADD, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_R4, 0);
+		sljit_emit_op2(b->c, SLJIT_AND, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 0xffff);
+		sljit_emit_op2(b->c, SLJIT_SHL, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 2);
+		e_load(b, SLJIT_R3, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0);
+		e_store(b, CELL(dsp.pend[i & 1]), SLJIT_R3);
+		sljit_emit_op2(b->c, SLJIT_AND, SLJIT_R4, 0, XP_REG_ACC, 0, SLJIT_IMM, 0xfff);
+		sljit_emit_op1(b->c, SLJIT_MOV_U16, CELL(dsp.fraction), SLJIT_R4, 0);
+	}
+	if (o->strobe != 0xff)
+	{
+		e_load(b, SLJIT_R3, CELL(dsp.serial_frame[o->strobe]));
+		e_store(b, CELL(dsp.serial_in), SLJIT_R3);
+	}
+	if (s->st == 1)
+		e_load(b, SLJIT_R1, IRAM_WORD(s->word));
+
+	e_execute(b, s, o);
+
+	if (o->gain_load)
+	{
+		sljit_emit_op2(b->c, SLJIT_ASHR, SLJIT_R3, 0, SLJIT_R1, 0, SLJIT_IMM, 8);
+		e_store(b, CELL(dsp.gain), SLJIT_R3);
+	}
+	if (s->st == 2)
+	{
+		e_load(b, SLJIT_R3, CELL(dsp.latch));
+		e_store(b, IRAM_WORD(s->word), SLJIT_R3);
+	}
+	else if (s->st == 3)
+	{
+		e_mov(b, SLJIT_R3, XP_REG_ABEF, 0);
+		jit_clamp24(b, SLJIT_R3, SLJIT_R4);
+		e_store(b, IRAM_WORD(s->word), SLJIT_R3);
+	}
+	if (s->eram_op == 3)
+	{
+		e_mov(b, SLJIT_R4, XP_REG_ABEF, 0);
+		jit_clamp24(b, SLJIT_R4, SLJIT_R0);
+		e_eram_index(b, s->eram_offset);
+		e_store(b, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0, SLJIT_R4);
+	}
+	else if (s->eram_op == 2)
+	{
+		e_load(b, SLJIT_R4, CELL(dsp.r));
+		e_eram_index(b, s->eram_offset);
+		e_store(b, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0, SLJIT_R4);
+	}
+	if (o->now_valid)
+	{
+		e_store(b, CELL(dsp.r), SLJIT_R1);
+		if (!s->read_bypass)
+			e_store(b, CELL(dsp.mem), SLJIT_R1);
+	}
+	e_mov(b, XP_REG_PPREV, SLJIT_R2, 0);
+}
+
 static bool compile_program(xp_t *xp)
 {
 	jit_builder_t b;
 	jit_code_t *code = &xp->code[xp->live ^ 1];
 	jit_code_free(xp->jit, code);
-	if (!jit_begin(&b, xp->jit, 4, 2))
+	xp_schedule(xp);
+	if (!jit_begin(&b, xp->jit, 5, 6))
 		return false;
+
+	e_load(&b, XP_REG_ACC, CELL(dsp.acc));
+	e_mov(&b, XP_REG_PPREV, SLJIT_IMM, 0);
+	e_mov(&b, XP_REG_ABEF, XP_REG_ACC, 0);
+	sljit_emit_op1(b.c, SLJIT_MOV_P, XP_REG_ERAM, 0, CELL(eram));
+	for (int i = 0; i < XP_DSP_SLOTS; i++)
+		e_slot(&b, i, &xp->slots[i], &xp->sched[i]);
+	e_store(&b, CELL(dsp.acc), XP_REG_ACC);
+
 	if (!jit_end(&b, xp->jit, code))
 		return false;
 	xp->live ^= 1;
@@ -698,16 +1101,19 @@ static bool compile_program(xp_t *xp)
 	return true;
 }
 
-void xp_run_frame(xp_t *xp)
-{
-	memset(xp->bus, 0, sizeof(xp->bus));
-	for (int n = 0; n < XP_VOICES; n++)
-		run_voice(xp, n);
-	xp->frame_counter++;
-	xp->noise ^= xp->noise << 13;
-	xp->noise ^= xp->noise >> 17;
-	xp->noise ^= xp->noise << 5;
+#else
 
+static bool compile_program(xp_t *xp)
+{
+	xp_schedule(xp);
+	xp->frame = NULL;
+	return false;
+}
+
+#endif
+
+void xp_run_dsp(xp_t *xp)
+{
 	xp->dsp_enabled = bit(xp->regs[XP_DSP_MODE >> 1], 1);
 	if (!xp->dsp_enabled)
 		return;
@@ -721,6 +1127,19 @@ void xp_run_frame(xp_t *xp)
 	if (xp->frame)
 		xp->frame(xp);
 	xp->dsp.cursor--;
+}
+
+void xp_run_frame(xp_t *xp)
+{
+	memset(xp->bus, 0, sizeof(xp->bus));
+	for (int n = 0; n < XP_VOICES; n++)
+		run_voice(xp, n);
+	xp->frame_counter++;
+	xp->noise ^= xp->noise << 13;
+	xp->noise ^= xp->noise >> 17;
+	xp->noise ^= xp->noise << 5;
+
+	xp_run_dsp(xp);
 }
 
 int32_t xp_output(const xp_t *xp, int word)

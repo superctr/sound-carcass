@@ -101,16 +101,27 @@ typedef struct xp_slot
 typedef struct xp_dsp_state
 {
 	int32_t acc;
-	int32_t product;
 	int32_t r;
 	int32_t mem;
 	int32_t latch;
+	int32_t pend[2];
 	int32_t gain;
 	uint16_t fraction;
 	uint16_t cursor;
 	int32_t serial_frame[2];
 	int32_t serial_in;
 } xp_dsp_state_t;
+
+/* The schedule pass: what the pipeline holds at each slot, resolved from the program alone. */
+typedef struct xp_sched
+{
+	uint8_t lands;
+	uint8_t latch_fresh;
+	uint8_t now_valid;
+	uint8_t r_use;
+	uint8_t gain_load;
+	uint8_t strobe;
+} xp_sched_t;
 
 struct xp;
 typedef void (*xp_frame_fn)(struct xp *xp);
@@ -136,6 +147,7 @@ typedef struct xp
 	int32_t exp_table[257];
 
 	xp_slot_t slots[XP_DSP_SLOTS];
+	xp_sched_t sched[XP_DSP_SLOTS];
 	xp_dsp_state_t dsp;
 	int32_t iram[XP_IRAM_SIZE];
 	int32_t *eram;
@@ -162,7 +174,11 @@ void xp_set_serial_words(xp_t *xp, int left, int right);
 void xp_run_frame(xp_t *xp);
 int32_t xp_output(const xp_t *xp, int word);
 
+/* the DSP alone on whatever is in the bus words, for the tests */
+void xp_run_dsp(xp_t *xp);
+
 /* the program as the schedule pass sees it, for the tests */
 void xp_decode_program(xp_t *xp);
+void xp_schedule(xp_t *xp);
 
 #endif
