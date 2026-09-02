@@ -385,7 +385,7 @@ void sc88_run_frame(sc88_t *b)
 
 bool sc88_idle(const sc88_t *b)
 {
-	return !b->mute && (!b->has_lsp || !b->lsp_mute);
+	return !b->mute;
 }
 
 void sc88_queue_midi(sc88_t *b, int port, uint8_t byte, uint32_t frame_offset)
