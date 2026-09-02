@@ -102,15 +102,15 @@ typedef enum scemu_computer_switch
 /* LED bit positions in the mask returned by scemu_leds(). */
 typedef enum scemu_led
 {
-	SCEMU_LED_USER_INST,
-	SCEMU_LED_EDIT1,
+	SCEMU_LED_ALL,
+	SCEMU_LED_MUTE,
+	SCEMU_LED_SC55_MAP,
+	SCEMU_LED_SC88_MAP,           /* EQ on the SC-88 */
+	SCEMU_LED_EDIT1,              /* the three triangles beside the edit rows */
 	SCEMU_LED_EDIT2,
 	SCEMU_LED_EDIT3,
-	SCEMU_LED_EQ,                 /* SC-88 MAP on the Pro */
-	SCEMU_LED_INST_MAP,           /* SC-55 MAP */
-	SCEMU_LED_MUTE,
-	SCEMU_LED_ALL,
-	SCEMU_LED_POWER,              /* the volume knob's lens */
+	SCEMU_LED_USER_INST,          /* the lens; green */
+	SCEMU_LED_USER_INST_RED,      /* the Pro's second lens die; both lit is EFX mode */
 	SCEMU_LED_COUNT
 } scemu_led_t;
 

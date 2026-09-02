@@ -9,14 +9,21 @@
  * window on /CS5, the panel matrix, MIDI OUT. */
 
 #define SUB_SOURCES 3
-#define SUB_SYSEX_MAX 512
+#define SUB_MAX_EXCLUSIVE 0x8a
+#define SUB_SYSEX_MAX (SUB_MAX_EXCLUSIVE + 9)
+#define SUB_BLOCK_SIZE 0x24
 #define SUB_QUEUE_SIZE 64
+
+/* one 31.25 us frame per sub_hle_frame() call */
+#define SUB_DELIVER_FRAMES 1
+#define SUB_BLOCK_RETRY_FRAMES 3
+#define SUB_TX_BYTE_FRAMES 10
 
 typedef struct sub_message
 {
 	uint8_t code, flags, d1, d2;
-	uint16_t block_offset;
-	uint16_t block_size;
+	uint8_t block_size;
+	uint8_t block[SUB_BLOCK_SIZE];
 } sub_message_t;
 
 typedef struct sub_source
@@ -44,9 +51,14 @@ typedef struct sub_hle
 	sub_source_t src[SUB_SOURCES];
 	sub_message_t queue[SUB_QUEUE_SIZE];
 	uint8_t queue_head, queue_count;
-	uint8_t block_pool[SUB_QUEUE_SIZE * 8];
 	bool busy;
 	uint32_t deliver_frames;
+	uint32_t queue_drops;
+	uint32_t sysex_drops;
+
+	uint8_t tx_rd, tx_left, tx_end;
+	bool tx_running;
+	uint32_t tx_frames;
 
 	uint8_t keys[4];
 
@@ -57,6 +69,8 @@ typedef struct sub_hle
 
 void sub_hle_init(sub_hle_t *sub, void (*irq)(void *user, bool state), void (*midi_out)(void *user, uint8_t byte), void *user);
 void sub_hle_reset(sub_hle_t *sub);
+/* /RST from the main CPU's P4-0 (SC-88VL); active low */
+void sub_hle_reset_w(sub_hle_t *sub, bool state);
 uint8_t sub_hle_read(sub_hle_t *sub, uint32_t offset);
 void sub_hle_write(sub_hle_t *sub, uint32_t offset, uint8_t data);
 void sub_hle_midi_byte(sub_hle_t *sub, int source, uint8_t byte);

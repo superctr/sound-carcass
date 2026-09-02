@@ -32,7 +32,6 @@ add_library(scemu STATIC
 	lib/scemu.c
 	lib/h8500.c
 	lib/xp.c
-	lib/xp_dsp.c
 	lib/lsp.c
 	lib/sc88.c
 	lib/gate_array.c
@@ -43,6 +42,9 @@ add_library(scemu STATIC
 )
 target_include_directories(scemu PUBLIC lib)
 target_link_libraries(scemu PRIVATE sljit)
+if(NOT MSVC)
+	target_link_libraries(scemu PUBLIC m)
+endif()
 if(NOT MSVC)
 	target_compile_options(scemu PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-unused-function)
 endif()

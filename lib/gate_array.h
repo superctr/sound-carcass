@@ -27,7 +27,6 @@ void gate_array_init(gate_array_t *ga, struct lcd *lcd, void (*irq)(void *user, 
 void gate_array_reset(gate_array_t *ga);
 uint8_t gate_array_read(gate_array_t *ga, uint32_t offset);
 void gate_array_write(gate_array_t *ga, uint32_t offset, uint8_t data);
-void gate_array_set_source(gate_array_t *ga, int source, bool state);
 void gate_array_frame(gate_array_t *ga);
 
 #endif

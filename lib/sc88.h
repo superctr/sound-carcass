@@ -34,9 +34,20 @@ typedef struct sc88_midi_event
 	uint8_t byte;
 } sc88_midi_event_t;
 
+typedef struct sc88_map
+{
+	uint32_t sram_base;
+	uint32_t sram_alias[2];
+	uint32_t xp_base;
+	uint32_t sub_base;
+	uint32_t ga_base;
+	uint32_t lsp_base;
+} sc88_map_t;
+
 typedef struct sc88
 {
 	scemu_model_t model;
+	sc88_map_t map;
 	jit_alloc_t jit;
 
 	uint8_t *program_rom;
@@ -55,10 +66,10 @@ typedef struct sc88
 	lcd_t lcd;
 	sub_hle_t sub;
 
-	uint8_t port4;
+	bool xp_int;
 	bool mute;
+	bool lsp_mute;
 	scemu_computer_switch_t computer_switch;
-	uint32_t leds;
 
 	uint64_t frame;
 	sc88_midi_event_t midi_queue[SC88_MIDI_QUEUE_SIZE];

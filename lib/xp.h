@@ -4,14 +4,41 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include "xp_dsp.h"
+#include "jit.h"
 
-/* Roland XP (MBCS30109): 64-voice PCM engine with a 256-slot DSP, one frame per sample. */
+/* Roland XP (MBCS30109): 64-voice PCM engine with a 256-slot effect DSP, one frame per sample. */
 
 #define XP_VOICES 64
 #define XP_BUS_COUNT 64
 #define XP_OUTPUT_WORDS 8
 #define XP_REGS 0x2000
+#define XP_DSP_SLOTS 256
+#define XP_IRAM_SIZE 256
+#define XP_ERAM_SIZE 0x10000
+#define XP_DSP_INPUT_SHIFT 4
+
+enum
+{
+	XP_PAGE_CONTROL = 0x00, XP_PAGE_ADDRESS = 0x01, XP_PAGE_LOOP = 0x02, XP_PAGE_END = 0x03,
+	XP_PAGE_RESO_TARGET = 0x11, XP_PAGE_PITCH_TARGET = 0x12, XP_PAGE_TVF_TARGET = 0x13,
+	XP_PAGE_TVA2_TARGET = 0x14, XP_PAGE_TVA1_TARGET = 0x15,
+	XP_PAGE_RESO_CONTROL = 0x16, XP_PAGE_PITCH_CONTROL = 0x17, XP_PAGE_TVF_CONTROL = 0x18,
+	XP_PAGE_TVA2_CONTROL = 0x19, XP_PAGE_TVA1_CONTROL = 0x1a,
+	XP_PAGE_PITCH_SEED = 0x1b, XP_PAGE_TVF_SEED = 0x1c, XP_PAGE_TVA2_SEED = 0x1d, XP_PAGE_TVA1_SEED = 0x1e,
+	XP_PAGE_FILTER = 0x20, XP_PAGE_RESO_SEED = 0x21
+};
+
+enum
+{
+	XP_CRAM_BASE = 0x2c00, XP_IRAM_BASE = 0x3000, XP_IRAM3_BASE = 0x3200, XP_IRAM3_TARGET_BASE = 0x3300,
+	XP_PRAM_BASE = 0x3400, XP_RUN_MASK = 0x3900, XP_READBACK_LOW = 0x3910, XP_READBACK_HIGH = 0x3912,
+	XP_DSP_MODE = 0x3916, XP_IRQ_STATUS = 0x3918, XP_IRQ_ACK = 0x391a, XP_ROM_PAGE = 0x3920,
+	XP_ROM_BANK = 0x3922, XP_IRAM3_RATE = 0x3928, XP_SEND_BASE = 0x3a00, XP_ROM_WINDOW = 0x3c00
+};
+
+enum { XP_IRQ_VOICE_DONE = 4, XP_IRQ_LOOP_REACHED = 5 };
+
+typedef enum xp_law { XP_LAW_LINEAR, XP_LAW_EXPONENTIAL, XP_LAW_S_CURVE } xp_law_t;
 
 typedef struct xp_link
 {
@@ -55,11 +82,45 @@ typedef struct xp_voice
 	int32_t filter_band;
 } xp_voice_t;
 
+/* One decoded program slot, the input of the schedule pass. */
+typedef struct xp_slot
+{
+	uint8_t st;
+	uint8_t word;
+	uint8_t col;
+	uint8_t ext;
+	uint8_t eram_op;
+	bool read_bypass;
+	uint16_t eram_offset;
+	uint16_t cram;
+	int32_t coefficient;
+	int32_t raw;
+} xp_slot_t;
+
+/* What the compiled frame keeps across frames. */
+typedef struct xp_dsp_state
+{
+	int32_t acc;
+	int32_t product;
+	int32_t r;
+	int32_t mem;
+	int32_t latch;
+	int32_t gain;
+	uint16_t fraction;
+	uint16_t cursor;
+	int32_t serial_frame[2];
+	int32_t serial_in;
+} xp_dsp_state_t;
+
+struct xp;
+typedef void (*xp_frame_fn)(struct xp *xp);
+
 typedef struct xp
 {
 	xp_link_t link;
 	const uint8_t *wave;
 	size_t wave_size;
+	uint32_t wave_chip_size;
 
 	uint16_t regs[XP_REGS];
 	xp_voice_t voices[XP_VOICES];
@@ -74,21 +135,34 @@ typedef struct xp
 	bool int_state;
 	int32_t exp_table[257];
 
+	xp_slot_t slots[XP_DSP_SLOTS];
+	xp_dsp_state_t dsp;
+	int32_t iram[XP_IRAM_SIZE];
 	int32_t *eram;
-	xp_dsp_t dsp;
-	jit_alloc_t *jit;
+	uint8_t iram_ramping[XP_IRAM_SIZE];
+	bool dsp_enabled;
+	bool program_dirty;
 	uint8_t serial_out_word[2];
+
+	jit_alloc_t *jit;
+	jit_code_t code[2];
+	int live;
+	xp_frame_fn frame;
 } xp_t;
 
-bool xp_init(xp_t *xp, const xp_link_t *link, jit_alloc_t *jit, const uint8_t *wave, size_t wave_size);
+bool xp_init(xp_t *xp, const xp_link_t *link, jit_alloc_t *jit, const uint8_t *wave, size_t wave_size, uint32_t chip_size);
 void xp_release(xp_t *xp);
 void xp_reset(xp_t *xp);
 
+/* The host window: offset is the word index in the 16 KB window. */
 uint16_t xp_read(xp_t *xp, uint32_t offset);
-void xp_write(xp_t *xp, uint32_t offset, uint16_t data);
+void xp_write(xp_t *xp, uint32_t offset, uint16_t data, uint16_t mask);
 
 void xp_set_serial_words(xp_t *xp, int left, int right);
 void xp_run_frame(xp_t *xp);
 int32_t xp_output(const xp_t *xp, int word);
+
+/* the program as the schedule pass sees it, for the tests */
+void xp_decode_program(xp_t *xp);
 
 #endif

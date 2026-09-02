@@ -118,7 +118,7 @@ void scemu_set_computer_switch(scemu_t *m, scemu_computer_switch_t sw)
 
 uint32_t scemu_leds(const scemu_t *m)
 {
-	return m->machine.leds;
+	return m->machine.ga.leds;
 }
 
 const scemu_lcd_t *scemu_lcd(scemu_t *m)

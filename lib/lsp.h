@@ -13,6 +13,26 @@
 #define LSP_IRAM_SIZE 0x80
 #define LSP_ERAM_SIZE 0x10000
 
+enum
+{
+	LSP_SLOT_JUMP_NEGATIVE = 0x0d, LSP_SLOT_JUMP_POSITIVE = 0x0e, LSP_SLOT_JUMP = 0x0f,
+	LSP_SLOT_ERAM_WRITE = 0x10, LSP_SLOT_TAP = 0x13, LSP_SLOT_MULTIPLIER = 0x14,
+	LSP_SLOT_AUDIO_OUT = 0x18, LSP_SLOT_ERAM_READ = 0x1a, LSP_SLOT_AUDIO_IN = 0x1e
+};
+
+enum
+{
+	LSP_HOST_ADDRESS_LOW = 0x00, LSP_HOST_ADDRESS_HIGH = 0x01, LSP_HOST_DATA_LOW = 0x02,
+	LSP_HOST_DATA_MID = 0x03, LSP_HOST_DATA_HIGH = 0x04, LSP_HOST_CONFIGURE = 0x06,
+	LSP_HOST_READ_LOW = 0x08, LSP_HOST_READ_HIGH = 0x09
+};
+
+enum
+{
+	LSP_OP_MAC_A = 0, LSP_OP_SET_A = 1, LSP_OP_MAC_B = 2, LSP_OP_SET_B = 3,
+	LSP_OP_MUL = 4, LSP_OP_ABS = 5, LSP_OP_SPECIAL_A = 6, LSP_OP_SPECIAL_B = 7
+};
+
 struct lsp;
 typedef void (*lsp_sample_fn)(struct lsp *lsp);
 
@@ -29,6 +49,8 @@ typedef struct lsp_state
 	uint16_t tap;
 	uint8_t buffer_pos;
 	uint16_t eram_pos;
+	uint16_t jump_target;
+	uint8_t jump_delay;
 } lsp_state_t;
 
 typedef struct lsp
@@ -40,6 +62,7 @@ typedef struct lsp
 	lsp_state_t state;
 	uint16_t configuration;
 	bool running;
+	bool restart;
 	bool dirty;
 
 	int32_t serial_in[2];
