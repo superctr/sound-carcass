@@ -86,6 +86,11 @@ void sc88_run_frame(sc88_t *b);
 bool sc88_idle(const sc88_t *b);
 
 void sc88_queue_midi(sc88_t *b, int port, uint8_t byte, uint32_t frame_offset);
+
+/* The whole machine at a frame boundary: the struct with its pointers put back on load, then the ERAMs. */
+size_t sc88_state_size(const sc88_t *b);
+size_t sc88_state_save(const sc88_t *b, void *buffer, size_t size);
+bool sc88_state_load(sc88_t *b, const void *buffer, size_t size);
 void sc88_button(sc88_t *b, scemu_button_t button, bool down);
 
 #endif

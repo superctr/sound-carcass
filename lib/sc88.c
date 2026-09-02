@@ -420,3 +420,117 @@ void sc88_button(sc88_t *b, scemu_button_t button, bool down)
 		return;
 	sub_hle_set_key(&b->sub, BUTTON_ROW[button], BUTTON_BIT[button], down);
 }
+
+/* ---------------------------------------------------------------- state */
+
+#define STATE_MAGIC "SCEMU1"
+
+typedef struct state_header
+{
+	char magic[8];
+	uint32_t model;
+	uint32_t machine_size;
+	uint32_t xp_eram_size;
+	uint32_t lsp_eram_size;
+} state_header_t;
+
+size_t sc88_state_size(const sc88_t *b)
+{
+	return sizeof(state_header_t) + sizeof(sc88_t) + XP_ERAM_SIZE * sizeof(int32_t) + (b->has_lsp ? LSP_ERAM_SIZE * sizeof(int32_t) : 0);
+}
+
+size_t sc88_state_save(const sc88_t *b, void *buffer, size_t size)
+{
+	const size_t need = sc88_state_size(b);
+	if (size < need)
+		return 0;
+	uint8_t *p = buffer;
+	state_header_t h;
+	memset(&h, 0, sizeof(h));
+	memcpy(h.magic, STATE_MAGIC, sizeof(STATE_MAGIC));
+	h.model = (uint32_t)b->model;
+	h.machine_size = (uint32_t)sizeof(sc88_t);
+	h.xp_eram_size = XP_ERAM_SIZE * sizeof(int32_t);
+	h.lsp_eram_size = b->has_lsp ? LSP_ERAM_SIZE * sizeof(int32_t) : 0;
+	memcpy(p, &h, sizeof(h));
+	p += sizeof(h);
+	memcpy(p, b, sizeof(*b));
+	p += sizeof(*b);
+	memcpy(p, b->xp.eram, h.xp_eram_size);
+	p += h.xp_eram_size;
+	if (b->has_lsp)
+		memcpy(p, b->lsp.eram, h.lsp_eram_size);
+	return need;
+}
+
+bool sc88_state_load(sc88_t *b, const void *buffer, size_t size)
+{
+	state_header_t h;
+	if (size < sizeof(h))
+		return false;
+	memcpy(&h, buffer, sizeof(h));
+	if (memcmp(h.magic, STATE_MAGIC, sizeof(STATE_MAGIC)) != 0 || h.model != (uint32_t)b->model
+		|| h.machine_size != sizeof(sc88_t) || h.xp_eram_size != XP_ERAM_SIZE * sizeof(int32_t)
+		|| h.lsp_eram_size != (b->has_lsp ? LSP_ERAM_SIZE * sizeof(int32_t) : 0)
+		|| size < sc88_state_size(b))
+		return false;
+
+	uint8_t *program_rom = b->program_rom;
+	uint8_t *wave_rom = b->wave_rom;
+	h8500_bus_t bus = b->cpu.bus;
+	h8500_region_t regions[H8500_MAX_REGIONS];
+	memcpy(regions, b->cpu.regions, sizeof(regions));
+	int region_count = b->cpu.region_count;
+	xp_link_t xp_link = b->xp.link;
+	const uint8_t *xp_wave = b->xp.wave;
+	int32_t *xp_eram = b->xp.eram;
+	jit_code_t xp_code[2] = { b->xp.code[0], b->xp.code[1] };
+	int xp_live = b->xp.live;
+	xp_frame_fn xp_frame = b->xp.frame;
+	int32_t *lsp_eram = b->lsp.eram;
+	jit_code_t lsp_code[2] = { b->lsp.code[0], b->lsp.code[1] };
+	int lsp_live = b->lsp.live;
+	lsp_sample_fn lsp_sample = b->lsp.sample;
+	scemu_midi_out_fn midi_out = b->midi_out;
+	void *midi_out_user = b->midi_out_user;
+
+	const uint8_t *p = (const uint8_t *)buffer + sizeof(h);
+	memcpy(b, p, sizeof(*b));
+	p += sizeof(*b);
+
+	b->program_rom = program_rom;
+	b->wave_rom = wave_rom;
+	b->cpu.bus = bus;
+	memcpy(b->cpu.regions, regions, sizeof(regions));
+	b->cpu.region_count = region_count;
+	b->xp.link = xp_link;
+	b->xp.wave = xp_wave;
+	b->xp.eram = xp_eram;
+	b->xp.jit = &b->jit;
+	b->xp.code[0] = xp_code[0];
+	b->xp.code[1] = xp_code[1];
+	b->xp.live = xp_live;
+	b->xp.frame = xp_frame;
+	b->xp.program_dirty = true;
+	b->lsp.eram = lsp_eram;
+	b->lsp.jit = &b->jit;
+	b->lsp.code[0] = lsp_code[0];
+	b->lsp.code[1] = lsp_code[1];
+	b->lsp.live = lsp_live;
+	b->lsp.sample = lsp_sample;
+	b->lsp.dirty = true;
+	b->ga.lcd = &b->lcd;
+	b->ga.irq = ga_irq;
+	b->ga.user = b;
+	b->sub.irq = sub_irq;
+	b->sub.midi_out = sub_midi_out;
+	b->sub.user = b;
+	b->midi_out = midi_out;
+	b->midi_out_user = midi_out_user;
+
+	memcpy(b->xp.eram, p, h.xp_eram_size);
+	p += h.xp_eram_size;
+	if (b->has_lsp)
+		memcpy(b->lsp.eram, p, h.lsp_eram_size);
+	return true;
+}

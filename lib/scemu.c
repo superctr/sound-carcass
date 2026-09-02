@@ -133,24 +133,17 @@ void scemu_lcd_ack(scemu_t *m)
 
 size_t scemu_state_size(const scemu_t *m)
 {
-	(void)m;
-	return 0;
+	return sc88_state_size(&m->machine);
 }
 
 size_t scemu_state_save(const scemu_t *m, void *buffer, size_t size)
 {
-	(void)m;
-	(void)buffer;
-	(void)size;
-	return 0;
+	return sc88_state_save(&m->machine, buffer, size);
 }
 
 bool scemu_state_load(scemu_t *m, const void *buffer, size_t size)
 {
-	(void)m;
-	(void)buffer;
-	(void)size;
-	return false;
+	return sc88_state_load(&m->machine, buffer, size);
 }
 
 size_t scemu_nvram_size(const scemu_t *m)
