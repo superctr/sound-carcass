@@ -36,20 +36,20 @@ enum
 struct lsp;
 typedef void (*lsp_sample_fn)(struct lsp *lsp);
 
+/* hist[n] is a four-deep ring of accumulator n, indexed by the slot counter. */
 typedef struct lsp_state
 {
 	int32_t acc[2];
-	int32_t history[2][3];
+	int32_t hist[2][4];
 	int32_t eram_read;
-	uint8_t prev_offset;
 	int32_t multiplier[2];
-	uint16_t eram_base[2];
-	bool eram_tap2[2];
 	int32_t eram_latch;
+	uint16_t eram_base[2];
 	uint16_t tap;
-	uint8_t buffer_pos;
 	uint16_t eram_pos;
-	uint16_t jump_target;
+	uint8_t eram_tap2[2];
+	uint8_t prev_offset;
+	uint8_t buffer_pos;
 	uint8_t jump_delay;
 } lsp_state_t;
 
