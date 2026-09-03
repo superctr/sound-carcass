@@ -5,6 +5,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 
+#include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <signal.h>
@@ -169,6 +170,8 @@ typedef struct options
 	const char *model;
 	const char *wav;
 	const char *rom;
+	const char *audio_device;
+	unsigned audio_block;
 	double tail;
 	int port;
 	bool no_audio;
@@ -188,6 +191,9 @@ static void usage(FILE *fp)
 	        "  --rom PATH                    a zip or a directory holding the ROM images\n"
 	        "  --wav FILE                    also write what is played, 16-bit stereo 32 kHz\n"
 	        "  --no-audio                    render as fast as the host allows, no sound card\n"
+	        "  --audio-device NAME           play on the output device whose name holds NAME\n"
+	        "                                (--audio-device list prints them) instead of the default\n"
+	        "  --audio-block N               the device's buffer in frames (default 256, 8 ms)\n"
 	        "  --no-cache                    boot the firmware instead of loading a cached state\n"
 	        "  --keep-settings               start from, and save, the settings memory of the\n"
 	        "                                last --keep-settings run instead of factory settings\n"
@@ -208,6 +214,7 @@ static int parse_options(int argc, char **argv, options_t *o)
 	memset(o, 0, sizeof(*o));
 	o->tail = 4.0;
 	o->midi_rate = 31250;
+	o->audio_block = 256;
 	for (int n = 1; n < argc; n++)
 	{
 		const char *a = argv[n];
@@ -239,6 +246,10 @@ static int parse_options(int argc, char **argv, options_t *o)
 		}
 		else if (!strcmp(a, "--midi-rate") && n + 1 < argc)
 			o->midi_rate = (uint32_t)atoi(argv[++n]);
+		else if (!strcmp(a, "--audio-device") && n + 1 < argc)
+			o->audio_device = argv[++n];
+		else if (!strcmp(a, "--audio-block") && n + 1 < argc)
+			o->audio_block = (unsigned)atoi(argv[++n]);
 		else if (!strcmp(a, "--no-audio"))
 			o->no_audio = true;
 		else if (!strcmp(a, "--no-cache"))
@@ -260,12 +271,40 @@ static int parse_options(int argc, char **argv, options_t *o)
 			return -1;
 		}
 	}
+	if (o->audio_device && !strcmp(o->audio_device, "list"))
+	{
+		audio_device_info_t devices[64];
+		int count = audio_list(devices, 64);
+		for (int n = 0; n < count; n++)
+			printf("%s%s\n", devices[n].name, devices[n].is_default ? " (default)" : "");
+		return 0;
+	}
 	if (!o->midi)
 	{
 		usage(stderr);
 		return -1;
 	}
 	return 1;
+}
+
+/* the first output device whose name holds `name`, any case; -1 for none */
+static int find_audio_device(const char *name)
+{
+	audio_device_info_t devices[64];
+	int count = audio_list(devices, 64);
+	for (int n = 0; n < count; n++)
+	{
+		const char *hay = devices[n].name, *needle = name;
+		for (const char *h = hay; *h; h++)
+		{
+			size_t k = 0;
+			while (needle[k] && h[k] && tolower((unsigned char)h[k]) == tolower((unsigned char)needle[k]))
+				k++;
+			if (!needle[k])
+				return devices[n].index;
+		}
+	}
+	return -1;
 }
 
 /* ---------------------------------------------------------------- main */
@@ -388,7 +427,14 @@ int main(int argc, char **argv)
 	scplay_audio_t *audio = NULL;
 	if (!opt.no_audio && !g_quit)
 	{
-		audio = audio_open(rate, err, sizeof(err));
+		int device = -1;
+		if (opt.audio_device)
+		{
+			device = find_audio_device(opt.audio_device);
+			if (device < 0)
+				fprintf(stderr, "scplay: no output device named like %s, using the default\n", opt.audio_device);
+		}
+		audio = audio_open(rate, device, opt.audio_block, err, sizeof(err));
 		if (!audio)
 			fprintf(stderr, "scplay: no audio (%s), rendering silently\n", err);
 	}

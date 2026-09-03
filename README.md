@@ -52,8 +52,9 @@ computer port's speed instead of the cable's.  A dual-port file (tracks with por
 
 `scgui` is the same player as a desktop window: the front panel drawn from `gui/`'s artwork, its
 buttons under the mouse, the volume knob under the wheel, a playlist in a second window.  It needs
-GTK 4 besides SDL2 and zlib.  See [docs/scgui.md](docs/scgui.md).  It needs SDL2 and
-zlib; without them the library and `scemu-cli` still build.
+GTK 4 besides zlib.  See [docs/scgui.md](docs/scgui.md).  Both players play through PortAudio and
+`scgui` takes MIDI through PortMidi, built from the submodules (`git submodule update --init`).
+Without zlib the library and `scemu-cli` still build.
 
 ## Status
 

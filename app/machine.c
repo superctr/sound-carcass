@@ -16,13 +16,16 @@
 #include "smf.h"
 #include "midi_io.h"
 
-#define BLOCK 256
+#define BLOCK_MAX 1024
+#define BLOCK_DEFAULT 256
 #define QUEUE_SIZE 64
 #define TIMED_KEYS 32
+#define PENDING_MAX 256
+#define PENDING_BYTES 65536
 
 typedef enum command_kind
 {
-	CMD_PLAY, CMD_PAUSE, CMD_STOP, CMD_BUTTON, CMD_POWER, CMD_GAIN, CMD_MIDI_IN, CMD_MIDI_OUT,
+	CMD_PLAY, CMD_PAUSE, CMD_STOP, CMD_BUTTON, CMD_POWER, CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT,
 	CMD_RESET, CMD_MAP, CMD_QUIT
 } command_kind_t;
 
@@ -43,7 +46,7 @@ struct machine
 	scplay_audio_t *audio;
 	midi_io_t *midi;
 	machine_options_t opt;
-	char audio_driver[64];
+	size_t block;             /* frames per render, the audio device's buffer */
 
 	pthread_t thread;
 	pthread_mutex_t lock;
@@ -65,6 +68,11 @@ struct machine
 	double clock_start;
 	uint64_t clock_frames;
 	bool started;
+	/* MIDI from the host, stamped when polled, placed when rendered */
+	struct { double t; uint8_t which; uint16_t len; uint32_t at; } pending[PENDING_MAX];
+	uint8_t pending_bytes[PENDING_BYTES];
+	int pending_count;
+	uint32_t pending_used;
 };
 
 static double now_seconds(void)
@@ -127,13 +135,22 @@ static void publish(machine_t *mc, bool booting)
 	s.position = (double)mc->pos / mc->rate;
 	s.length = mc->have_smf ? (double)mc->end_frame / mc->rate : 0;
 	s.underruns = mc->audio ? audio_underruns(mc->audio) : 0;
+	if (mc->audio)
+	{
+		snprintf(s.audio, sizeof(s.audio), "%s (%s), %u Hz", audio_device_name(mc->audio), audio_driver(mc->audio),
+		         audio_device_rate(mc->audio));
+		s.latency = audio_latency(mc->audio);
+	}
+	else
+		snprintf(s.audio, sizeof(s.audio), "none");
 	pthread_mutex_lock(&mc->lock);
 	snprintf(s.song, sizeof(s.song), "%s", mc->state.song);
 	snprintf(s.title, sizeof(s.title), "%s", mc->state.title);
 	s.generation = mc->state.generation;
 	if (memcmp(&s.lcd, &mc->state.lcd, sizeof(s.lcd)) != 0 || s.leds != mc->state.leds || s.power != mc->state.power
 	    || s.booting != mc->state.booting || s.playing != mc->state.playing || s.paused != mc->state.paused
-	    || s.finished != mc->state.finished || s.position != mc->state.position || s.underruns != mc->state.underruns)
+	    || s.finished != mc->state.finished || s.position != mc->state.position || s.underruns != mc->state.underruns
+	    || strcmp(s.audio, mc->state.audio) != 0 || s.latency != mc->state.latency)
 		s.generation++;
 	mc->state = s;
 	pthread_mutex_unlock(&mc->lock);
@@ -160,7 +177,7 @@ void machine_snapshot(machine_t *mc, machine_state_t *out)
 static bool boot_progress(void *user, uint64_t frames)
 {
 	machine_t *mc = user;
-	if (frames % (BLOCK * 16) == 0)
+	if (frames % (BLOCK_DEFAULT * 16) == 0)
 		publish(mc, true);
 	return true;
 }
@@ -298,12 +315,27 @@ static void quiet(machine_t *mc)
 			scemu_midi_write(mc->m, port, off, sizeof(off), 0);
 			midi_io_write(mc->midi, port ? MIDI_IO_SONG_B : MIDI_IO_SONG_A, off, sizeof(off));
 		}
-	for (size_t done = 0; done < mc->rate / 8; done += BLOCK)
+	for (size_t done = 0; done < mc->rate / 8; done += mc->block)
 	{
-		while (mc->audio && audio_space(mc->audio) < BLOCK)
+		while (mc->audio && audio_space(mc->audio) < mc->block)
 			sleep_ms(1);
-		render_block(mc, BLOCK);
+		render_block(mc, mc->block);
 	}
+}
+
+static void open_audio(machine_t *mc)
+{
+	char err[256];
+	size_t block = mc->opt.audio_block ? mc->opt.audio_block : BLOCK_DEFAULT;
+	if (block > BLOCK_MAX)
+		block = BLOCK_MAX;
+	mc->block = block;
+	mc->started = false;
+	if (mc->opt.no_audio)
+		return;
+	mc->audio = audio_open(mc->rate, mc->opt.audio_device, block, err, sizeof(err));
+	if (!mc->audio)
+		fprintf(stderr, "scgui: no audio (%s), running silently\n", err);
 }
 
 static void handle(machine_t *mc, const command_t *c)
@@ -353,11 +385,21 @@ static void handle(machine_t *mc, const command_t *c)
 	case CMD_GAIN:
 		mc->gain = c->f;
 		break;
+	case CMD_AUDIO:
+		audio_close(mc->audio);
+		mc->audio = NULL;
+		mc->opt.audio_device = c->a;
+		if (c->b > 0)
+			mc->opt.audio_block = (unsigned)c->b;
+		open_audio(mc);
+		mc->clock_start = now_seconds();
+		mc->clock_frames = 0;
+		break;
 	case CMD_MIDI_IN:
-		midi_io_connect_input(mc->midi, c->a, c->b, c->c);
+		midi_io_connect_input(mc->midi, c->a, c->b);
 		break;
 	case CMD_MIDI_OUT:
-		midi_io_connect_output(mc->midi, c->a, c->b, c->c);
+		midi_io_connect_output(mc->midi, c->a, c->b);
 		break;
 	case CMD_RESET:
 		mc->reset = (machine_reset_t)c->a;
@@ -383,8 +425,8 @@ static void to_s16(const int32_t *in, int16_t *out, size_t samples, float gain)
 
 static void render_block(machine_t *mc, size_t n)
 {
-	int32_t raw[BLOCK * 2];
-	int16_t pcm[BLOCK * 2];
+	int32_t raw[BLOCK_MAX * 2];
+	int16_t pcm[BLOCK_MAX * 2];
 	int32_t *const out[2] = { raw, NULL };
 	scemu_render(mc->m, out, n);
 	to_s16(raw, pcm, n * 2, mc->gain);
@@ -403,6 +445,52 @@ static void render_block(machine_t *mc, size_t n)
 	mc->frames += n;
 	if (mc->timed_count)
 		timed_keys(mc);
+}
+
+/* Whatever the host's ports hold, stamped with the time it was seen; the
+ * machine thread looks every millisecond or so, so the stamp is close to
+ * the arrival. */
+static void poll_midi(machine_t *mc, bool keep)
+{
+	for (;;)
+	{
+		uint8_t bytes[1024];
+		int which;
+		size_t got = midi_io_read(mc->midi, &which, bytes, sizeof(bytes));
+		if (!got)
+			break;
+		if (!keep || mc->pending_count >= PENDING_MAX || mc->pending_used + got > PENDING_BYTES)
+			continue;
+		mc->pending[mc->pending_count].t = now_seconds();
+		mc->pending[mc->pending_count].which = (uint8_t)which;
+		mc->pending[mc->pending_count].len = (uint16_t)got;
+		mc->pending[mc->pending_count].at = mc->pending_used;
+		memcpy(mc->pending_bytes + mc->pending_used, bytes, got);
+		mc->pending_used += (uint32_t)got;
+		mc->pending_count++;
+	}
+}
+
+/* Each message goes to the frame a fixed time after it was seen -- a block
+ * and two milliseconds, which is later than the start of the block about
+ * to be rendered however long ago the message arrived -- so the delay from
+ * the host is the same for all of them instead of a whole block's worth
+ * of jitter. */
+static void deliver_midi(machine_t *mc)
+{
+	if (!mc->pending_count)
+		return;
+	double now = now_seconds();
+	double delay = (double)mc->block / mc->rate + 0.002;
+	for (int n = 0; n < mc->pending_count; n++)
+	{
+		double at = (delay - (now - mc->pending[n].t)) * mc->rate;
+		uint32_t offset = at > 0 ? (uint32_t)(at + 0.5) : 0;
+		scemu_midi_write(mc->m, mc->pending[n].which ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A,
+		                 mc->pending_bytes + mc->pending[n].at, mc->pending[n].len, offset);
+	}
+	mc->pending_count = 0;
+	mc->pending_used = 0;
 }
 
 static void *run(void *user)
@@ -430,6 +518,7 @@ static void *run(void *user)
 		{
 			if (mc->audio)
 				audio_pause(mc->audio, true);
+			poll_midi(mc, false);
 			sleep_ms(10);
 			continue;
 		}
@@ -437,6 +526,7 @@ static void *run(void *user)
 		{
 			if (mc->audio)
 				audio_pause(mc->audio, true);
+			poll_midi(mc, false);
 			publish(mc, false);
 			sleep_ms(10);
 			mc->clock_start = now_seconds();
@@ -444,7 +534,8 @@ static void *run(void *user)
 			continue;
 		}
 
-		size_t n = BLOCK;
+		poll_midi(mc, true);
+		size_t n = mc->block;
 		if (mc->audio)
 		{
 			size_t space = audio_space(mc->audio);
@@ -467,15 +558,7 @@ static void *run(void *user)
 			continue;
 		}
 
-		for (;;)
-		{
-			uint8_t bytes[1024];
-			int which;
-			size_t got = midi_io_read(mc->midi, &which, bytes, sizeof(bytes));
-			if (!got)
-				break;
-			scemu_midi_write(mc->m, which ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A, bytes, got, 0);
-		}
+		deliver_midi(mc);
 		if (mc->playing)
 		{
 			feed_events(mc, n);
@@ -517,15 +600,7 @@ machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size)
 	}
 	mc->rate = scemu_sample_rate(mc->m);
 	session_init(&mc->session, mc->m, mc->roms.model_name, mc->roms.hash, o->no_cache, o->keep_settings);
-	if (!o->no_audio)
-	{
-		char aerr[256];
-		mc->audio = audio_open(mc->rate, aerr, sizeof(aerr));
-		if (!mc->audio)
-			fprintf(stderr, "scgui: no audio (%s), running silently\n", aerr);
-		else
-			snprintf(mc->audio_driver, sizeof(mc->audio_driver), "%s", audio_driver(mc->audio));
-	}
+	open_audio(mc);
 	mc->gain = 0.75f * 0.75f;
 	mc->reset = MACHINE_RESET_GS;
 	mc->midi = midi_io_open("scgui");
@@ -564,7 +639,6 @@ void machine_stop(machine_t *mc)
 
 scemu_model_t machine_model(const machine_t *mc) { return mc->roms.model; }
 const char *machine_model_label(const machine_t *mc) { return scplay_model_label(mc->roms.model); }
-const char *machine_audio_driver(const machine_t *mc) { return mc->audio ? mc->audio_driver : "none"; }
 
 void machine_play(machine_t *mc, const char *path)
 {
@@ -624,14 +698,30 @@ void machine_set_map(machine_t *mc, scemu_map_t map)
 	post(mc, c);
 }
 
-void machine_midi_input(machine_t *mc, int which, int client, int port)
+void machine_set_audio(machine_t *mc, int device, unsigned block)
 {
-	command_t c = { CMD_MIDI_IN, which, client, port, 0, NULL };
+	command_t c = { CMD_AUDIO, device, (int)block, 0, 0, NULL };
 	post(mc, c);
 }
 
-void machine_midi_output(machine_t *mc, int which, int client, int port)
+void machine_midi_input(machine_t *mc, int which, int id)
 {
-	command_t c = { CMD_MIDI_OUT, which, client, port, 0, NULL };
+	command_t c = { CMD_MIDI_IN, which, id, 0, 0, NULL };
 	post(mc, c);
+}
+
+void machine_midi_output(machine_t *mc, int which, int id)
+{
+	command_t c = { CMD_MIDI_OUT, which, id, 0, 0, NULL };
+	post(mc, c);
+}
+
+int machine_midi_list(machine_t *mc, struct midi_port_info *out, int max)
+{
+	return midi_io_list(mc->midi, out, max);
+}
+
+void machine_midi_rescan(machine_t *mc)
+{
+	midi_io_rescan(mc->midi);
 }

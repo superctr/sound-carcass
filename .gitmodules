@@ -1,3 +1,9 @@
 [submodule "sljit"]
 	path = sljit
 	url = https://github.com/zherczeg/sljit
+[submodule "portmidi"]
+	path = portmidi
+	url = https://github.com/portmidi/portmidi
+[submodule "portaudio"]
+	path = portaudio
+	url = https://github.com/PortAudio/portaudio

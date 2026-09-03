@@ -20,6 +20,8 @@ and starts instantly on later runs.
 | `--rom PATH` | a zip or a directory holding the ROM images, searched before the usual places |
 | `--wav FILE` | also write what is played, 16-bit stereo at the machine's own 32 kHz |
 | `--no-audio` | render as fast as the host allows and open no sound card; for `--wav` |
+| `--audio-device NAME` | play on the output device whose name holds `NAME` (any case) instead of the host's default; `--audio-device list` prints them and exits |
+| `--audio-block N` | the device's buffer in frames (default 256, 8 ms); the player keeps two of them ahead, or two of the host's own period when that is larger |
 | `--no-cache` | boot the firmware instead of loading the cached boot state, and use no cached settings memory |
 | `--keep-settings` | start from the settings memory the last `--keep-settings` run left, and save it again on exit |
 | `--midi-rate BAUD` | the speed of the MIDI input: 31250 is the cable and the default, 38400 the SC-88Pro's computer port, 0 removes the limit.  Faster than the firmware can take loses messages inside it: a song with a large setup block right after its GS reset plays with wrong sounds and levels at 0 |
@@ -134,10 +136,14 @@ ANSI; the terminal is left as it was found, including after Ctrl-C.
 
 ## Audio
 
-Output goes through SDL2 at the machine's own 32 kHz, stereo, 16-bit — SDL resamples for a device that
-insists on 44.1 or 48 kHz.  The emulation fills a ring buffer about 200 ms deep that SDL's callback
-drains; if the host cannot keep up, scplay counts the dropouts and shows them.  The Pro's OUTPUT 2 is
-not played; only OUTPUT 1 is.
+Output goes through PortAudio at the machine's own 32 kHz, stereo, 16-bit, on the host's default
+device or the one `--audio-device` names (`--audio-device list` shows what there is, with its host
+API: on Linux ALSA, JACK and PulseAudio).  A device that will not open at 32 kHz runs at its own rate
+and the output is resampled on the way, through a 32-tap windowed sinc.  The emulation keeps two
+device buffers (`--audio-block`, 256 frames or 8 ms by default; the host's own period when that is
+larger, as under JACK) ahead of PortAudio's callback; if the host cannot keep up, scplay counts the
+dropouts and shows them.  The Pro's OUTPUT 2 is not played;
+only OUTPUT 1 is.
 
 Without a sound card, `--no-audio --wav out.wav` renders the file as fast as the machine allows — about
 nine to twelve times real time on a current desktop.

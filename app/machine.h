@@ -26,6 +26,8 @@ typedef struct machine_options
 	uint32_t midi_rate;
 	double tail;              /* seconds after a song's last event */
 	bool keep_settings, no_cache, no_audio;
+	int audio_device;         /* an index from audio_list (audio.h), or -1 for the default */
+	unsigned audio_block;     /* the device's buffer in frames; 0 for the default */
 } machine_options_t;
 
 typedef struct machine_state
@@ -37,6 +39,8 @@ typedef struct machine_state
 	char song[256];           /* the file's name, empty when nothing is loaded */
 	char title[128];          /* the file's title, UTF-8 */
 	uint32_t underruns;
+	char audio[192];          /* the output device, its host API and rate; "none" without one */
+	double latency;           /* seconds from the machine to the jack */
 	uint64_t generation;      /* counts up on every change of the above */
 } machine_state_t;
 
@@ -47,7 +51,6 @@ void machine_stop(machine_t *mc);
 
 scemu_model_t machine_model(const machine_t *mc);
 const char *machine_model_label(const machine_t *mc);
-const char *machine_audio_driver(const machine_t *mc);
 
 void machine_snapshot(machine_t *mc, machine_state_t *out);
 
@@ -61,6 +64,9 @@ void machine_button(machine_t *mc, scemu_button_t b, bool down);
 void machine_button_after(machine_t *mc, scemu_button_t b, bool down, unsigned ms);
 void machine_power(machine_t *mc, bool on);            /* off: silence; on: reset and boot, keys held */
 void machine_set_gain(machine_t *mc, float gain);       /* 0..1, applied to the output */
+/* Reopen the output on another device (audio.h's index, -1 the default)
+ * with another buffer; 0 keeps the block. */
+void machine_set_audio(machine_t *mc, int device, unsigned block);
 
 /* What goes to the machine before every song, on both ports. */
 typedef enum machine_reset
@@ -78,11 +84,14 @@ extern const char *const machine_reset_names[MACHINE_RESET_COUNT];
 void machine_set_reset(machine_t *mc, machine_reset_t reset);
 void machine_set_map(machine_t *mc, scemu_map_t map);   /* takes effect at once */
 
-/* Host MIDI ports (midi_io.h): connect one of the machine's inputs (MIDI IN
- * A, B) to a source, or one of its outputs (MIDI OUT, the song's ports A
- * and B for a real unit playing along) to a destination; client -1
- * disconnects. */
-void machine_midi_input(machine_t *mc, int which, int client, int port);
-void machine_midi_output(machine_t *mc, int which, int client, int port);
+/* Host MIDI devices (midi_io.h): tie one of the machine's inputs (MIDI IN
+ * A, B) to a device that feeds it, or one of its outputs (MIDI OUT, the
+ * song's ports A and B for a real unit playing along) to a device it feeds;
+ * id -1 unties.  The list and the rescan are synchronous. */
+void machine_midi_input(machine_t *mc, int which, int id);
+void machine_midi_output(machine_t *mc, int which, int id);
+struct midi_port_info;
+int machine_midi_list(machine_t *mc, struct midi_port_info *out, int max);
+void machine_midi_rescan(machine_t *mc);
 
 #endif

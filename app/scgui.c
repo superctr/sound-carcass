@@ -16,9 +16,11 @@
 #include "session.h"
 #include "smf.h"
 #include "midi_io.h"
+#include "audio.h"
 #include "combos.h"
 
 #define MIDI_PORTS_MAX 64
+#define AUDIO_DEVICES_MAX 64
 #define MIDI_SLOTS 5           /* MIDI IN A, MIDI IN B, MIDI OUT, Song A, Song B */
 
 #define DEFAULT_PITCH 4
@@ -30,7 +32,7 @@ typedef struct app
 	panel_t *panel;
 	int pitch, scale;
 	uint32_t *frame;
-	GtkWidget *window, *area, *playlist_window, *list, *audio_window;
+	GtkWidget *window, *area, *playlist_window, *list, *audio_window, *audio_label, *audio_drop, *block_drop;
 	GMainLoop *loop;
 	GPtrArray *songs;          /* char * paths */
 	int current;               /* index in songs, or -1 */
@@ -49,6 +51,10 @@ typedef struct app
 	double pointer_x, pointer_y;
 	midi_port_info_t ports[MIDI_PORTS_MAX];
 	int port_count;
+	audio_device_info_t devices[AUDIO_DEVICES_MAX];
+	int device_count;
+	int audio_choice;              /* index into devices, or -1 for the default */
+	int block_choice;
 	GtkWidget *midi_drop[MIDI_SLOTS];
 	int midi_choice[MIDI_SLOTS];   /* index into ports, or -1 */
 	GtkWidget *combo_popover;
@@ -279,12 +285,10 @@ static gboolean on_playlist_close(GtkWindow *w, gpointer user)
 static void midi_apply(app_t *app, int slot)
 {
 	int choice = app->midi_choice[slot];
-	int client = choice >= 0 ? app->ports[choice].client : -1;
-	int port = choice >= 0 ? app->ports[choice].port : 0;
 	if (midi_slot_is_input[slot])
-		machine_midi_input(app->mc, slot, client, port);
+		machine_midi_input(app->mc, slot, choice >= 0 ? app->ports[choice].in_id : -1);
 	else
-		machine_midi_output(app->mc, slot - 2, client, port);
+		machine_midi_output(app->mc, slot - 2, choice >= 0 ? app->ports[choice].out_id : -1);
 }
 
 static void on_midi_selected(GObject *drop, GParamSpec *spec, gpointer user)
@@ -316,7 +320,7 @@ static void on_midi_selected(GObject *drop, GParamSpec *spec, gpointer user)
 
 static void midi_fill(app_t *app)
 {
-	app->port_count = midi_io_list(app->ports, MIDI_PORTS_MAX);
+	app->port_count = machine_midi_list(app->mc, app->ports, MIDI_PORTS_MAX);
 	for (int slot = 0; slot < MIDI_SLOTS; slot++)
 	{
 		GtkStringList *list = gtk_string_list_new(NULL);
@@ -348,7 +352,8 @@ static void on_midi_refresh(GtkButton *b, gpointer user)
 	int old_choice[MIDI_SLOTS];
 	memcpy(old, app->ports, sizeof(old));
 	memcpy(old_choice, app->midi_choice, sizeof(old_choice));
-	int count = midi_io_list(app->ports, MIDI_PORTS_MAX);
+	machine_midi_rescan(app->mc);
+	int count = machine_midi_list(app->mc, app->ports, MIDI_PORTS_MAX);
 	for (int slot = 0; slot < MIDI_SLOTS; slot++)
 	{
 		app->midi_choice[slot] = -1;
@@ -533,6 +538,84 @@ static void play_index(app_t *app, int index)
 
 /* ---------------------------------------------------------------- audio settings */
 
+static const unsigned block_sizes[] = { 64, 128, 256, 512, 1024 };
+#define BLOCK_CHOICES ((int)(sizeof(block_sizes) / sizeof(block_sizes[0])))
+
+static void audio_readout(app_t *app)
+{
+	if (!app->audio_label)
+		return;
+	char text[384];
+	snprintf(text, sizeof(text), "Output: %s\nLatency: %.0f ms from the machine to the jack\nUnderruns so far: %u",
+	         app->state.audio, app->state.latency * 1000, app->state.underruns);
+	gtk_label_set_text(GTK_LABEL(app->audio_label), text);
+}
+
+static void audio_apply(app_t *app)
+{
+	int device = app->audio_choice >= 0 ? app->devices[app->audio_choice].index : -1;
+	machine_set_audio(app->mc, device, block_sizes[app->block_choice]);
+}
+
+static void on_audio_selected(GObject *drop, GParamSpec *spec, gpointer user)
+{
+	app_t *app = user;
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(drop));
+	int choice = sel == GTK_INVALID_LIST_POSITION || sel == 0 ? -1 : (int)sel - 1;
+	if (choice != app->audio_choice)
+	{
+		app->audio_choice = choice;
+		audio_apply(app);
+	}
+}
+
+static void on_block_selected(GObject *drop, GParamSpec *spec, gpointer user)
+{
+	app_t *app = user;
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(drop));
+	if (sel < (guint)BLOCK_CHOICES && (int)sel != app->block_choice)
+	{
+		app->block_choice = (int)sel;
+		audio_apply(app);
+	}
+}
+
+/* the list holds "default" then every output device; a choice survives by name */
+static void audio_fill(app_t *app)
+{
+	char chosen[128] = "";
+	if (app->audio_choice >= 0)
+		snprintf(chosen, sizeof(chosen), "%s", app->devices[app->audio_choice].name);
+	app->device_count = audio_list(app->devices, AUDIO_DEVICES_MAX);
+	GtkStringList *list = gtk_string_list_new(NULL);
+	gtk_string_list_append(list, "default");
+	guint selected = 0;
+	app->audio_choice = -1;
+	for (int n = 0; n < app->device_count; n++)
+	{
+		gtk_string_list_append(list, app->devices[n].name);
+		if (chosen[0] && strcmp(chosen, app->devices[n].name) == 0)
+		{
+			app->audio_choice = n;
+			selected = (guint)n + 1;
+		}
+	}
+	g_signal_handlers_block_by_func(app->audio_drop, on_audio_selected, app);
+	gtk_drop_down_set_model(GTK_DROP_DOWN(app->audio_drop), G_LIST_MODEL(list));
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(app->audio_drop), selected);
+	g_signal_handlers_unblock_by_func(app->audio_drop, on_audio_selected, app);
+	g_object_unref(list);
+}
+
+static void on_audio_refresh(GtkButton *b, gpointer user)
+{
+	app_t *app = user;
+	bool had = app->audio_choice >= 0;
+	audio_fill(app);
+	if (had && app->audio_choice < 0)
+		audio_apply(app);
+}
+
 static void audio_show(app_t *app)
 {
 	if (!app->audio_window)
@@ -541,16 +624,37 @@ static void audio_show(app_t *app)
 		gtk_window_set_title(GTK_WINDOW(w), "Audio");
 		gtk_window_set_transient_for(GTK_WINDOW(w), GTK_WINDOW(app->window));
 		gtk_window_set_hide_on_close(GTK_WINDOW(w), TRUE);
-		char text[256];
-		snprintf(text, sizeof(text), "Output: %s\nSample rate: 32000 Hz, the machine's own\nUnderruns so far: %u",
-		         machine_audio_driver(app->mc), app->state.underruns);
-		GtkWidget *label = gtk_label_new(text);
-		gtk_widget_set_margin_start(label, 16);
-		gtk_widget_set_margin_end(label, 16);
-		gtk_widget_set_margin_top(label, 16);
-		gtk_widget_set_margin_bottom(label, 16);
-		gtk_window_set_child(GTK_WINDOW(w), label);
+		gtk_window_set_default_size(GTK_WINDOW(w), 480, -1);
+
+		GtkWidget *grid = settings_grid();
+		app->audio_drop = gtk_drop_down_new(NULL, NULL);
+		g_signal_connect(app->audio_drop, "notify::selected", G_CALLBACK(on_audio_selected), app);
+		grid_row(grid, 0, "Output device", app->audio_drop);
+		GtkWidget *refresh = gtk_button_new_from_icon_name("view-refresh-symbolic");
+		gtk_widget_set_tooltip_text(refresh, "Look for devices again");
+		g_signal_connect(refresh, "clicked", G_CALLBACK(on_audio_refresh), app);
+		gtk_grid_attach(GTK_GRID(grid), refresh, 2, 0, 1, 1);
+
+		GtkStringList *blocks = gtk_string_list_new(NULL);
+		for (int n = 0; n < BLOCK_CHOICES; n++)
+		{
+			char text[64];
+			snprintf(text, sizeof(text), "%u frames, %.0f ms", block_sizes[n], block_sizes[n] * 1000.0 / 32000);
+			gtk_string_list_append(blocks, text);
+		}
+		app->block_drop = gtk_drop_down_new(G_LIST_MODEL(blocks), NULL);
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(app->block_drop), app->block_choice);
+		g_signal_connect(app->block_drop, "notify::selected", G_CALLBACK(on_block_selected), app);
+		grid_row(grid, 1, "Buffer", app->block_drop);
+
+		app->audio_label = gtk_label_new("");
+		gtk_label_set_xalign(GTK_LABEL(app->audio_label), 0);
+		gtk_widget_set_margin_top(app->audio_label, 8);
+		gtk_grid_attach(GTK_GRID(grid), app->audio_label, 0, 2, 3, 1);
+		gtk_window_set_child(GTK_WINDOW(w), grid);
 		app->audio_window = w;
+		audio_fill(app);
+		audio_readout(app);
 	}
 	gtk_window_present(GTK_WINDOW(app->audio_window));
 }
@@ -597,6 +701,8 @@ static gboolean on_tick(gpointer user)
 		app->state = st;
 		panel_set_lcd(app->panel, &st.lcd);
 		panel_set_leds(app->panel, st.leds);
+		if (app->audio_window && gtk_widget_get_visible(app->audio_window))
+			audio_readout(app);
 		if (song_changed)
 			set_title(app);
 		if (finished_now && app->current >= 0 && app->current + 1 < (int)app->songs->len)
@@ -1058,6 +1164,8 @@ int main(int argc, char **argv)
 		app.midi_choice[n] = -1;
 	app.power = true;
 	app.knob = 0.75f;
+	app.audio_choice = -1;
+	app.block_choice = 2;      /* 256 frames */
 
 	int rc = parse_options(argc, argv, &opt, app.songs);
 	if (rc <= 0)
@@ -1068,7 +1176,7 @@ int main(int argc, char **argv)
 	char exe_dir[PATH_MAX];
 	session_exe_directory(argv[0], exe_dir, sizeof(exe_dir));
 	machine_options_t mo = { opt.model, opt.rom, exe_dir, opt.map, opt.midi_rate, opt.tail,
-	                         opt.keep_settings, opt.no_cache, opt.no_audio };
+	                         opt.keep_settings, opt.no_cache, opt.no_audio, -1, block_sizes[app.block_choice] };
 	char err[512];
 	app.mc = machine_start(&mo, err, sizeof(err));
 	if (!app.mc)
