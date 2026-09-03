@@ -14,19 +14,20 @@
 #include "roms.h"
 #include "session.h"
 #include "smf.h"
+#include "midi_io.h"
 
 #define BLOCK 256
 #define QUEUE_SIZE 64
 
 typedef enum command_kind
 {
-	CMD_PLAY, CMD_PAUSE, CMD_STOP, CMD_BUTTON, CMD_POWER, CMD_GAIN, CMD_QUIT
+	CMD_PLAY, CMD_PAUSE, CMD_STOP, CMD_BUTTON, CMD_POWER, CMD_GAIN, CMD_MIDI_IN, CMD_MIDI_OUT, CMD_QUIT
 } command_kind_t;
 
 typedef struct command
 {
 	command_kind_t kind;
-	int a, b;
+	int a, b, c;
 	float f;
 	char *path;
 } command_t;
@@ -38,6 +39,7 @@ struct machine
 	uint32_t rate;
 	session_t session;
 	scplay_audio_t *audio;
+	midi_io_t *midi;
 	machine_options_t opt;
 	char audio_driver[64];
 
@@ -221,15 +223,24 @@ static void feed_events(machine_t *mc, size_t n)
 		if (e->tempo_change || (e->port != SMF_PORT_UNSET && e->port > 1))
 			continue;
 		int port = e->port == 1 ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A;
+		int song = e->port == 1 ? MIDI_IO_SONG_B : MIDI_IO_SONG_A;
 		if (e->status[0] == 0xf0 && e->bytes)
 		{
 			scemu_midi_write(mc->m, port, e->status, 1, offset);
 			scemu_midi_write(mc->m, port, e->bytes, e->length - 1u, offset);
+			midi_io_write(mc->midi, song, e->status, 1);
+			midi_io_write(mc->midi, song, e->bytes, e->length - 1u);
 		}
 		else if (e->bytes)
+		{
 			scemu_midi_write(mc->m, port, e->bytes, e->length, offset);
+			midi_io_write(mc->midi, song, e->bytes, e->length);
+		}
 		else
+		{
 			scemu_midi_write(mc->m, port, e->status, e->length, offset);
+			midi_io_write(mc->midi, song, e->status, e->length);
+		}
 	}
 }
 
@@ -244,6 +255,7 @@ static void quiet(machine_t *mc)
 		{
 			uint8_t off[6] = { (uint8_t)(0xb0 | ch), 0x7b, 0x00, (uint8_t)(0xb0 | ch), 0x78, 0x00 };
 			scemu_midi_write(mc->m, port, off, sizeof(off), 0);
+			midi_io_write(mc->midi, port ? MIDI_IO_SONG_B : MIDI_IO_SONG_A, off, sizeof(off));
 		}
 	for (size_t done = 0; done < mc->rate / 8; done += BLOCK)
 	{
@@ -293,6 +305,12 @@ static void handle(machine_t *mc, const command_t *c)
 		break;
 	case CMD_GAIN:
 		mc->gain = c->f;
+		break;
+	case CMD_MIDI_IN:
+		midi_io_connect_input(mc->midi, c->a, c->b, c->c);
+		break;
+	case CMD_MIDI_OUT:
+		midi_io_connect_output(mc->midi, c->a, c->b, c->c);
 		break;
 	case CMD_QUIT:
 		break;
@@ -391,6 +409,15 @@ static void *run(void *user)
 			continue;
 		}
 
+		for (;;)
+		{
+			uint8_t bytes[1024];
+			int which;
+			size_t got = midi_io_read(mc->midi, &which, bytes, sizeof(bytes));
+			if (!got)
+				break;
+			scemu_midi_write(mc->m, which ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A, bytes, got, 0);
+		}
 		if (mc->playing)
 		{
 			feed_events(mc, n);
@@ -404,6 +431,12 @@ static void *run(void *user)
 }
 
 /* ---------------------------------------------------------------- the front */
+
+static void midi_out(const uint8_t *bytes, size_t count, void *user)
+{
+	machine_t *mc = user;
+	midi_io_write(mc->midi, MIDI_IO_OUT, bytes, count);
+}
 
 machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size)
 {
@@ -436,6 +469,8 @@ machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size)
 			snprintf(mc->audio_driver, sizeof(mc->audio_driver), "%s", audio_driver(mc->audio));
 	}
 	mc->gain = 0.75f * 0.75f;
+	mc->midi = midi_io_open("scgui");
+	scemu_set_midi_out(mc->m, midi_out, mc);
 	pthread_mutex_init(&mc->lock, NULL);
 	if (pthread_create(&mc->thread, NULL, run, mc) != 0)
 	{
@@ -452,7 +487,7 @@ void machine_stop(machine_t *mc)
 		return;
 	if (mc->thread)
 	{
-		command_t c = { CMD_QUIT, 0, 0, 0, NULL };
+		command_t c = { CMD_QUIT, 0, 0, 0, 0, NULL };
 		post(mc, c);
 		pthread_join(mc->thread, NULL);
 	}
@@ -460,6 +495,7 @@ void machine_stop(machine_t *mc)
 		session_save_settings(&mc->session);
 	unload_song(mc);
 	audio_close(mc->audio);
+	midi_io_close(mc->midi);
 	session_free(&mc->session);
 	scemu_destroy(mc->m);
 	scplay_roms_free(&mc->roms);
@@ -473,36 +509,48 @@ const char *machine_audio_driver(const machine_t *mc) { return mc->audio ? mc->a
 
 void machine_play(machine_t *mc, const char *path)
 {
-	command_t c = { CMD_PLAY, 0, 0, 0, strdup(path) };
+	command_t c = { CMD_PLAY, 0, 0, 0, 0, strdup(path) };
 	post(mc, c);
 }
 
 void machine_pause(machine_t *mc, bool paused)
 {
-	command_t c = { CMD_PAUSE, paused, 0, 0, NULL };
+	command_t c = { CMD_PAUSE, paused, 0, 0, 0, NULL };
 	post(mc, c);
 }
 
 void machine_stop_song(machine_t *mc)
 {
-	command_t c = { CMD_STOP, 0, 0, 0, NULL };
+	command_t c = { CMD_STOP, 0, 0, 0, 0, NULL };
 	post(mc, c);
 }
 
 void machine_button(machine_t *mc, scemu_button_t b, bool down)
 {
-	command_t c = { CMD_BUTTON, b, down, 0, NULL };
+	command_t c = { CMD_BUTTON, b, down, 0, 0, NULL };
 	post(mc, c);
 }
 
 void machine_power(machine_t *mc, bool on)
 {
-	command_t c = { CMD_POWER, on, 0, 0, NULL };
+	command_t c = { CMD_POWER, on, 0, 0, 0, NULL };
 	post(mc, c);
 }
 
 void machine_set_gain(machine_t *mc, float gain)
 {
-	command_t c = { CMD_GAIN, 0, 0, gain, NULL };
+	command_t c = { CMD_GAIN, 0, 0, 0, gain, NULL };
+	post(mc, c);
+}
+
+void machine_midi_input(machine_t *mc, int which, int client, int port)
+{
+	command_t c = { CMD_MIDI_IN, which, client, port, 0, NULL };
+	post(mc, c);
+}
+
+void machine_midi_output(machine_t *mc, int which, int client, int port)
+{
+	command_t c = { CMD_MIDI_OUT, which, client, port, 0, NULL };
 	post(mc, c);
 }

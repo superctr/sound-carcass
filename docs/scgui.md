@@ -34,6 +34,10 @@ line become the playlist and the first one plays.
   real (not from the cache), with any queued keys held, so the power-on combinations work.
 - **The MIDI IN B jack** opens the playlist, **the PHONES jack** the audio window.
 
+- **Combinations from the manual**: a middle-click (or Ctrl and the right button) on a key opens a
+  menu of every multi-key operation the owner's manual lists for that key; choosing one holds and
+  presses the keys for you.  The list is `docs/panel/combinations.md` in the project.
+
 Keys: `space` pause, `n` / `p` next and previous song, `l` the playlist, `q` quit.
 
 ## The playlist
@@ -44,7 +48,20 @@ reset, a quarter second before its first event; pausing or stopping sends all no
 off on every part first, so nothing hangs.  The title bar of
 the main window shows the song's title (UTF-8 or Shift-JIS, as in scplay).
 
+## MIDI ports
+
+The bottom of the playlist window connects the machine to the host's MIDI ports (the ALSA
+sequencer; `scgui` is a client with ports of its own, so other programs can connect to it too):
+
+| | |
+|---|---|
+| MIDI IN A, MIDI IN B | a source feeding the machine's two inputs: a keyboard, a sequencer, another program |
+| MIDI OUT | where the machine's own MIDI OUT goes |
+| Song to A, Song to B | the song being played is also sent here, port A's and port B's tracks separately, with the same GS reset and the same notes-off on pause and stop: for a real unit playing along, e.g. an SC-8850's Part A and Part B |
+
+The refresh button looks for ports again after plugging something in.
+
 ## Building
 
-Needs GTK 4, SDL2 (for audio) and zlib, besides the library.  Without GTK 4 the build skips it and
+Needs GTK 4, ALSA, SDL2 (for audio) and zlib, besides the library.  Without GTK 4 the build skips it and
 still makes `scplay`.

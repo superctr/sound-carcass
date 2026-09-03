@@ -15,6 +15,11 @@
 #include "machine.h"
 #include "session.h"
 #include "smf.h"
+#include "midi_io.h"
+#include "combos.h"
+
+#define MIDI_PORTS_MAX 64
+#define MIDI_SLOTS 5           /* MIDI IN A, MIDI IN B, MIDI OUT, Song A, Song B */
 
 #define DEFAULT_PITCH 4
 #define KNOB_STEP 0.05f
@@ -38,7 +43,19 @@ typedef struct app
 	bool latched_down;         /* the queued keys are down right now */
 	bool release_after_boot;
 	double pointer_x, pointer_y;
+	midi_port_info_t ports[MIDI_PORTS_MAX];
+	int port_count;
+	GtkWidget *midi_drop[MIDI_SLOTS];
+	int midi_choice[MIDI_SLOTS];   /* index into ports, or -1 */
+	GtkWidget *combo_popover;
+	int combo_ids[64];
+	int combo_hold_count;
+	scemu_button_t combo_hold[4];
+	int combo_press;
 } app_t;
+
+static const char *const midi_slot_names[MIDI_SLOTS] = { "MIDI IN A", "MIDI IN B", "MIDI OUT", "Song to A", "Song to B" };
+static const bool midi_slot_is_input[MIDI_SLOTS] = { true, true, false, false, false };
 
 /* ---------------------------------------------------------------- options */
 
@@ -249,6 +266,124 @@ static gboolean on_playlist_close(GtkWindow *w, gpointer user)
 	return TRUE;
 }
 
+/* ---------------------------------------------------------------- MIDI ports */
+
+static void midi_apply(app_t *app, int slot)
+{
+	int choice = app->midi_choice[slot];
+	int client = choice >= 0 ? app->ports[choice].client : -1;
+	int port = choice >= 0 ? app->ports[choice].port : 0;
+	if (midi_slot_is_input[slot])
+		machine_midi_input(app->mc, slot, client, port);
+	else
+		machine_midi_output(app->mc, slot - 2, client, port);
+}
+
+static void on_midi_selected(GObject *drop, GParamSpec *spec, gpointer user)
+{
+	app_t *app = user;
+	int slot = GPOINTER_TO_INT(g_object_get_data(drop, "slot"));
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(drop));
+	int choice = -1;
+	if (sel != GTK_INVALID_LIST_POSITION && sel > 0)
+	{
+		/* the list holds "none" then the ports that fit the slot, in order */
+		guint seen = 0;
+		for (int n = 0; n < app->port_count; n++)
+		{
+			bool fits = midi_slot_is_input[slot] ? app->ports[n].readable : app->ports[n].writable;
+			if (fits && ++seen == sel)
+			{
+				choice = n;
+				break;
+			}
+		}
+	}
+	if (choice != app->midi_choice[slot])
+	{
+		app->midi_choice[slot] = choice;
+		midi_apply(app, slot);
+	}
+}
+
+static void midi_fill(app_t *app)
+{
+	app->port_count = midi_io_list(app->ports, MIDI_PORTS_MAX);
+	for (int slot = 0; slot < MIDI_SLOTS; slot++)
+	{
+		GtkStringList *list = gtk_string_list_new(NULL);
+		gtk_string_list_append(list, "none");
+		guint selected = 0, seen = 0;
+		for (int n = 0; n < app->port_count; n++)
+		{
+			bool fits = midi_slot_is_input[slot] ? app->ports[n].readable : app->ports[n].writable;
+			if (!fits)
+				continue;
+			gtk_string_list_append(list, app->ports[n].name);
+			seen++;
+			if (n == app->midi_choice[slot])
+				selected = seen;
+		}
+		g_signal_handlers_block_by_func(app->midi_drop[slot], on_midi_selected, app);
+		gtk_drop_down_set_model(GTK_DROP_DOWN(app->midi_drop[slot]), G_LIST_MODEL(list));
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(app->midi_drop[slot]), selected);
+		g_signal_handlers_unblock_by_func(app->midi_drop[slot], on_midi_selected, app);
+		g_object_unref(list);
+	}
+}
+
+static void on_midi_refresh(GtkButton *b, gpointer user)
+{
+	app_t *app = user;
+	/* a port that is gone drops to none; the rest keep their choice by name */
+	midi_port_info_t old[MIDI_PORTS_MAX];
+	int old_choice[MIDI_SLOTS];
+	memcpy(old, app->ports, sizeof(old));
+	memcpy(old_choice, app->midi_choice, sizeof(old_choice));
+	int count = midi_io_list(app->ports, MIDI_PORTS_MAX);
+	for (int slot = 0; slot < MIDI_SLOTS; slot++)
+	{
+		app->midi_choice[slot] = -1;
+		if (old_choice[slot] < 0)
+			continue;
+		for (int n = 0; n < count; n++)
+			if (strcmp(app->ports[n].name, old[old_choice[slot]].name) == 0)
+				app->midi_choice[slot] = n;
+		if (app->midi_choice[slot] != old_choice[slot])
+			midi_apply(app, slot);
+	}
+	midi_fill(app);
+}
+
+static GtkWidget *midi_section(app_t *app)
+{
+	GtkWidget *grid = gtk_grid_new();
+	gtk_grid_set_row_spacing(GTK_GRID(grid), 4);
+	gtk_grid_set_column_spacing(GTK_GRID(grid), 8);
+	gtk_widget_set_margin_start(grid, 8);
+	gtk_widget_set_margin_end(grid, 8);
+	gtk_widget_set_margin_top(grid, 8);
+	gtk_widget_set_margin_bottom(grid, 8);
+	for (int slot = 0; slot < MIDI_SLOTS; slot++)
+	{
+		GtkWidget *label = gtk_label_new(midi_slot_names[slot]);
+		gtk_label_set_xalign(GTK_LABEL(label), 0);
+		gtk_grid_attach(GTK_GRID(grid), label, 0, slot, 1, 1);
+		app->midi_drop[slot] = gtk_drop_down_new(NULL, NULL);
+		gtk_widget_set_hexpand(app->midi_drop[slot], TRUE);
+		g_object_set_data(G_OBJECT(app->midi_drop[slot]), "slot", GINT_TO_POINTER(slot));
+		g_signal_connect(app->midi_drop[slot], "notify::selected", G_CALLBACK(on_midi_selected), app);
+		gtk_grid_attach(GTK_GRID(grid), app->midi_drop[slot], 1, slot, 1, 1);
+	}
+	GtkWidget *refresh = gtk_button_new_from_icon_name("view-refresh-symbolic");
+	gtk_widget_set_tooltip_text(refresh, "Look for ports again");
+	gtk_widget_set_valign(refresh, GTK_ALIGN_START);
+	g_signal_connect(refresh, "clicked", G_CALLBACK(on_midi_refresh), app);
+	gtk_grid_attach(GTK_GRID(grid), refresh, 2, 0, 1, 1);
+	midi_fill(app);
+	return grid;
+}
+
 static GtkWidget *toolbar_button(const char *icon, const char *tip, GCallback cb, app_t *app)
 {
 	GtkWidget *b = gtk_button_new_from_icon_name(icon);
@@ -295,6 +430,8 @@ static void playlist_show(app_t *app)
 		gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), app->list);
 		gtk_widget_set_vexpand(scroll, TRUE);
 		gtk_box_append(GTK_BOX(box), scroll);
+		gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
+		gtk_box_append(GTK_BOX(box), midi_section(app));
 		gtk_window_set_child(GTK_WINDOW(w), box);
 		app->playlist_window = w;
 	}
@@ -440,17 +577,92 @@ static void element_action(app_t *app, int e)
 	}
 }
 
+/* a combination from the manual: the held keys go down in order, the
+ * pressed one follows, and everything comes up a moment later */
+static gboolean combo_release(gpointer user)
+{
+	app_t *app = user;
+	if (app->combo_press >= 0)
+		machine_button(app->mc, (scemu_button_t)app->combo_press, false);
+	for (int n = app->combo_hold_count - 1; n >= 0; n--)
+		machine_button(app->mc, app->combo_hold[n], false);
+	app->combo_hold_count = 0;
+	app->combo_press = -1;
+	return G_SOURCE_REMOVE;
+}
+
+static void on_combo_chosen(GtkButton *b, gpointer user)
+{
+	app_t *app = user;
+	const combo_t *c = &combos[GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "combo"))];
+	gtk_popover_popdown(GTK_POPOVER(app->combo_popover));
+	if (app->combo_hold_count || app->combo_press >= 0)
+		return;
+	for (int n = 0; n < c->hold_count; n++)
+	{
+		machine_button(app->mc, c->hold[n], true);
+		app->combo_hold[app->combo_hold_count++] = c->hold[n];
+	}
+	if (c->press != SCEMU_BUTTON_COUNT)
+	{
+		machine_button(app->mc, c->press, true);
+		app->combo_press = c->press;
+	}
+	else
+		app->combo_press = -1;
+	g_timeout_add(150, combo_release, app);
+}
+
+static void combo_menu(app_t *app, int element, double x, double y)
+{
+	int button = panel_element_button((panel_element_t)element);
+	int count = combos_for((scemu_button_t)button, app->combo_ids, 64);
+	if (count == 0)
+		return;
+	if (!app->combo_popover)
+	{
+		app->combo_popover = gtk_popover_new();
+		gtk_widget_set_parent(app->combo_popover, app->area);
+	}
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	for (int n = 0; n < count; n++)
+	{
+		const combo_t *c = &combos[app->combo_ids[n]];
+		GtkWidget *item = gtk_button_new_with_label(c->name);
+		gtk_button_set_has_frame(GTK_BUTTON(item), FALSE);
+		gtk_label_set_xalign(GTK_LABEL(gtk_button_get_child(GTK_BUTTON(item))), 0);
+		char tip[400];
+		snprintf(tip, sizeof(tip), "%s  (manual p.%d)", c->effect, c->page);
+		gtk_widget_set_tooltip_text(item, tip);
+		g_object_set_data(G_OBJECT(item), "combo", GINT_TO_POINTER(app->combo_ids[n]));
+		g_signal_connect(item, "clicked", G_CALLBACK(on_combo_chosen), app);
+		gtk_box_append(GTK_BOX(box), item);
+	}
+	GtkWidget *scroll = gtk_scrolled_window_new();
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+	gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), box);
+	gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll), TRUE);
+	gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 360);
+	gtk_popover_set_child(GTK_POPOVER(app->combo_popover), scroll);
+	GdkRectangle at = { (int)x, (int)y, 1, 1 };
+	gtk_popover_set_pointing_to(GTK_POPOVER(app->combo_popover), &at);
+	gtk_popover_popup(GTK_POPOVER(app->combo_popover));
+}
+
 static void on_pressed(GtkGestureClick *g, int n_press, double x, double y, gpointer user)
 {
 	app_t *app = user;
 	int e = panel_hit(app->panel, (int)(x * app->scale), (int)(y * app->scale));
 	guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(g));
+	GdkModifierType mods = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(g));
 	if (e < 0)
 		return;
 	int b = panel_element_button((panel_element_t)e);
 	if (b >= 0)
 	{
-		if (button == GDK_BUTTON_SECONDARY)
+		if (button == GDK_BUTTON_MIDDLE || (button == GDK_BUTTON_SECONDARY && (mods & GDK_CONTROL_MASK)))
+			combo_menu(app, e, x, y);
+		else if (button == GDK_BUTTON_SECONDARY)
 		{
 			app->latched ^= (uint64_t)1 << e;
 			panel_set_pressed(app->panel, (panel_element_t)e, (app->latched >> e) & 1);
@@ -549,6 +761,9 @@ int main(int argc, char **argv)
 	app.songs = g_ptr_array_new_with_free_func(g_free);
 	app.current = -1;
 	app.pressed_element = -1;
+	app.combo_press = -1;
+	for (int n = 0; n < MIDI_SLOTS; n++)
+		app.midi_choice[n] = -1;
 	app.power = true;
 	app.knob = 0.75f;
 
@@ -626,6 +841,8 @@ int main(int argc, char **argv)
 	g_source_remove(tick);
 
 	machine_stop(app.mc);
+	if (app.combo_popover)
+		gtk_widget_unparent(app.combo_popover);
 	gtk_window_destroy(GTK_WINDOW(app.window));
 	free(app.frame);
 	panel_destroy(app.panel);

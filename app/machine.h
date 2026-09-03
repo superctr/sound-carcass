@@ -59,4 +59,11 @@ void machine_button(machine_t *mc, scemu_button_t b, bool down);
 void machine_power(machine_t *mc, bool on);            /* off: silence; on: reset and boot, keys held */
 void machine_set_gain(machine_t *mc, float gain);       /* 0..1, applied to the output */
 
+/* Host MIDI ports (midi_io.h): connect one of the machine's inputs (MIDI IN
+ * A, B) to a source, or one of its outputs (MIDI OUT, the song's ports A
+ * and B for a real unit playing along) to a destination; client -1
+ * disconnects. */
+void machine_midi_input(machine_t *mc, int which, int client, int port);
+void machine_midi_output(machine_t *mc, int which, int client, int port);
+
 #endif

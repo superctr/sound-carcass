@@ -1,0 +1,223 @@
+/* scgui: the front-panel button combinations the SC-88Pro understands.
+ *
+ * Copyright (c) 2026 ian karlsson
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+#include "combos.h"
+
+#define B(x) SCEMU_BUTTON_##x
+#define NONE SCEMU_BUTTON_COUNT
+
+const combo_t combos[] = {
+	/* Chapter 1 -- Try out the unit */
+	{ "the value will change faster",
+	  "Holding one half of the Part pair and pressing the other steps the Part number quickly.",
+	  { B(PART_LEFT) }, 1, B(PART_RIGHT), false, 6 },
+	{ "the value will change faster",
+	  "Holding one half of the Instrument pair and pressing the other steps the sound quickly.",
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, 6 },
+	{ "the value will change faster",
+	  "Holding one half of the Level pair and pressing the other changes the level quickly.",
+	  { B(LEVEL_LEFT) }, 1, B(LEVEL_RIGHT), false, 6 },
+	{ "the value will change faster",
+	  "Holding one half of the Pan pair and pressing the other changes the pan quickly.",
+	  { B(PAN_LEFT) }, 1, B(PAN_RIGHT), false, 6 },
+	{ "the value will change faster",
+	  "Holding one half of the Reverb pair and pressing the other changes the reverb level quickly.",
+	  { B(REVERB_LEFT) }, 1, B(REVERB_RIGHT), false, 6 },
+	{ "the value will change faster",
+	  "Holding one half of the Chorus pair and pressing the other changes the chorus level quickly.",
+	  { B(CHORUS_LEFT) }, 1, B(CHORUS_RIGHT), false, 6 },
+	{ "the value will change faster",
+	  "Holding one half of the Key Shift pair and pressing the other transposes quickly.",
+	  { B(KEY_SHIFT_LEFT) }, 1, B(KEY_SHIFT_RIGHT), false, 6 },
+	{ "the value will change faster",
+	  "Holding one half of the MIDI Channel pair and pressing the other steps the channel quickly.",
+	  { B(MIDI_CH_LEFT) }, 1, B(MIDI_CH_RIGHT), false, 6 },
+	{ "Adjust the amount of delay",
+	  "Lowers the delay send level of the Part, or of all Parts when the ALL indicator is lit.",
+	  { B(SC88_MAP) }, 1, B(KEY_SHIFT_LEFT), false, 13 },
+	{ "Adjust the amount of delay",
+	  "Raises the delay send level of the Part, or of all Parts when the ALL indicator is lit.",
+	  { B(SC88_MAP) }, 1, B(KEY_SHIFT_RIGHT), false, 13 },
+
+	/* Chapter 2 -- Parts and parameters */
+	{ "To switch between the group A and B",
+	  "Flips the Part display between Parts A01-A16 and Parts B01-B16.",
+	  { B(ALL) }, 1, B(PART_LEFT), false, 18 },
+	{ "Variation select mode",
+	  "Enters and leaves Variation select, where the Instrument buttons pick the Variation number.",
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, 20 },
+	{ "To switch between the A and B",
+	  "Flips the Part's MIDI channel display between group A and group B channels.",
+	  { B(KEY_SHIFT_RIGHT) }, 1, B(MIDI_CH_LEFT), false, 22 },
+	{ "Part Monitor",
+	  "Listens to the selected Part alone; the Mute indicator blinks while the monitor is on.",
+	  { B(ALL) }, 1, B(MUTE), false, 25 },
+	{ "the current setting will be shown graphically",
+	  "Draws the Level of every Part as bars; the same press returns to the normal display.",
+	  { B(LEVEL_LEFT) }, 1, B(LEVEL_RIGHT), false, 25 },
+	{ "the current setting will be shown graphically",
+	  "Draws Pan graphically; the same press returns to the normal display.",
+	  { B(PAN_LEFT) }, 1, B(PAN_RIGHT), false, 25 },
+	{ "the current setting will be shown graphically",
+	  "Draws Key Shift graphically; the same press returns to the normal display.",
+	  { B(KEY_SHIFT_LEFT) }, 1, B(KEY_SHIFT_RIGHT), false, 25 },
+	{ "Parameters that must be selected from the menu",
+	  "Opens and closes the per-Part parameter menu, from Part EQ to the CC1 LFO block.",
+	  { B(PART_LEFT) }, 1, B(PART_RIGHT), false, 26 },
+	{ "Parameter jump",
+	  "Skips the menu cursor up to the head of the next parameter block.",
+	  { B(SELECT) }, 1, B(SC55_MAP), false, 26 },
+	{ "Parameter jump",
+	  "Skips the menu cursor down to the head of the next parameter block.",
+	  { B(SELECT) }, 1, B(SC88_MAP), false, 26 },
+	{ "setting status ... graphically",
+	  "Draws Vibrato Rate, Attack Time or the EFX type row graphically; the same press returns.",
+	  { B(EDIT1_LEFT) }, 1, B(EDIT1_RIGHT), false, 31 },
+	{ "setting status ... graphically",
+	  "Draws Vibrato Depth, Cutoff or Decay graphically; the same press returns.",
+	  { B(EDIT2_LEFT) }, 1, B(EDIT2_RIGHT), false, 31 },
+	{ "setting status ... graphically",
+	  "Draws Vibrato Delay, Resonance or Release graphically; the same press returns.",
+	  { B(EDIT3_LEFT) }, 1, B(EDIT3_RIGHT), false, 31 },
+	{ "Setting parameters common to all Parts",
+	  "Opens and closes the all-Parts menu: M. Tune, the system effects, EFX control, Device ID and the receive switches.",
+	  { B(PART_LEFT) }, 1, B(PART_RIGHT), false, 14 },
+	{ "System parameter settings",
+	  "Opens and closes the System-parameter menu, from Preview Note to Patch Load Initialize.",
+	  { B(SC55_MAP) }, 1, B(SC88_MAP), false, 36 },
+	{ "the Native map ... holding down [SELECT] while you press [SC-55 MAP]",
+	  "Puts every Part back on the Native map; the SC-55 Map indicator blinks.",
+	  { B(SELECT) }, 1, B(SC55_MAP), false, 35 },
+	{ "hold down the [SELECT] button and press the [SC-88MAP] button",
+	  "Puts every Part on the SC-88 map; the SC-88 Map indicator blinks.",
+	  { B(SELECT) }, 1, B(SC88_MAP), false, 35 },
+	{ "Drum editing procedure",
+	  "Enters and leaves Drum Edit, where each Drum Instrument of the set is edited by note name.",
+	  { B(SELECT) }, 1, B(EDIT1_LEFT), false, 42 },
+	{ "switch between Drum Set select mode and Drum Instrument select mode",
+	  "Toggles what the Instrument buttons step: the Drum Set, whose number blinks, or the Drum Instrument.",
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, 43 },
+
+	/* Chapter 3 -- System Effects */
+	{ "the current parameter value will be displayed graphically",
+	  "Draws the reverb send level graphically; the same press returns to the normal display.",
+	  { B(REVERB_LEFT) }, 1, B(REVERB_RIGHT), false, 50 },
+	{ "the current parameter value will be displayed graphically",
+	  "Draws the chorus send level graphically; the same press returns to the normal display.",
+	  { B(CHORUS_LEFT) }, 1, B(CHORUS_RIGHT), false, 50 },
+	{ "While holding the [SC-88MAP] button, press both [l][r] buttons of DELAY",
+	  "Draws the delay send level graphically; the same press returns to the normal display.",
+	  { B(SC88_MAP), B(KEY_SHIFT_LEFT) }, 2, B(KEY_SHIFT_RIGHT), false, 50 },
+	{ "Simultaneously press both EFX TYPE [l][r]",
+	  "Draws the delay send level graphically when the EFX indicator is dark and the edit row sets delay.",
+	  { B(EDIT1_LEFT) }, 1, B(EDIT1_RIGHT), false, 50 },
+
+	/* Chapter 5 -- Convenient functions */
+	{ "Press [USER INST] and [SELECT] simultaneously, the indicator light red",
+	  "Enters User Instrument edit, where the edit rows change the sound itself rather than the Part.",
+	  { B(USER_INST) }, 1, B(SELECT), false, 97 },
+	{ "Simultaneously press [USER INST] and [SELECT]",
+	  "Asks \"Write UI 64/001?\" to store the edited sound as a User Instrument.",
+	  { B(USER_INST) }, 1, B(SELECT), false, 98 },
+	{ "Simultaneously pressing both INSTRUMENT [l] and [r] will move between the two numbers",
+	  "Moves the cursor between the instrument number and the variation number in the Write prompt.",
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, 98 },
+	{ "Simultaneously press [EFX] and [ON/OFF]",
+	  "Asks \"Write U.EFX 01?\" to store the insertion effect settings as one of 64 User Effects.",
+	  { B(USER_INST) }, 1, B(SELECT), false, 99 },
+	{ "Naming a User Patch",
+	  "Enters and leaves Patch-name editing, where Part moves the cursor and Instrument picks the character.",
+	  { B(PAN_RIGHT) }, 1, B(CHORUS_RIGHT), false, 100 },
+	{ "Saving a User Patch",
+	  "Asks \"Write U.Patch01?\" to store Parts A01 and A02 and the common settings as User Patch U01-U16.",
+	  { B(USER_INST) }, 1, B(SELECT), false, 101 },
+	{ "Naming a User Drum Set",
+	  "Enters and leaves Drum-Set-name editing for the selected Drum Part.",
+	  { B(PAN_RIGHT) }, 1, B(CHORUS_RIGHT), false, 102 },
+	{ "If you wish to change the User Drum Set number",
+	  "Switches the Instrument buttons to selecting User Drum Set 65 or 66 while naming.",
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, 102 },
+	{ "To store an individual Drum Instrument",
+	  "Asks \"Write UD D#3/65?\" to store one Drum Instrument into a note of a User Drum Set.",
+	  { B(USER_INST) }, 1, B(SELECT), false, 104 },
+	{ "the cursor will move between the Note Name and the Drum Set number",
+	  "Moves the cursor in the \"Write UD ...?\" prompt.",
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, 104 },
+	{ "To store the entire Drum Set",
+	  "Asks \"Write U.DRUM 65?\" to store all 128 Drum Instruments as User Drum Set 65 or 66.",
+	  { B(EDIT3_LEFT) }, 1, B(EDIT3_RIGHT), false, 105 },
+	{ "Copy",
+	  "Asks \"Copy A01->A02?\" to copy the selected Part's settings to another Part.",
+	  { B(SELECT) }, 1, B(LEVEL_LEFT), false, 106 },
+	{ "Initialize",
+	  "Asks \"Clear A01?\" to return the selected Part to its default settings.",
+	  { B(SELECT) }, 1, B(LEVEL_RIGHT), false, 106 },
+	{ "Exchange",
+	  "Asks \"Exchg A01<->A02?\" to swap the settings of two Parts.",
+	  { B(SELECT) }, 1, B(PAN_LEFT), false, 106 },
+	{ "Bulk Dump procedure",
+	  "Asks \"Dump ALL,Sure?\" to transmit the chosen block of memory as System Exclusive data.",
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, 107 },
+	{ "the data will be transmitted",
+	  "Transmits the parameter shown in the menu as an Individual Data exclusive message.",
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, 108 },
+	{ "the Effect Type data will be transmitted",
+	  "Transmits the displayed insertion-effect type or parameter as exclusive data.",
+	  { B(EDIT3_LEFT) }, 1, B(EDIT3_RIGHT), false, 109 },
+	{ "Frame Draw",
+	  "Enters and leaves Frame Draw, where the display's dots are drawn by hand over ten pages.",
+	  { B(EDIT1_RIGHT) }, 1, B(EDIT2_LEFT), false, 110 },
+	{ "to transmit the screen data to an external device",
+	  "Sends the current Frame Draw page as exclusive data.",
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, 110 },
+	{ "SC-88-compatibility mode",
+	  "Turns SC-88-compatibility mode on, and off again; the All button blinks while it is on.",
+	  { B(SELECT) }, 1, B(ALL), false, 112 },
+	{ "Selecting the CM-64 sound map",
+	  "Asks \"Init CM-64, Sure?\" to switch the unit to the CM-64 sound map, losing every previous setting.",
+	  { B(SELECT) }, 1, B(INSTRUMENT_LEFT), false, 114 },
+	{ "Selecting Double Module Mode",
+	  "Asks \"Set Mode2, Sure?\" to split the unit into two GM/GS modules with their own system effects.",
+	  { B(SELECT) }, 1, B(KEY_SHIFT_RIGHT), false, 116 },
+	{ "To return to Single Module Mode",
+	  "Asks \"Set Mode1, Sure?\" to return to one 32-Part module.",
+	  { B(SELECT) }, 1, B(KEY_SHIFT_LEFT), false, 116 },
+	{ "Initialize all Parts to the factory settings",
+	  "Asks \"Init All, Sure?\" to restore every setting, System and User parameters included.",
+	  { B(SELECT), B(INSTRUMENT_LEFT) }, 2, B(INSTRUMENT_RIGHT), false, 118 },
+	{ "Initialize for GM",
+	  "Asks \"Init GM, Sure?\" to set the unit to the basic GM state.",
+	  { B(SELECT) }, 1, B(PART_RIGHT), false, 118 },
+	{ "Initialize for GS",
+	  "Asks \"Init GS, Sure?\" to set the unit to the basic GS state.",
+	  { B(SELECT) }, 1, B(INSTRUMENT_RIGHT), false, 118 },
+
+	/* Chapter 8 -- Appendix */
+	{ "View settings for 32 Parts in the Part display",
+	  "Shows all 32 Parts at once in the bar display.",
+	  { B(EDIT2_RIGHT) }, 1, B(EDIT3_LEFT), false, 153 },
+};
+
+const int combo_count = (int)(sizeof combos / sizeof combos[0]);
+
+int combos_for(scemu_button_t button, int *out, int max)
+{
+	int n = 0;
+
+	for (int i = 0; i < combo_count; i++)
+	{
+		bool involved = combos[i].press == button;
+
+		for (int j = 0; !involved && j < combos[i].hold_count; j++)
+			if (combos[i].hold[j] == button)
+				involved = true;
+		if (!involved)
+			continue;
+		if (n < max && out)
+			out[n] = i;
+		n++;
+	}
+	return n > max ? max : n;
+}
