@@ -37,6 +37,7 @@ typedef struct app
 	bool power, paused;
 	float knob;
 	int pressed_element;       /* the element under the held mouse button, or -1 */
+	int opposite_element;      /* the other half of the pair, pressed with the right button meanwhile */
 	uint64_t seen_generation;
 	machine_state_t state;
 	uint64_t latched;          /* elements queued with the right button, pressed with the next key */
@@ -681,6 +682,14 @@ static const char *const button_label[SCEMU_BUTTON_COUNT] = {
 	[SCEMU_BUTTON_EDIT3_LEFT] = "VIB DELAY·RESONANCE·RELEASE·EFX VALUE ◀", [SCEMU_BUTTON_EDIT3_RIGHT] = "VIB DELAY·RESONANCE·RELEASE·EFX VALUE ▶",
 };
 
+/* the other half of a ◀ ▶ pair, or -1 */
+static int opposite_button(int b)
+{
+	bool pair = (b >= SCEMU_BUTTON_PART_LEFT && b <= SCEMU_BUTTON_MIDI_CH_RIGHT)
+	            || (b >= SCEMU_BUTTON_EDIT1_LEFT && b <= SCEMU_BUTTON_EDIT3_RIGHT);
+	return pair ? SCEMU_BUTTON_PART_LEFT + ((b - SCEMU_BUTTON_PART_LEFT) ^ 1) : -1;
+}
+
 static int element_for_button(scemu_button_t b)
 {
 	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
@@ -789,6 +798,12 @@ static void combo_menu(app_t *app, int element, double x, double y)
 {
 	int button = panel_element_button((panel_element_t)element);
 	int count = combos_for((scemu_button_t)button, app->combo_ids, 64);
+	/* holding one half and pressing the other is a mouse gesture here, not a menu entry */
+	int kept = 0;
+	for (int n = 0; n < count; n++)
+		if (strcmp(combos[app->combo_ids[n]].name, "the value will change faster") != 0)
+			app->combo_ids[kept++] = app->combo_ids[n];
+	count = kept;
 	if (count == 0)
 		return;
 	if (!app->combo_popover)
@@ -848,7 +863,20 @@ static void on_pressed(GtkGestureClick *g, int n_press, double x, double y, gpoi
 	int b = panel_element_button((panel_element_t)e);
 	if (b >= 0)
 	{
-		if (button == GDK_BUTTON_MIDDLE || (button == GDK_BUTTON_SECONDARY && (mods & GDK_CONTROL_MASK)))
+		if (button == GDK_BUTTON_SECONDARY && app->pressed_element >= 0)
+		{
+			/* the right button while a half of a pair is held: its other half */
+			int held = panel_element_button((panel_element_t)app->pressed_element);
+			int other = opposite_button(held);
+			int oe = other >= 0 ? element_for_button((scemu_button_t)other) : -1;
+			if (oe >= 0 && app->opposite_element < 0)
+			{
+				app->opposite_element = oe;
+				machine_button(app->mc, (scemu_button_t)other, true);
+				panel_set_pressed(app->panel, (panel_element_t)oe, true);
+			}
+		}
+		else if (button == GDK_BUTTON_MIDDLE || (button == GDK_BUTTON_SECONDARY && (mods & GDK_CONTROL_MASK)))
 			combo_menu(app, e, x, y);
 		else if (button == GDK_BUTTON_SECONDARY)
 		{
@@ -871,6 +899,20 @@ static void on_pressed(GtkGestureClick *g, int n_press, double x, double y, gpoi
 static void on_released(GtkGestureClick *g, int n_press, double x, double y, gpointer user)
 {
 	app_t *app = user;
+	guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(g));
+	if (button == GDK_BUTTON_SECONDARY)
+	{
+		int oe = app->opposite_element;
+		if (oe >= 0)
+		{
+			app->opposite_element = -1;
+			machine_button(app->mc, (scemu_button_t)panel_element_button((panel_element_t)oe), false);
+			panel_set_pressed(app->panel, (panel_element_t)oe, false);
+		}
+		return;
+	}
+	if (button != GDK_BUTTON_PRIMARY)
+		return;
 	int e = app->pressed_element;
 	if (e < 0)
 		return;
@@ -949,6 +991,7 @@ int main(int argc, char **argv)
 	app.songs = g_ptr_array_new_with_free_func(g_free);
 	app.current = -1;
 	app.pressed_element = -1;
+	app.opposite_element = -1;
 	app.combo_press = -1;
 	app.reset = MACHINE_RESET_GS;
 	for (int n = 0; n < MIDI_SLOTS; n++)

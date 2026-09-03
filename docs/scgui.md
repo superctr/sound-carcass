@@ -27,6 +27,8 @@ Files on the command line become the playlist and the first one plays.
   key (it shows pressed but is not sent yet); the queued keys go down together with the next key you
   left-click, before it, and come up with it.  That is how the combinations the firmware reads while
   another key is held are entered with one mouse, and a queued key is also held through a power-on.
+  While the left button holds one half of a ◀ ▶ pair, the right button presses the other half, which
+  is how the unit steps a value quickly.
 - **The volume knob** turns with the scroll wheel over it; it is the program's output gain, the
   machine itself has no volume control in software.  The knob's push switch (PREVIEW) is a button.
 - **The power switch** switches the emulated unit off and on.  Switching on boots the firmware for
