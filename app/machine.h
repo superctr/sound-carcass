@@ -56,6 +56,9 @@ void machine_play(machine_t *mc, const char *path);    /* a fresh machine, then 
 void machine_pause(machine_t *mc, bool paused);
 void machine_stop_song(machine_t *mc);
 void machine_button(machine_t *mc, scemu_button_t b, bool down);
+/* the same, ms of the machine's own time later (it stands still while the
+ * machine boots), in the order posted; for the panel's key combinations */
+void machine_button_after(machine_t *mc, scemu_button_t b, bool down, unsigned ms);
 void machine_power(machine_t *mc, bool on);            /* off: silence; on: reset and boot, keys held */
 void machine_set_gain(machine_t *mc, float gain);       /* 0..1, applied to the output */
 

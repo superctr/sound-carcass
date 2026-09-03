@@ -40,9 +40,12 @@ typedef struct app
 	int opposite_element;      /* the other half of the pair, pressed with the right button meanwhile */
 	uint64_t seen_generation;
 	machine_state_t state;
-	uint64_t latched;          /* elements queued with the right button, pressed with the next key */
-	bool latched_down;         /* the queued keys are down right now */
-	bool release_after_boot;
+	uint64_t queued;           /* elements queued with the right button: they go down with the next key */
+	uint64_t held;             /* elements the right button holds down right now */
+	bool release_after_boot;   /* the held keys come up when the boot they were held through ends */
+	uint64_t macro_pressed;    /* elements shown pressed while a chosen combination plays out */
+	bool macro_after_boot;
+	unsigned macro_ms;         /* how long it plays after the boot */
 	double pointer_x, pointer_y;
 	midi_port_info_t ports[MIDI_PORTS_MAX];
 	int port_count;
@@ -53,10 +56,10 @@ typedef struct app
 	machine_reset_t reset;
 	scemu_map_t map;
 	int combo_ids[64];
-	int combo_hold_count;
-	scemu_button_t combo_hold[4];
-	int combo_press;
 } app_t;
+
+#define MACRO_HOLD_MS 300    /* a held key is seen held before the next goes down */
+#define MACRO_PRESS_MS 150
 
 static const char *const midi_slot_names[MIDI_SLOTS] = { "MIDI IN A", "MIDI IN B", "MIDI OUT", "Song to A", "Song to B" };
 static const bool midi_slot_is_input[MIDI_SLOTS] = { true, true, false, false, false };
@@ -140,9 +143,9 @@ static int parse_options(int argc, char **argv, options_t *o, GPtrArray *songs)
 /* ---------------------------------------------------------------- playlist */
 
 static void play_index(app_t *app, int index);
-static void latched_press(app_t *app, bool down);
-static void latched_clear(app_t *app);
-static gboolean combo_release(gpointer user);
+static void queued_press(app_t *app);
+static void held_release(app_t *app);
+static gboolean macro_done(gpointer user);
 
 static const char *song_label(const char *path, char *buf, size_t size)
 {
@@ -601,14 +604,12 @@ static gboolean on_tick(gpointer user)
 		if (app->release_after_boot && !st.booting && st.power)
 		{
 			app->release_after_boot = false;
-			latched_press(app, false);
-			latched_clear(app);
-			if (app->combo_hold_count)
-			{
-				if (app->combo_press >= 0)
-					machine_button(app->mc, (scemu_button_t)app->combo_press, true);
-				g_timeout_add(150, combo_release, app);
-			}
+			held_release(app);
+		}
+		if (app->macro_after_boot && !st.booting && st.power)
+		{
+			app->macro_after_boot = false;
+			g_timeout_add(app->macro_ms, macro_done, app);
 		}
 	}
 	if (panel_dirty(app->panel))
@@ -617,20 +618,26 @@ static gboolean on_tick(gpointer user)
 }
 
 /* the queued keys go down, in the order they were queued, before the key they modify */
-static void latched_press(app_t *app, bool down)
+static void queued_press(app_t *app)
 {
 	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
-		if ((app->latched >> e) & 1)
-			machine_button(app->mc, (scemu_button_t)panel_element_button((panel_element_t)e), down);
-	app->latched_down = down;
+		if ((app->queued >> e) & 1)
+			machine_button(app->mc, (scemu_button_t)panel_element_button((panel_element_t)e), true);
+	app->held |= app->queued;
+	app->queued = 0;
 }
 
-static void latched_clear(app_t *app)
+/* everything the right button holds or queues comes up */
+static void held_release(app_t *app)
 {
 	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
-		if ((app->latched >> e) & 1)
+	{
+		if ((app->held >> e) & 1)
+			machine_button(app->mc, (scemu_button_t)panel_element_button((panel_element_t)e), false);
+		if (((app->held | app->queued) >> e) & 1)
 			panel_set_pressed(app->panel, (panel_element_t)e, false);
-	app->latched = 0;
+	}
+	app->held = app->queued = 0;
 }
 
 static void element_action(app_t *app, int e)
@@ -639,9 +646,9 @@ static void element_action(app_t *app, int e)
 	{
 	case PANEL_SWITCH_POWER:
 		app->power = !app->power;
-		if (app->power && app->latched)
+		if (app->power && (app->queued | app->held))
 		{
-			latched_press(app, true);
+			queued_press(app);
 			app->release_after_boot = true;
 		}
 		machine_power(app->mc, app->power);
@@ -700,14 +707,23 @@ static int element_for_button(scemu_button_t b)
 
 static void combo_text(const combo_t *c, char *out, size_t size)
 {
-	size_t n = 0;
-	n += (size_t)snprintf(out + n, size - n, "hold ");
-	for (int k = 0; k < c->hold_count && n < size; k++)
+	bool together = c->timing == COMBO_TOGETHER && !c->power_on;
+	int first = c->timing == COMBO_HOLD_THEN_PAIR && !c->power_on ? 1 : c->hold_count;
+	size_t n = (size_t)snprintf(out, size, together ? "press " : "hold ");
+	for (int k = 0; k < first && n < size; k++)
 		n += (size_t)snprintf(out + n, size - n, "%s%s", k ? " + " : "", button_label[c->hold[k]]);
 	if (c->power_on && n < size)
 		n += (size_t)snprintf(out + n, size - n, " while switching on");
-	if (c->press != SCEMU_BUTTON_COUNT && n < size)
-		snprintf(out + n, size - n, "%s press %s", c->power_on ? ", then" : ",", button_label[c->press]);
+	if (c->press == SCEMU_BUTTON_COUNT)
+		return;
+	if (!together && n < size)
+		n += (size_t)snprintf(out + n, size - n, ", then press ");
+	for (int k = first; k < c->hold_count && n < size; k++)
+		n += (size_t)snprintf(out + n, size - n, "%s + ", button_label[c->hold[k]]);
+	if (n < size)
+		n += (size_t)snprintf(out + n, size - n, "%s%s", together ? " + " : "", button_label[c->press]);
+	if ((together || first < c->hold_count) && n < size)
+		snprintf(out + n, size - n, " together");
 }
 
 /* the keys of the combination under the pointer light up on the panel */
@@ -747,21 +763,32 @@ static void on_combo_closed(GtkPopover *popover, gpointer user)
 	for (int n = 0; n < combo_count; n++)
 		combo_highlight(app, &combos[n], false);
 	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
-		if ((app->latched >> e) & 1)
+		if (((app->queued | app->held | app->macro_pressed) >> e) & 1)
 			panel_set_pressed(app->panel, (panel_element_t)e, true);
 }
 
-/* a combination from the manual: the held keys go down in order, the
- * pressed one follows, and everything comes up a moment later */
-static gboolean combo_release(gpointer user)
+/* a combination from the manual plays out on the machine's clock: the held
+ * keys go down in order, the pressed one follows (at once when the manual
+ * says "simultaneously", after a moment when it says "while holding"), and
+ * everything comes up in reverse; the window shows the keys pressed meanwhile */
+static void macro_key(app_t *app, scemu_button_t b, bool down, unsigned ms)
+{
+	machine_button_after(app->mc, b, down, ms);
+	int e = element_for_button(b);
+	if (e >= 0 && down)
+	{
+		app->macro_pressed |= (uint64_t)1 << e;
+		panel_set_pressed(app->panel, (panel_element_t)e, true);
+	}
+}
+
+static gboolean macro_done(gpointer user)
 {
 	app_t *app = user;
-	if (app->combo_press >= 0)
-		machine_button(app->mc, (scemu_button_t)app->combo_press, false);
-	for (int n = app->combo_hold_count - 1; n >= 0; n--)
-		machine_button(app->mc, app->combo_hold[n], false);
-	app->combo_hold_count = 0;
-	app->combo_press = -1;
+	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
+		if ((app->macro_pressed >> e) & 1)
+			panel_set_pressed(app->panel, (panel_element_t)e, ((app->queued | app->held) >> e) & 1);
+	app->macro_pressed = 0;
 	return G_SOURCE_REMOVE;
 }
 
@@ -770,28 +797,35 @@ static void on_combo_chosen(GtkButton *b, gpointer user)
 	app_t *app = user;
 	const combo_t *c = &combos[GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "combo"))];
 	gtk_popover_popdown(GTK_POPOVER(app->combo_popover));
-	if (app->combo_hold_count || app->combo_press >= 0 || app->release_after_boot)
+	if (app->macro_pressed || app->release_after_boot)
 		return;
-	for (int n = 0; n < c->hold_count; n++)
-	{
-		machine_button(app->mc, c->hold[n], true);
-		app->combo_hold[app->combo_hold_count++] = c->hold[n];
-	}
-	app->combo_press = c->press != SCEMU_BUTTON_COUNT ? (int)c->press : -1;
+	int first = c->timing == COMBO_HOLD_THEN_PAIR && !c->power_on ? 1 : c->hold_count;
+	for (int n = 0; n < first; n++)
+		macro_key(app, c->hold[n], true, 0);
 	if (c->power_on)
 	{
-		/* the held keys go through a power cycle; the pressed one follows the boot */
+		/* the held keys go through a power cycle; the rest follows the boot */
 		if (app->power)
 			machine_power(app->mc, false);
 		app->power = true;
 		machine_power(app->mc, true);
-		app->release_after_boot = true;
 		set_title(app);
-		return;
 	}
-	if (app->combo_press >= 0)
-		machine_button(app->mc, (scemu_button_t)app->combo_press, true);
-	g_timeout_add(150, combo_release, app);
+	unsigned t = c->timing != COMBO_TOGETHER || c->power_on ? MACRO_HOLD_MS : 0;
+	for (int n = first; n < c->hold_count; n++)
+		macro_key(app, c->hold[n], true, t);
+	if (c->press != SCEMU_BUTTON_COUNT)
+		macro_key(app, c->press, true, t);
+	t += MACRO_PRESS_MS;
+	if (c->press != SCEMU_BUTTON_COUNT)
+		macro_key(app, c->press, false, t);
+	for (int n = c->hold_count - 1; n >= 0; n--)
+		macro_key(app, c->hold[n], false, t);
+	app->macro_ms = t + 50;
+	if (c->power_on)
+		app->macro_after_boot = true;
+	else
+		g_timeout_add(app->macro_ms, macro_done, app);
 }
 
 static void combo_menu(app_t *app, int element, double x, double y)
@@ -879,13 +913,29 @@ static void press(app_t *app, guint button, GdkModifierType mods, double x, doub
 			combo_menu(app, e, x, y);
 		else if (button == GDK_BUTTON_SECONDARY)
 		{
-			app->latched ^= (uint64_t)1 << e;
-			panel_set_pressed(app->panel, (panel_element_t)e, (app->latched >> e) & 1);
+			/* the right button queues a key for the next one, or with Shift
+			 * holds it down from now; either again lets it go */
+			uint64_t bit = (uint64_t)1 << e;
+			if ((app->held | app->queued) & bit)
+			{
+				if (app->held & bit)
+					machine_button(app->mc, (scemu_button_t)b, false);
+				app->held &= ~bit;
+				app->queued &= ~bit;
+			}
+			else if (mods & GDK_SHIFT_MASK)
+			{
+				app->held |= bit;
+				machine_button(app->mc, (scemu_button_t)b, true);
+			}
+			else
+				app->queued |= bit;
+			panel_set_pressed(app->panel, (panel_element_t)e, ((app->held | app->queued) & bit) != 0);
 		}
 		else
 		{
-			if (app->latched && !app->latched_down)
-				latched_press(app, true);
+			if (app->queued)
+				queued_press(app);
 			app->pressed_element = e;
 			machine_button(app->mc, (scemu_button_t)b, true);
 			panel_set_pressed(app->panel, (panel_element_t)e, true);
@@ -917,11 +967,8 @@ static void release(app_t *app, guint button)
 	int b = panel_element_button((panel_element_t)e);
 	machine_button(app->mc, (scemu_button_t)b, false);
 	panel_set_pressed(app->panel, (panel_element_t)e, false);
-	if (app->latched_down)
-	{
-		latched_press(app, false);
-		latched_clear(app);
-	}
+	if (app->held | app->queued)
+		held_release(app);
 }
 
 static void on_motion(GtkEventControllerMotion *c, double x, double y, gpointer user)
@@ -1006,7 +1053,6 @@ int main(int argc, char **argv)
 	app.current = -1;
 	app.pressed_element = -1;
 	app.opposite_element = -1;
-	app.combo_press = -1;
 	app.reset = MACHINE_RESET_GS;
 	for (int n = 0; n < MIDI_SLOTS; n++)
 		app.midi_choice[n] = -1;

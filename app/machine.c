@@ -18,6 +18,7 @@
 
 #define BLOCK 256
 #define QUEUE_SIZE 64
+#define TIMED_KEYS 32
 
 typedef enum command_kind
 {
@@ -56,6 +57,9 @@ struct machine
 	uint64_t pos, end_frame, lead;
 	size_t next_event;
 	bool held[SCEMU_BUTTON_COUNT];
+	struct { scemu_button_t b; bool down; uint64_t due; } timed[TIMED_KEYS];
+	int timed_count;
+	uint64_t frames;          /* rendered since the start; what the timed keys wait on */
 	float gain;
 	machine_reset_t reset;
 	double clock_start;
@@ -159,6 +163,27 @@ static bool boot_progress(void *user, uint64_t frames)
 	if (frames % (BLOCK * 16) == 0)
 		publish(mc, true);
 	return true;
+}
+
+static void key(machine_t *mc, scemu_button_t b, bool down)
+{
+	mc->held[b] = down;
+	if (mc->power)
+		scemu_button(mc->m, b, down);
+}
+
+/* the timed keys, in the order they were posted, once their time has come */
+static void timed_keys(machine_t *mc)
+{
+	int kept = 0;
+	for (int n = 0; n < mc->timed_count; n++)
+	{
+		if (mc->timed[n].due <= mc->frames)
+			key(mc, mc->timed[n].b, mc->timed[n].down);
+		else
+			mc->timed[kept++] = mc->timed[n];
+	}
+	mc->timed_count = kept;
 }
 
 static void hold_keys(machine_t *mc)
@@ -301,9 +326,15 @@ static void handle(machine_t *mc, const command_t *c)
 		set_song(mc, "", "");
 		break;
 	case CMD_BUTTON:
-		mc->held[c->a] = c->b != 0;
-		if (mc->power)
-			scemu_button(mc->m, (scemu_button_t)c->a, c->b != 0);
+		if (c->c > 0 && mc->timed_count < TIMED_KEYS)
+		{
+			mc->timed[mc->timed_count].b = (scemu_button_t)c->a;
+			mc->timed[mc->timed_count].down = c->b != 0;
+			mc->timed[mc->timed_count].due = mc->frames + (uint64_t)c->c * mc->rate / 1000;
+			mc->timed_count++;
+		}
+		else
+			key(mc, (scemu_button_t)c->a, c->b != 0);
 		break;
 	case CMD_POWER:
 		if (c->a && !mc->power)
@@ -369,6 +400,9 @@ static void render_block(machine_t *mc, size_t n)
 			audio_pause(mc->audio, false);
 	}
 	mc->clock_frames += n;
+	mc->frames += n;
+	if (mc->timed_count)
+		timed_keys(mc);
 }
 
 static void *run(void *user)
@@ -553,6 +587,12 @@ void machine_stop_song(machine_t *mc)
 void machine_button(machine_t *mc, scemu_button_t b, bool down)
 {
 	command_t c = { CMD_BUTTON, b, down, 0, 0, NULL };
+	post(mc, c);
+}
+
+void machine_button_after(machine_t *mc, scemu_button_t b, bool down, unsigned ms)
+{
+	command_t c = { CMD_BUTTON, b, down, (int)(ms ? ms : 1), 0, NULL };
 	post(mc, c);
 }
 

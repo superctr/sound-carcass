@@ -14,6 +14,17 @@
 #include <stdbool.h>
 #include "scemu.h"
 
+/* How the firmware wants the keys: the manual's [A]*[B] means both keys are
+ * pressed at once and must reach it in one scan, its [A]+[B] means [A] is
+ * held, and seen held, before [B] goes down; [A]+[B]*[C] holds [A] first and
+ * then presses the other two at once. */
+typedef enum combo_timing
+{
+	COMBO_TOGETHER,
+	COMBO_HOLD_THEN_PRESS,
+	COMBO_HOLD_THEN_PAIR
+} combo_timing_t;
+
 typedef struct combo
 {
 	const char *name;           /* the manual's name for the operation */
@@ -25,6 +36,7 @@ typedef struct combo
 	scemu_button_t press;       /* pressed while they are held; SCEMU_BUTTON_COUNT if none */
 	bool power_on;              /* the hold set is held while switching on */
 	int page;                   /* in the user manual */
+	combo_timing_t timing;
 } combo_t;
 
 extern const combo_t combos[];

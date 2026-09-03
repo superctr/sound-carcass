@@ -23,10 +23,13 @@ Files on the command line become the playlist and the first one plays.
 
 ## The panel
 
-- **Buttons** work with the mouse: press and hold with the left button.  The right button queues a
-  key (it shows pressed but is not sent yet); the queued keys go down together with the next key you
-  left-click, before it, and come up with it.  That is how the combinations the firmware reads while
-  another key is held are entered with one mouse, and a queued key is also held through a power-on.
+- **Buttons** work with the mouse: press and hold with the left button.  The manual has two kinds of
+  two-key operations, and the right button covers both.  A plain right-click *queues* a key: it shows
+  pressed but is not sent until the next key you left-click, and then both go down in the same key
+  scan, the way the manual's "press [A] and [B] simultaneously" wants them.  Shift and the right button
+  *hold* a key: it goes down at once and stays down, for the manual's "while holding [A], press [B]",
+  where the firmware must see the hold before the second key.  Either kind comes up when the
+  left-clicked key does, or with another right-click on it, and both are held through a power-on.
   While the left button holds one half of a ◀ ▶ pair, the right button presses the other half, which
   is how the unit steps a value quickly.
 - **The volume knob** turns with the scroll wheel over it; it is the program's output gain, the
@@ -37,8 +40,12 @@ Files on the command line become the playlist and the first one plays.
 
 - **Combinations from the manual**: a middle-click (or Ctrl and the right button) on a key opens a
   menu of every multi-key operation the owner's manual and the service notes list for that key, each
-  with its keys spelled out; the keys light up on the panel while the pointer is over an entry, and
-  choosing one holds and presses them for you (a power-on combination through a power cycle).  The list is `docs/panel/combinations.md` in the project.
+  with its keys spelled out and the mode it applies in; the keys light up on the panel while the
+  pointer is over an entry, and choosing one plays it for you on the machine's own clock: keys the
+  manual says to press together go down in one scan, a held key is held for a moment before the next
+  goes down, and a power-on combination goes through a power cycle with its keys held.  The list is
+  `docs/panel/combinations.md` in the project.  The SC-88Pro's power-on combinations (test mode, the
+  version display) do not take effect in the emulator yet; see that file.
 
 Keys: `space` pause, `n` / `p` next and previous song, `l` the playlist, `q` quit.
 
