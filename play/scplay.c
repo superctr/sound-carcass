@@ -300,7 +300,8 @@ static void usage(FILE *fp)
 	        "                                last --keep-settings run instead of factory settings\n"
 	        "  --tail N                      seconds to keep running after the last event (default 4)\n"
 	        "  --port 0|1                    MIDI IN for tracks that name no port (default A);\n"
-	        "                                a track's port event routes it to A (even) or B (odd)\n"
+	        "                                a track's port event routes it to A (0) or B (1);\n"
+	        "                                ports 2 and 3 (an SC-8850's C and D) are not played\n"
 	        "  --map sc55|sc88|sc88pro       play every part from that instrument map, whatever\n"
 	        "                                the song selects (the SC-88 has no SC-88Pro map)\n"
 	        "  --midi-rate BAUD              speed of the MIDI input: 31250 (the cable, default),\n"
@@ -585,7 +586,9 @@ int main(int argc, char **argv)
 				uint32_t offset = e->frame > pos ? (uint32_t)(e->frame - pos) : 0;
 				if (e->tempo_change)
 					continue;
-				int port = e->port == SMF_PORT_UNSET ? opt.port : (e->port & 1) ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A;
+				if (e->port != SMF_PORT_UNSET && e->port > 1)
+					continue;
+				int port = e->port == SMF_PORT_UNSET ? opt.port : e->port ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A;
 				if (e->status[0] == 0xf0 && e->bytes)
 				{
 					scemu_midi_write(m, port, e->status, 1, offset);

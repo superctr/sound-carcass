@@ -177,7 +177,7 @@ static int smf_parse_track(smf_t *s, const uint8_t *p, const uint8_t *end)
 				e->tempo = ((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2];
 			}
 			else if (type == 0x21 && length == 1)
-				port = p[0] & 1;
+				port = p[0];
 			if (type == 0x2f)
 				break;
 			p += length;
@@ -423,6 +423,8 @@ int main(int argc, char **argv)
 			const midi_event_t *e = &smf.events[next_event++];
 			uint32_t offset = e->frame > done ? (uint32_t)(e->frame - done) : 0;
 			if (e->tempo_change)
+				continue;
+			if (e->port > 1)
 				continue;
 			int port = e->port ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A;
 			if (e->status[0] == 0xf0 && e->bytes)

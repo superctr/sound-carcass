@@ -74,7 +74,8 @@ static int parse_track(smf_t *s, const uint8_t *p, const uint8_t *end)
 			else if (type == 0x21 && length == 1)
 			{
 				port = p[0];
-				s->ports |= (uint8_t)(1u << (port & 1));
+				if (port < 2)
+					s->ports |= (uint8_t)(1u << port);
 			}
 			else if (type == 0x03 && !s->name[0] && length)
 			{
