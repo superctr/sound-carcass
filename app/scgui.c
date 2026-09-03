@@ -48,6 +48,9 @@ typedef struct app
 	GtkWidget *midi_drop[MIDI_SLOTS];
 	int midi_choice[MIDI_SLOTS];   /* index into ports, or -1 */
 	GtkWidget *combo_popover;
+	GtkWidget *more;               /* the revealer with the less-used settings */
+	machine_reset_t reset;
+	scemu_map_t map;
 	int combo_ids[64];
 	int combo_hold_count;
 	scemu_button_t combo_hold[4];
@@ -355,7 +358,29 @@ static void on_midi_refresh(GtkButton *b, gpointer user)
 	midi_fill(app);
 }
 
-static GtkWidget *midi_section(app_t *app)
+static void on_reset_selected(GObject *drop, GParamSpec *spec, gpointer user)
+{
+	app_t *app = user;
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(drop));
+	if (sel < MACHINE_RESET_COUNT)
+	{
+		app->reset = (machine_reset_t)sel;
+		machine_set_reset(app->mc, app->reset);
+	}
+}
+
+static void on_map_selected(GObject *drop, GParamSpec *spec, gpointer user)
+{
+	app_t *app = user;
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(drop));
+	if (sel <= SCEMU_MAP_SC88PRO)
+	{
+		app->map = (scemu_map_t)sel;
+		machine_set_map(app->mc, app->map);
+	}
+}
+
+static GtkWidget *settings_grid(void)
 {
 	GtkWidget *grid = gtk_grid_new();
 	gtk_grid_set_row_spacing(GTK_GRID(grid), 4);
@@ -364,24 +389,70 @@ static GtkWidget *midi_section(app_t *app)
 	gtk_widget_set_margin_end(grid, 8);
 	gtk_widget_set_margin_top(grid, 8);
 	gtk_widget_set_margin_bottom(grid, 8);
-	for (int slot = 0; slot < MIDI_SLOTS; slot++)
-	{
-		GtkWidget *label = gtk_label_new(midi_slot_names[slot]);
-		gtk_label_set_xalign(GTK_LABEL(label), 0);
-		gtk_grid_attach(GTK_GRID(grid), label, 0, slot, 1, 1);
-		app->midi_drop[slot] = gtk_drop_down_new(NULL, NULL);
-		gtk_widget_set_hexpand(app->midi_drop[slot], TRUE);
-		g_object_set_data(G_OBJECT(app->midi_drop[slot]), "slot", GINT_TO_POINTER(slot));
-		g_signal_connect(app->midi_drop[slot], "notify::selected", G_CALLBACK(on_midi_selected), app);
-		gtk_grid_attach(GTK_GRID(grid), app->midi_drop[slot], 1, slot, 1, 1);
-	}
+	return grid;
+}
+
+static void grid_row(GtkWidget *grid, int row, const char *name, GtkWidget *widget)
+{
+	GtkWidget *label = gtk_label_new(name);
+	gtk_label_set_xalign(GTK_LABEL(label), 0);
+	gtk_grid_attach(GTK_GRID(grid), label, 0, row, 1, 1);
+	gtk_widget_set_hexpand(widget, TRUE);
+	gtk_grid_attach(GTK_GRID(grid), widget, 1, row, 1, 1);
+}
+
+static GtkWidget *midi_drop(app_t *app, int slot)
+{
+	app->midi_drop[slot] = gtk_drop_down_new(NULL, NULL);
+	g_object_set_data(G_OBJECT(app->midi_drop[slot]), "slot", GINT_TO_POINTER(slot));
+	g_signal_connect(app->midi_drop[slot], "notify::selected", G_CALLBACK(on_midi_selected), app);
+	return app->midi_drop[slot];
+}
+
+/* the ports a user looks for first, always in view */
+static GtkWidget *midi_section(app_t *app)
+{
+	GtkWidget *grid = settings_grid();
+	for (int slot = 0; slot < 3; slot++)
+		grid_row(grid, slot, midi_slot_names[slot], midi_drop(app, slot));
 	GtkWidget *refresh = gtk_button_new_from_icon_name("view-refresh-symbolic");
 	gtk_widget_set_tooltip_text(refresh, "Look for ports again");
 	gtk_widget_set_valign(refresh, GTK_ALIGN_START);
 	g_signal_connect(refresh, "clicked", G_CALLBACK(on_midi_refresh), app);
 	gtk_grid_attach(GTK_GRID(grid), refresh, 2, 0, 1, 1);
-	midi_fill(app);
 	return grid;
+}
+
+/* the rest, behind the toolbar's toggle */
+static GtkWidget *more_section(app_t *app)
+{
+	GtkWidget *grid = settings_grid();
+	for (int slot = 3; slot < MIDI_SLOTS; slot++)
+		grid_row(grid, slot - 3, midi_slot_names[slot], midi_drop(app, slot));
+
+	GtkStringList *resets = gtk_string_list_new(machine_reset_names);
+	GtkWidget *reset = gtk_drop_down_new(G_LIST_MODEL(resets), NULL);
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(reset), app->reset);
+	g_signal_connect(reset, "notify::selected", G_CALLBACK(on_reset_selected), app);
+	grid_row(grid, 2, "Before each song", reset);
+
+	static const char *const map_names[] = { "as the song selects", "SC-55 map", "SC-88 map", "SC-88Pro map", NULL };
+	GtkStringList *maps = gtk_string_list_new(map_names);
+	GtkWidget *map = gtk_drop_down_new(G_LIST_MODEL(maps), NULL);
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(map), app->map);
+	g_signal_connect(map, "notify::selected", G_CALLBACK(on_map_selected), app);
+	grid_row(grid, 3, "Instrument map", map);
+
+	app->more = gtk_revealer_new();
+	gtk_revealer_set_child(GTK_REVEALER(app->more), grid);
+	gtk_revealer_set_reveal_child(GTK_REVEALER(app->more), FALSE);
+	return app->more;
+}
+
+static void on_more_toggled(GtkToggleButton *b, gpointer user)
+{
+	app_t *app = user;
+	gtk_revealer_set_reveal_child(GTK_REVEALER(app->more), gtk_toggle_button_get_active(b));
 }
 
 static GtkWidget *toolbar_button(const char *icon, const char *tip, GCallback cb, app_t *app)
@@ -418,6 +489,11 @@ static void playlist_show(app_t *app)
 		gtk_widget_set_hexpand(spacer, TRUE);
 		gtk_box_append(GTK_BOX(bar), spacer);
 		gtk_box_append(GTK_BOX(bar), toolbar_button("edit-clear-all-symbolic", "Clear the list", G_CALLBACK(on_clear_clicked), app));
+		GtkWidget *more = gtk_toggle_button_new();
+		gtk_button_set_icon_name(GTK_BUTTON(more), "emblem-system-symbolic");
+		gtk_widget_set_tooltip_text(more, "More settings: the song's own outputs, the reset before each song, the instrument map");
+		g_signal_connect(more, "toggled", G_CALLBACK(on_more_toggled), app);
+		gtk_box_append(GTK_BOX(bar), more);
 		gtk_box_append(GTK_BOX(box), bar);
 
 		app->list = gtk_list_box_new();
@@ -432,6 +508,8 @@ static void playlist_show(app_t *app)
 		gtk_box_append(GTK_BOX(box), scroll);
 		gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
 		gtk_box_append(GTK_BOX(box), midi_section(app));
+		gtk_box_append(GTK_BOX(box), more_section(app));
+		midi_fill(app);
 		gtk_window_set_child(GTK_WINDOW(w), box);
 		app->playlist_window = w;
 	}
@@ -762,6 +840,7 @@ int main(int argc, char **argv)
 	app.current = -1;
 	app.pressed_element = -1;
 	app.combo_press = -1;
+	app.reset = MACHINE_RESET_GS;
 	for (int n = 0; n < MIDI_SLOTS; n++)
 		app.midi_choice[n] = -1;
 	app.power = true;
@@ -829,6 +908,7 @@ int main(int argc, char **argv)
 	gtk_widget_add_controller(app.window, key);
 	g_signal_connect(app.window, "close-request", G_CALLBACK(on_close), &app);
 
+	app.map = opt.map;
 	panel_set_knob(app.panel, app.knob);
 	machine_set_gain(app.mc, app.knob * app.knob);
 	gtk_window_present(GTK_WINDOW(app.window));

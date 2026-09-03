@@ -21,7 +21,8 @@
 
 typedef enum command_kind
 {
-	CMD_PLAY, CMD_PAUSE, CMD_STOP, CMD_BUTTON, CMD_POWER, CMD_GAIN, CMD_MIDI_IN, CMD_MIDI_OUT, CMD_QUIT
+	CMD_PLAY, CMD_PAUSE, CMD_STOP, CMD_BUTTON, CMD_POWER, CMD_GAIN, CMD_MIDI_IN, CMD_MIDI_OUT,
+	CMD_RESET, CMD_MAP, CMD_QUIT
 } command_kind_t;
 
 typedef struct command
@@ -56,6 +57,7 @@ struct machine
 	size_t next_event;
 	bool held[SCEMU_BUTTON_COUNT];
 	float gain;
+	machine_reset_t reset;
 	double clock_start;
 	uint64_t clock_frames;
 	bool started;
@@ -195,18 +197,32 @@ static void load_song(machine_t *mc, const char *path)
 		return;
 	}
 	mc->have_smf = true;
-	/* every song starts from the machine as it came up, unless the user
-	 * keeps the settings across sessions, or there is no cached boot */
-	if (!mc->opt.keep_settings && session_restore(&mc->session))
-	{
-		hold_keys(mc);
-		scemu_set_map(mc->m, mc->opt.map);
-		scemu_set_midi_rate(mc->m, mc->opt.midi_rate);
-	}
+	static const uint8_t gm_on[] = { 0xf0, 0x7e, 0x7f, 0x09, 0x01, 0xf7 };
+	static const uint8_t gm2_on[] = { 0xf0, 0x7e, 0x7f, 0x09, 0x03, 0xf7 };
 	static const uint8_t gs_reset[] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7f, 0x00, 0x41, 0xf7 };
-	scemu_midi_write(mc->m, SCEMU_MIDI_IN_A, gs_reset, sizeof(gs_reset), 0);
-	scemu_midi_write(mc->m, SCEMU_MIDI_IN_B, gs_reset, sizeof(gs_reset), 0);
-	mc->lead = mc->rate / 4;
+	static const uint8_t mode_single[] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x00, 0x00, 0x7f, 0x00, 0x01, 0xf7 };
+	static const uint8_t mode_double[] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x00, 0x00, 0x7f, 0x01, 0x00, 0xf7 };
+	const uint8_t *msg = NULL;
+	size_t msg_size = 0;
+	switch (mc->reset)
+	{
+	case MACHINE_RESET_GM: msg = gm_on; msg_size = sizeof(gm_on); break;
+	case MACHINE_RESET_GS: msg = gs_reset; msg_size = sizeof(gs_reset); break;
+	case MACHINE_RESET_GM2: msg = gm2_on; msg_size = sizeof(gm2_on); break;
+	case MACHINE_RESET_SC88_SINGLE: msg = mode_single; msg_size = sizeof(mode_single); break;
+	case MACHINE_RESET_SC88_DOUBLE: msg = mode_double; msg_size = sizeof(mode_double); break;
+	default: break;
+	}
+	mc->lead = 0;
+	if (msg)
+	{
+		for (int port = 0; port < 2; port++)
+		{
+			scemu_midi_write(mc->m, port, msg, msg_size, 0);
+			midi_io_write(mc->midi, port ? MIDI_IO_SONG_B : MIDI_IO_SONG_A, msg, msg_size);
+		}
+		mc->lead = mc->rate / 4;
+	}
 	mc->end_frame = (uint64_t)mc->smf.last_frame + mc->lead + (uint64_t)(mc->opt.tail * mc->rate);
 	mc->playing = true;
 	mc->paused = false;
@@ -311,6 +327,14 @@ static void handle(machine_t *mc, const command_t *c)
 		break;
 	case CMD_MIDI_OUT:
 		midi_io_connect_output(mc->midi, c->a, c->b, c->c);
+		break;
+	case CMD_RESET:
+		mc->reset = (machine_reset_t)c->a;
+		break;
+	case CMD_MAP:
+		mc->opt.map = (scemu_map_t)c->a;
+		if (mc->power)
+			scemu_set_map(mc->m, mc->opt.map);
 		break;
 	case CMD_QUIT:
 		break;
@@ -469,6 +493,7 @@ machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size)
 			snprintf(mc->audio_driver, sizeof(mc->audio_driver), "%s", audio_driver(mc->audio));
 	}
 	mc->gain = 0.75f * 0.75f;
+	mc->reset = MACHINE_RESET_GS;
 	mc->midi = midi_io_open("scgui");
 	scemu_set_midi_out(mc->m, midi_out, mc);
 	pthread_mutex_init(&mc->lock, NULL);
@@ -540,6 +565,22 @@ void machine_power(machine_t *mc, bool on)
 void machine_set_gain(machine_t *mc, float gain)
 {
 	command_t c = { CMD_GAIN, 0, 0, 0, gain, NULL };
+	post(mc, c);
+}
+
+const char *const machine_reset_names[MACHINE_RESET_COUNT] = {
+	"nothing", "GM System On", "GS Reset", "GM2 System On", "SC-88 Mode Set, single module", "SC-88 Mode Set, double module"
+};
+
+void machine_set_reset(machine_t *mc, machine_reset_t reset)
+{
+	command_t c = { CMD_RESET, reset, 0, 0, 0, NULL };
+	post(mc, c);
+}
+
+void machine_set_map(machine_t *mc, scemu_map_t map)
+{
+	command_t c = { CMD_MAP, map, 0, 0, 0, NULL };
 	post(mc, c);
 }
 

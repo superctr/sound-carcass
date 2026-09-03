@@ -6,9 +6,8 @@ from a playlist, with the panel's buttons under the mouse.
     scgui [options] [file.mid ...]
 
 It finds its ROM images the way `scplay` does (a zip or directory named after the model beside the
-program or in `~/.mame/roms`, or `--rom`), boots the firmware once and caches the booted machine, and
-starts every song from that fresh machine unless `--keep-settings` is given.  Files on the command
-line become the playlist and the first one plays.
+program or in `~/.mame/roms`, or `--rom`), and boots the firmware once, caching the booted machine.
+Files on the command line become the playlist and the first one plays.
 
 | option | |
 |---|---|
@@ -17,7 +16,7 @@ line become the playlist and the first one plays.
 | `--size 4 \| 8` | the window size, named by the display's dot pitch in pixels: 4 is 1399 × 440, 8 twice that.  On a HiDPI screen the 8 is used for a 4 automatically |
 | `--map sc55 \| sc88 \| sc88pro` | play every part from that instrument map, as in scplay |
 | `--midi-rate BAUD` | the speed of the MIDI input, as in scplay |
-| `--keep-settings` | keep the machine's settings memory across sessions, and across songs |
+| `--keep-settings` | keep the machine's settings memory across sessions |
 | `--no-cache` | boot the firmware every time |
 | `--no-audio` | no sound card; the machine runs at real time anyway |
 | `--tail N` | seconds to keep running after a song's last event (default 4) |
@@ -43,10 +42,12 @@ Keys: `space` pause, `n` / `p` next and previous song, `l` the playlist, `q` qui
 ## The playlist
 
 A separate window: add files (the file chooser takes several at once), previous / pause / stop /
-next, clear.  Double-click a row to play it; when a song ends the next one starts.  Every song is preceded by a GS
-reset, a quarter second before its first event; pausing or stopping sends all notes off and all sound
-off on every part first, so nothing hangs.  The title bar of
-the main window shows the song's title (UTF-8 or Shift-JIS, as in scplay).
+next, clear.  Double-click a row to play it; when a song ends the next one starts.  Every song is preceded by the
+message chosen under "Before each song" (a GS Reset by default; GM or GM2 System On, an SC-88 mode
+set, or nothing), a quarter second before its first event, so a song without a reset of its own does
+not inherit the last one's settings; pausing or stopping sends all notes off and all sound off on
+every part first, so nothing hangs.  The title bar of the main window shows the song's title (UTF-8
+or Shift-JIS, as in scplay).
 
 ## MIDI ports
 
@@ -59,7 +60,10 @@ sequencer; `scgui` is a client with ports of its own, so other programs can conn
 | MIDI OUT | where the machine's own MIDI OUT goes |
 | Song to A, Song to B | the song being played is also sent here, port A's and port B's tracks separately, with the same GS reset and the same notes-off on pause and stop: for a real unit playing along, e.g. an SC-8850's Part A and Part B |
 
-The refresh button looks for ports again after plugging something in.
+The refresh button looks for ports again after plugging something in.  The first three are always in
+view; the toolbar's gear button reveals the song outputs together with the message sent before each
+song and the instrument map override ("as the song selects", or one of the three maps forced on every
+part, the same as `--map`).
 
 ## Building
 

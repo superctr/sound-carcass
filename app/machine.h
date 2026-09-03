@@ -59,6 +59,22 @@ void machine_button(machine_t *mc, scemu_button_t b, bool down);
 void machine_power(machine_t *mc, bool on);            /* off: silence; on: reset and boot, keys held */
 void machine_set_gain(machine_t *mc, float gain);       /* 0..1, applied to the output */
 
+/* What goes to the machine before every song, on both ports. */
+typedef enum machine_reset
+{
+	MACHINE_RESET_NONE,
+	MACHINE_RESET_GM,          /* GM System On */
+	MACHINE_RESET_GS,          /* GS Reset (the default) */
+	MACHINE_RESET_GM2,         /* GM2 System On */
+	MACHINE_RESET_SC88_SINGLE, /* SC-88 System Mode Set, single module */
+	MACHINE_RESET_SC88_DOUBLE, /* SC-88 System Mode Set, double module */
+	MACHINE_RESET_COUNT
+} machine_reset_t;
+extern const char *const machine_reset_names[MACHINE_RESET_COUNT];
+
+void machine_set_reset(machine_t *mc, machine_reset_t reset);
+void machine_set_map(machine_t *mc, scemu_map_t map);   /* takes effect at once */
+
 /* Host MIDI ports (midi_io.h): connect one of the machine's inputs (MIDI IN
  * A, B) to a source, or one of its outputs (MIDI OUT, the song's ports A
  * and B for a real unit playing along) to a destination; client -1
