@@ -34,8 +34,9 @@ Files on the command line become the playlist and the first one plays.
 - **The MIDI IN B jack** opens the playlist, **the PHONES jack** the audio window.
 
 - **Combinations from the manual**: a middle-click (or Ctrl and the right button) on a key opens a
-  menu of every multi-key operation the owner's manual lists for that key; choosing one holds and
-  presses the keys for you.  The list is `docs/panel/combinations.md` in the project.
+  menu of every multi-key operation the owner's manual and the service notes list for that key, each
+  with its keys spelled out; the keys light up on the panel while the pointer is over an entry, and
+  choosing one holds and presses them for you (a power-on combination through a power cycle).  The list is `docs/panel/combinations.md` in the project.
 
 Keys: `space` pause, `n` / `p` next and previous song, `l` the playlist, `q` quit.
 

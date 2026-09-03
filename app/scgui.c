@@ -662,6 +662,86 @@ static void element_action(app_t *app, int e)
 	}
 }
 
+/* the panel's own words for a key, for the combination menu */
+static const char *const button_label[SCEMU_BUTTON_COUNT] = {
+	[SCEMU_BUTTON_ALL] = "ALL", [SCEMU_BUTTON_MUTE] = "MUTE",
+	[SCEMU_BUTTON_SC55_MAP] = "SC-55 MAP", [SCEMU_BUTTON_SC88_MAP] = "SC-88 MAP",
+	[SCEMU_BUTTON_PREVIEW] = "PREVIEW (push the knob)",
+	[SCEMU_BUTTON_PART_LEFT] = "PART ◀", [SCEMU_BUTTON_PART_RIGHT] = "PART ▶",
+	[SCEMU_BUTTON_INSTRUMENT_LEFT] = "INSTRUMENT ◀", [SCEMU_BUTTON_INSTRUMENT_RIGHT] = "INSTRUMENT ▶",
+	[SCEMU_BUTTON_LEVEL_LEFT] = "LEVEL ◀", [SCEMU_BUTTON_LEVEL_RIGHT] = "LEVEL ▶",
+	[SCEMU_BUTTON_PAN_LEFT] = "PAN ◀", [SCEMU_BUTTON_PAN_RIGHT] = "PAN ▶",
+	[SCEMU_BUTTON_REVERB_LEFT] = "REVERB ◀", [SCEMU_BUTTON_REVERB_RIGHT] = "REVERB ▶",
+	[SCEMU_BUTTON_CHORUS_LEFT] = "CHORUS ◀", [SCEMU_BUTTON_CHORUS_RIGHT] = "CHORUS ▶",
+	[SCEMU_BUTTON_KEY_SHIFT_LEFT] = "KEY SHIFT/DELAY ◀", [SCEMU_BUTTON_KEY_SHIFT_RIGHT] = "KEY SHIFT/DELAY ▶",
+	[SCEMU_BUTTON_MIDI_CH_LEFT] = "MIDI CH ◀", [SCEMU_BUTTON_MIDI_CH_RIGHT] = "MIDI CH ▶",
+	[SCEMU_BUTTON_USER_INST] = "USER INST/EFX", [SCEMU_BUTTON_SELECT] = "SELECT/EFX ON/OFF",
+	[SCEMU_BUTTON_EDIT1_LEFT] = "VIB RATE·ATTACK·EFX TYPE ◀", [SCEMU_BUTTON_EDIT1_RIGHT] = "VIB RATE·ATTACK·EFX TYPE ▶",
+	[SCEMU_BUTTON_EDIT2_LEFT] = "VIB DEPTH·CUTOFF·DECAY·EFX PARAM ◀", [SCEMU_BUTTON_EDIT2_RIGHT] = "VIB DEPTH·CUTOFF·DECAY·EFX PARAM ▶",
+	[SCEMU_BUTTON_EDIT3_LEFT] = "VIB DELAY·RESONANCE·RELEASE·EFX VALUE ◀", [SCEMU_BUTTON_EDIT3_RIGHT] = "VIB DELAY·RESONANCE·RELEASE·EFX VALUE ▶",
+};
+
+static int element_for_button(scemu_button_t b)
+{
+	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
+		if (panel_element_button((panel_element_t)e) == (int)b)
+			return e;
+	return -1;
+}
+
+static void combo_text(const combo_t *c, char *out, size_t size)
+{
+	size_t n = 0;
+	n += (size_t)snprintf(out + n, size - n, "hold ");
+	for (int k = 0; k < c->hold_count && n < size; k++)
+		n += (size_t)snprintf(out + n, size - n, "%s%s", k ? " + " : "", button_label[c->hold[k]]);
+	if (c->power_on && n < size)
+		n += (size_t)snprintf(out + n, size - n, " while switching on");
+	if (c->press != SCEMU_BUTTON_COUNT && n < size)
+		snprintf(out + n, size - n, "%s press %s", c->power_on ? ", then" : ",", button_label[c->press]);
+}
+
+/* the keys of the combination under the pointer light up on the panel */
+static void combo_highlight(app_t *app, const combo_t *c, bool on)
+{
+	for (int k = 0; k < c->hold_count; k++)
+	{
+		int e = element_for_button(c->hold[k]);
+		if (e >= 0)
+			panel_set_pressed(app->panel, (panel_element_t)e, on);
+	}
+	if (c->press != SCEMU_BUTTON_COUNT)
+	{
+		int e = element_for_button(c->press);
+		if (e >= 0)
+			panel_set_pressed(app->panel, (panel_element_t)e, on);
+	}
+}
+
+static void on_combo_enter(GtkEventControllerMotion *m, double x, double y, gpointer user)
+{
+	app_t *app = user;
+	GtkWidget *item = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(m));
+	combo_highlight(app, &combos[GPOINTER_TO_INT(g_object_get_data(G_OBJECT(item), "combo"))], true);
+}
+
+static void on_combo_leave(GtkEventControllerMotion *m, gpointer user)
+{
+	app_t *app = user;
+	GtkWidget *item = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(m));
+	combo_highlight(app, &combos[GPOINTER_TO_INT(g_object_get_data(G_OBJECT(item), "combo"))], false);
+}
+
+static void on_combo_closed(GtkPopover *popover, gpointer user)
+{
+	app_t *app = user;
+	for (int n = 0; n < combo_count; n++)
+		combo_highlight(app, &combos[n], false);
+	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
+		if ((app->latched >> e) & 1)
+			panel_set_pressed(app->panel, (panel_element_t)e, true);
+}
+
 /* a combination from the manual: the held keys go down in order, the
  * pressed one follows, and everything comes up a moment later */
 static gboolean combo_release(gpointer user)
@@ -715,26 +795,42 @@ static void combo_menu(app_t *app, int element, double x, double y)
 	{
 		app->combo_popover = gtk_popover_new();
 		gtk_widget_set_parent(app->combo_popover, app->area);
+		g_signal_connect(app->combo_popover, "closed", G_CALLBACK(on_combo_closed), app);
 	}
 	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	for (int n = 0; n < count; n++)
 	{
 		const combo_t *c = &combos[app->combo_ids[n]];
-		GtkWidget *item = gtk_button_new_with_label(c->name);
+		char keys[300], *name = g_markup_escape_text(c->name, -1);
+		combo_text(c, keys, sizeof(keys));
+		char *keys_markup = g_markup_escape_text(keys, -1);
+		char *markup = g_strdup_printf("<b>%s</b>\n<small>%s</small>", name, keys_markup);
+		GtkWidget *label = gtk_label_new(NULL);
+		gtk_label_set_markup(GTK_LABEL(label), markup);
+		gtk_label_set_xalign(GTK_LABEL(label), 0);
+		g_free(markup);
+		g_free(keys_markup);
+		g_free(name);
+		GtkWidget *item = gtk_button_new();
+		gtk_button_set_child(GTK_BUTTON(item), label);
 		gtk_button_set_has_frame(GTK_BUTTON(item), FALSE);
-		gtk_label_set_xalign(GTK_LABEL(gtk_button_get_child(GTK_BUTTON(item))), 0);
 		char tip[400];
 		snprintf(tip, sizeof(tip), "%s  (%s p.%d)", c->effect, c->power_on ? "service notes" : "manual", c->page);
 		gtk_widget_set_tooltip_text(item, tip);
 		g_object_set_data(G_OBJECT(item), "combo", GINT_TO_POINTER(app->combo_ids[n]));
 		g_signal_connect(item, "clicked", G_CALLBACK(on_combo_chosen), app);
+		GtkEventController *hover = gtk_event_controller_motion_new();
+		g_signal_connect(hover, "enter", G_CALLBACK(on_combo_enter), app);
+		g_signal_connect(hover, "leave", G_CALLBACK(on_combo_leave), app);
+		gtk_widget_add_controller(item, hover);
 		gtk_box_append(GTK_BOX(box), item);
 	}
 	GtkWidget *scroll = gtk_scrolled_window_new();
 	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll), GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
 	gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), box);
 	gtk_scrolled_window_set_propagate_natural_height(GTK_SCROLLED_WINDOW(scroll), TRUE);
-	gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 360);
+	gtk_scrolled_window_set_max_content_height(GTK_SCROLLED_WINDOW(scroll), 420);
+	gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scroll), 320);
 	gtk_popover_set_child(GTK_POPOVER(app->combo_popover), scroll);
 	GdkRectangle at = { (int)x, (int)y, 1, 1 };
 	gtk_popover_set_pointing_to(GTK_POPOVER(app->combo_popover), &at);
