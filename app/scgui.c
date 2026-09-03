@@ -852,12 +852,9 @@ static void combo_menu(app_t *app, int element, double x, double y)
 	gtk_popover_popup(GTK_POPOVER(app->combo_popover));
 }
 
-static void on_pressed(GtkGestureClick *g, int n_press, double x, double y, gpointer user)
+static void press(app_t *app, guint button, GdkModifierType mods, double x, double y)
 {
-	app_t *app = user;
 	int e = panel_hit(app->panel, (int)(x * app->scale), (int)(y * app->scale));
-	guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(g));
-	GdkModifierType mods = gtk_event_controller_get_current_event_state(GTK_EVENT_CONTROLLER(g));
 	if (e < 0)
 		return;
 	int b = panel_element_button((panel_element_t)e);
@@ -896,10 +893,8 @@ static void on_pressed(GtkGestureClick *g, int n_press, double x, double y, gpoi
 		element_action(app, e);
 }
 
-static void on_released(GtkGestureClick *g, int n_press, double x, double y, gpointer user)
+static void release(app_t *app, guint button)
 {
-	app_t *app = user;
-	guint button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(g));
 	if (button == GDK_BUTTON_SECONDARY)
 	{
 		int oe = app->opposite_element;
@@ -934,29 +929,21 @@ static void on_motion(GtkEventControllerMotion *c, double x, double y, gpointer 
 	app->pointer_y = y;
 }
 
-/* the toolkit gave up on the press (another button joined, the pointer
- * left): whatever the mouse holds comes up */
-static void on_cancel(GtkGesture *g, GdkEventSequence *seq, gpointer user)
+/* the raw button events: the toolkit's click gestures track one button at
+ * a time and end the first press when a second button joins, which is
+ * exactly the gesture the pairs want */
+static gboolean on_button_event(GtkEventControllerLegacy *c, GdkEvent *event, gpointer user)
 {
 	app_t *app = user;
-	if (app->opposite_element >= 0)
-	{
-		machine_button(app->mc, (scemu_button_t)panel_element_button((panel_element_t)app->opposite_element), false);
-		panel_set_pressed(app->panel, (panel_element_t)app->opposite_element, false);
-		app->opposite_element = -1;
-	}
-	if (app->pressed_element >= 0)
-	{
-		int e = app->pressed_element;
-		app->pressed_element = -1;
-		machine_button(app->mc, (scemu_button_t)panel_element_button((panel_element_t)e), false);
-		panel_set_pressed(app->panel, (panel_element_t)e, false);
-		if (app->latched_down)
-		{
-			latched_press(app, false);
-			latched_clear(app);
-		}
-	}
+	GdkEventType type = gdk_event_get_event_type(event);
+	if (type != GDK_BUTTON_PRESS && type != GDK_BUTTON_RELEASE)
+		return FALSE;
+	guint button = gdk_button_event_get_button(event);
+	if (type == GDK_BUTTON_PRESS)
+		press(app, button, gdk_event_get_modifier_state(event), app->pointer_x, app->pointer_y);
+	else
+		release(app, button);
+	return TRUE;
 }
 
 static gboolean on_scroll(GtkEventControllerScroll *c, double dx, double dy, gpointer user)
@@ -1070,18 +1057,9 @@ int main(int argc, char **argv)
 	gtk_window_set_resizable(GTK_WINDOW(app.window), FALSE);
 	set_title(&app);
 
-	/* one gesture per mouse button, so the buttons are tracked independently
-	 * and a second one joining does not end the first's press */
-	for (guint b = GDK_BUTTON_PRIMARY; b <= GDK_BUTTON_SECONDARY; b++)
-	{
-		GtkGesture *click = gtk_gesture_click_new();
-		gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), b);
-		g_signal_connect(click, "pressed", G_CALLBACK(on_pressed), &app);
-		g_signal_connect(click, "released", G_CALLBACK(on_released), &app);
-		if (b == GDK_BUTTON_PRIMARY)
-			g_signal_connect(click, "cancel", G_CALLBACK(on_cancel), &app);
-		gtk_widget_add_controller(app.area, GTK_EVENT_CONTROLLER(click));
-	}
+	GtkEventController *buttons = gtk_event_controller_legacy_new();
+	g_signal_connect(buttons, "event", G_CALLBACK(on_button_event), &app);
+	gtk_widget_add_controller(app.area, buttons);
 	GtkEventController *motion = gtk_event_controller_motion_new();
 	g_signal_connect(motion, "motion", G_CALLBACK(on_motion), &app);
 	gtk_widget_add_controller(app.area, motion);
