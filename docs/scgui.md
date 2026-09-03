@@ -24,13 +24,14 @@ line become the playlist and the first one plays.
 
 ## The panel
 
-- **Buttons** work with the mouse: press and hold with the left button.  The right button latches a
-  key down until it is right-clicked again, for the combinations the firmware reads while another
-  key is held, and at power-on.
+- **Buttons** work with the mouse: press and hold with the left button.  The right button queues a
+  key (it shows pressed but is not sent yet); the queued keys go down together with the next key you
+  left-click, before it, and come up with it.  That is how the combinations the firmware reads while
+  another key is held are entered with one mouse, and a queued key is also held through a power-on.
 - **The volume knob** turns with the scroll wheel over it; it is the program's output gain, the
   machine itself has no volume control in software.  The knob's push switch (PREVIEW) is a button.
 - **The power switch** switches the emulated unit off and on.  Switching on boots the firmware for
-  real (not from the cache), with any latched keys held, so the power-on combinations work.
+  real (not from the cache), with any queued keys held, so the power-on combinations work.
 - **The MIDI IN B jack** opens the playlist, **the PHONES jack** the audio window.
 
 Keys: `space` pause, `n` / `p` next and previous song, `l` the playlist, `q` quit.
@@ -38,7 +39,9 @@ Keys: `space` pause, `n` / `p` next and previous song, `l` the playlist, `q` qui
 ## The playlist
 
 A separate window: add files (the file chooser takes several at once), previous / pause / stop /
-next, clear.  Double-click a row to play it; when a song ends the next one starts.  The title bar of
+next, clear.  Double-click a row to play it; when a song ends the next one starts.  Every song is preceded by a GS
+reset, a quarter second before its first event; pausing or stopping sends all notes off and all sound
+off on every part first, so nothing hangs.  The title bar of
 the main window shows the song's title (UTF-8 or Shift-JIS, as in scplay).
 
 ## Building

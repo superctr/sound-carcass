@@ -34,7 +34,10 @@ typedef struct app
 	int pressed_element;       /* the element under the held mouse button, or -1 */
 	uint64_t seen_generation;
 	machine_state_t state;
-	uint64_t latched;          /* elements held with the right button */
+	uint64_t latched;          /* elements queued with the right button, pressed with the next key */
+	bool latched_down;         /* the queued keys are down right now */
+	bool release_after_boot;
+	double pointer_x, pointer_y;
 } app_t;
 
 /* ---------------------------------------------------------------- options */
@@ -116,6 +119,8 @@ static int parse_options(int argc, char **argv, options_t *o, GPtrArray *songs)
 /* ---------------------------------------------------------------- playlist */
 
 static void play_index(app_t *app, int index);
+static void latched_press(app_t *app, bool down);
+static void latched_clear(app_t *app);
 
 static const char *song_label(const char *path, char *buf, size_t size)
 {
@@ -376,10 +381,33 @@ static gboolean on_tick(gpointer user)
 			set_title(app);
 		if (finished_now && app->current >= 0 && app->current + 1 < (int)app->songs->len)
 			play_index(app, app->current + 1);
+		if (app->release_after_boot && !st.booting && st.power)
+		{
+			app->release_after_boot = false;
+			latched_press(app, false);
+			latched_clear(app);
+		}
 	}
 	if (panel_dirty(app->panel))
 		gtk_widget_queue_draw(app->area);
 	return G_SOURCE_CONTINUE;
+}
+
+/* the queued keys go down, in the order they were queued, before the key they modify */
+static void latched_press(app_t *app, bool down)
+{
+	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
+		if ((app->latched >> e) & 1)
+			machine_button(app->mc, (scemu_button_t)panel_element_button((panel_element_t)e), down);
+	app->latched_down = down;
+}
+
+static void latched_clear(app_t *app)
+{
+	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
+		if ((app->latched >> e) & 1)
+			panel_set_pressed(app->panel, (panel_element_t)e, false);
+	app->latched = 0;
 }
 
 static void element_action(app_t *app, int e)
@@ -388,6 +416,11 @@ static void element_action(app_t *app, int e)
 	{
 	case PANEL_SWITCH_POWER:
 		app->power = !app->power;
+		if (app->power && app->latched)
+		{
+			latched_press(app, true);
+			app->release_after_boot = true;
+		}
 		machine_power(app->mc, app->power);
 		if (!app->power)
 		{
@@ -420,12 +453,12 @@ static void on_pressed(GtkGestureClick *g, int n_press, double x, double y, gpoi
 		if (button == GDK_BUTTON_SECONDARY)
 		{
 			app->latched ^= (uint64_t)1 << e;
-			bool down = (app->latched >> e) & 1;
-			machine_button(app->mc, (scemu_button_t)b, down);
-			panel_set_pressed(app->panel, (panel_element_t)e, down);
+			panel_set_pressed(app->panel, (panel_element_t)e, (app->latched >> e) & 1);
 		}
 		else
 		{
+			if (app->latched && !app->latched_down)
+				latched_press(app, true);
 			app->pressed_element = e;
 			machine_button(app->mc, (scemu_button_t)b, true);
 			panel_set_pressed(app->panel, (panel_element_t)e, true);
@@ -442,27 +475,27 @@ static void on_released(GtkGestureClick *g, int n_press, double x, double y, gpo
 	if (e < 0)
 		return;
 	app->pressed_element = -1;
-	if ((app->latched >> e) & 1)
-		return;
 	int b = panel_element_button((panel_element_t)e);
 	machine_button(app->mc, (scemu_button_t)b, false);
 	panel_set_pressed(app->panel, (panel_element_t)e, false);
+	if (app->latched_down)
+	{
+		latched_press(app, false);
+		latched_clear(app);
+	}
+}
+
+static void on_motion(GtkEventControllerMotion *c, double x, double y, gpointer user)
+{
+	app_t *app = user;
+	app->pointer_x = x;
+	app->pointer_y = y;
 }
 
 static gboolean on_scroll(GtkEventControllerScroll *c, double dx, double dy, gpointer user)
 {
 	app_t *app = user;
-	double x, y;
-	GdkEvent *ev = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(c));
-	if (!ev || !gdk_event_get_position(ev, &x, &y))
-		return FALSE;
-	graphene_point_t in = GRAPHENE_POINT_INIT((float)x, (float)y), out;
-	if (gtk_widget_compute_point(app->window, app->area, &in, &out))
-	{
-		x = out.x;
-		y = out.y;
-	}
-	int e = panel_hit(app->panel, (int)(x * app->scale), (int)(y * app->scale));
+	int e = panel_hit(app->panel, (int)(app->pointer_x * app->scale), (int)(app->pointer_y * app->scale));
 	if (e != PANEL_KNOB_VOLUME && e != PANEL_BUTTON_PREVIEW)
 		return FALSE;
 	app->knob -= (float)dy * KNOB_STEP;
@@ -570,6 +603,9 @@ int main(int argc, char **argv)
 	g_signal_connect(click, "pressed", G_CALLBACK(on_pressed), &app);
 	g_signal_connect(click, "released", G_CALLBACK(on_released), &app);
 	gtk_widget_add_controller(app.area, GTK_EVENT_CONTROLLER(click));
+	GtkEventController *motion = gtk_event_controller_motion_new();
+	g_signal_connect(motion, "motion", G_CALLBACK(on_motion), &app);
+	gtk_widget_add_controller(app.area, motion);
 	GtkEventController *scroll = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
 	g_signal_connect(scroll, "scroll", G_CALLBACK(on_scroll), &app);
 	gtk_widget_add_controller(app.area, scroll);

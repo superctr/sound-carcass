@@ -69,14 +69,49 @@ typedef enum panel_sprite_id
 	PANEL_SPRITE_LED_SC88_MAP,
 	PANEL_SPRITE_LED_USER_INST,
 	PANEL_SPRITE_LED_USER_INST_RED,
+	PANEL_SPRITE_LED_USER_INST_EFX,
 	PANEL_SPRITE_LED_EDIT1,
 	PANEL_SPRITE_LED_EDIT2,
 	PANEL_SPRITE_LED_EDIT3,
 	PANEL_SPRITE_LCD_MARK_L,
 	PANEL_SPRITE_LCD_MARK_R,
 	PANEL_SPRITE_KNOB_VOLUME,
+	PANEL_SPRITE_BUTTON_ALL,
+	PANEL_SPRITE_BUTTON_MUTE,
+	PANEL_SPRITE_BUTTON_SC55_MAP,
+	PANEL_SPRITE_BUTTON_SC88_MAP,
+	PANEL_SPRITE_BUTTON_PART_LEFT,
+	PANEL_SPRITE_BUTTON_PART_RIGHT,
+	PANEL_SPRITE_BUTTON_INSTRUMENT_LEFT,
+	PANEL_SPRITE_BUTTON_INSTRUMENT_RIGHT,
+	PANEL_SPRITE_BUTTON_LEVEL_LEFT,
+	PANEL_SPRITE_BUTTON_LEVEL_RIGHT,
+	PANEL_SPRITE_BUTTON_PAN_LEFT,
+	PANEL_SPRITE_BUTTON_PAN_RIGHT,
+	PANEL_SPRITE_BUTTON_REVERB_LEFT,
+	PANEL_SPRITE_BUTTON_REVERB_RIGHT,
+	PANEL_SPRITE_BUTTON_CHORUS_LEFT,
+	PANEL_SPRITE_BUTTON_CHORUS_RIGHT,
+	PANEL_SPRITE_BUTTON_KEY_SHIFT_LEFT,
+	PANEL_SPRITE_BUTTON_KEY_SHIFT_RIGHT,
+	PANEL_SPRITE_BUTTON_MIDI_CH_LEFT,
+	PANEL_SPRITE_BUTTON_MIDI_CH_RIGHT,
+	PANEL_SPRITE_BUTTON_USER_INST,
+	PANEL_SPRITE_BUTTON_SELECT,
+	PANEL_SPRITE_BUTTON_EDIT1_LEFT,
+	PANEL_SPRITE_BUTTON_EDIT1_RIGHT,
+	PANEL_SPRITE_BUTTON_EDIT2_LEFT,
+	PANEL_SPRITE_BUTTON_EDIT2_RIGHT,
+	PANEL_SPRITE_BUTTON_EDIT3_LEFT,
+	PANEL_SPRITE_BUTTON_EDIT3_RIGHT,
+	PANEL_SPRITE_BUTTON_PREVIEW,
 	PANEL_SPRITE_COUNT
 } panel_sprite_id_t;
+
+/* the sprite that is an element's key, for drawing it pressed; -1 for the rest */
+static const int16_t panel_element_sprite[PANEL_ELEMENT_COUNT] = {
+	-1, 12, -1, -1, -1, -1, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41
+};
 
 typedef struct panel_size
 {
@@ -92,7 +127,7 @@ static const char *const panel_element_name[PANEL_ELEMENT_COUNT] = {
 };
 
 static const char *const panel_sprite_name[PANEL_SPRITE_COUNT] = {
-	"led-all", "led-mute", "led-sc55-map", "led-sc88-map", "led-user-inst", "led-user-inst-red", "led-edit1", "led-edit2", "led-edit3", "lcd-mark-l", "lcd-mark-r", "knob-volume"
+	"led-all", "led-mute", "led-sc55-map", "led-sc88-map", "led-user-inst", "led-user-inst-red", "led-user-inst-efx", "led-edit1", "led-edit2", "led-edit3", "lcd-mark-l", "lcd-mark-r", "knob-volume", "button-all", "button-mute", "button-sc55-map", "button-sc88-map", "button-part-left", "button-part-right", "button-instrument-left", "button-instrument-right", "button-level-left", "button-level-right", "button-pan-left", "button-pan-right", "button-reverb-left", "button-reverb-right", "button-chorus-left", "button-chorus-right", "button-key-shift-left", "button-key-shift-right", "button-midi-ch-left", "button-midi-ch-right", "button-user-inst", "button-select", "button-edit1-left", "button-edit1-right", "button-edit2-left", "button-edit2-right", "button-edit3-left", "button-edit3-right", "button-preview"
 };
 
 #define PANEL_SIZE_COUNT 2
@@ -144,14 +179,44 @@ static const panel_size_t panel_sizes[PANEL_SIZE_COUNT] = {
 			{ { 162, 0, 74, 73 }, 926, 78 },  /* led-mute */
 			{ { 312, 0, 74, 72 }, 926, 135 },  /* led-sc55-map */
 			{ { 237, 0, 74, 73 }, 926, 192 },  /* led-sc88-map */
-			{ { 387, 0, 51, 51 }, 635, 364 },  /* led-user-inst */
-			{ { 439, 0, 51, 51 }, 635, 364 },  /* led-user-inst-red */
-			{ { 531, 0, 39, 34 }, 841, 294 },  /* led-edit1 */
-			{ { 491, 0, 39, 35 }, 841, 319 },  /* led-edit2 */
-			{ { 571, 0, 39, 34 }, 841, 345 },  /* led-edit3 */
-			{ { 611, 0, 7, 9 }, 519, 101 },  /* lcd-mark-l */
-			{ { 619, 0, 9, 9 }, 519, 208 },  /* lcd-mark-r */
+			{ { 460, 0, 51, 51 }, 635, 364 },  /* led-user-inst */
+			{ { 512, 0, 51, 51 }, 635, 364 },  /* led-user-inst-red */
+			{ { 564, 0, 51, 51 }, 635, 364 },  /* led-user-inst-efx */
+			{ { 580, 127, 39, 34 }, 841, 294 },  /* led-edit1 */
+			{ { 540, 127, 39, 35 }, 841, 319 },  /* led-edit2 */
+			{ { 620, 127, 39, 34 }, 841, 345 },  /* led-edit3 */
+			{ { 660, 127, 7, 9 }, 519, 101 },  /* lcd-mark-l */
+			{ { 668, 127, 9, 9 }, 519, 208 },  /* lcd-mark-r */
 			{ { 0, 0, 86, 87 }, 192, 41 },  /* knob-volume */
+			{ { 462, 127, 38, 36 }, 944, 41 },  /* button-all */
+			{ { 459, 88, 38, 37 }, 944, 98 },  /* button-mute */
+			{ { 498, 88, 38, 37 }, 944, 155 },  /* button-sc55-map */
+			{ { 501, 127, 38, 36 }, 944, 213 },  /* button-sc88-map */
+			{ { 616, 0, 41, 40 }, 1055, 38 },  /* button-part-left */
+			{ { 658, 0, 41, 40 }, 1123, 38 },  /* button-part-right */
+			{ { 700, 0, 76, 38 }, 1204, 40 },  /* button-instrument-left */
+			{ { 777, 0, 76, 38 }, 1272, 40 },  /* button-instrument-right */
+			{ { 537, 88, 76, 37 }, 1038, 98 },  /* button-level-left */
+			{ { 614, 88, 76, 37 }, 1106, 98 },  /* button-level-right */
+			{ { 691, 88, 76, 37 }, 1204, 98 },  /* button-pan-left */
+			{ { 768, 88, 76, 37 }, 1272, 98 },  /* button-pan-right */
+			{ { 845, 88, 76, 37 }, 1038, 156 },  /* button-reverb-left */
+			{ { 922, 88, 76, 37 }, 1106, 156 },  /* button-reverb-right */
+			{ { 0, 127, 76, 37 }, 1204, 156 },  /* button-chorus-left */
+			{ { 77, 127, 76, 37 }, 1272, 156 },  /* button-chorus-right */
+			{ { 154, 127, 76, 37 }, 1038, 214 },  /* button-key-shift-left */
+			{ { 231, 127, 76, 37 }, 1106, 214 },  /* button-key-shift-right */
+			{ { 308, 127, 76, 37 }, 1204, 214 },  /* button-midi-ch-left */
+			{ { 385, 127, 76, 37 }, 1272, 214 },  /* button-midi-ch-right */
+			{ { 854, 0, 76, 38 }, 689, 373 },  /* button-user-inst */
+			{ { 931, 0, 75, 38 }, 758, 373 },  /* button-select */
+			{ { 0, 88, 75, 38 }, 870, 373 },  /* button-edit1-left */
+			{ { 76, 88, 76, 38 }, 938, 373 },  /* button-edit1-right */
+			{ { 153, 88, 75, 38 }, 1037, 373 },  /* button-edit2-left */
+			{ { 229, 88, 76, 38 }, 1105, 373 },  /* button-edit2-right */
+			{ { 306, 88, 75, 38 }, 1203, 373 },  /* button-edit3-left */
+			{ { 382, 88, 76, 38 }, 1271, 373 },  /* button-edit3-right */
+			{ { 387, 0, 72, 71 }, 199, 49 },  /* button-preview */
 		},
 	},
 	{
@@ -200,14 +265,44 @@ static const panel_size_t panel_sizes[PANEL_SIZE_COUNT] = {
 			{ { 172, 0, 149, 147 }, 1852, 155 },  /* led-mute */
 			{ { 322, 0, 149, 147 }, 1852, 268 },  /* led-sc55-map */
 			{ { 622, 0, 149, 146 }, 1852, 384 },  /* led-sc88-map */
-			{ { 772, 0, 103, 103 }, 1269, 726 },  /* led-user-inst */
-			{ { 876, 0, 103, 103 }, 1269, 726 },  /* led-user-inst-red */
-			{ { 980, 0, 79, 70 }, 1681, 586 },  /* led-edit1 */
-			{ { 1060, 0, 80, 69 }, 1681, 638 },  /* led-edit2 */
-			{ { 1141, 0, 79, 69 }, 1681, 689 },  /* led-edit3 */
-			{ { 1238, 0, 13, 17 }, 1039, 202 },  /* lcd-mark-l */
-			{ { 1221, 0, 16, 18 }, 1039, 415 },  /* lcd-mark-r */
+			{ { 915, 0, 103, 103 }, 1269, 726 },  /* led-user-inst */
+			{ { 1019, 0, 103, 103 }, 1269, 726 },  /* led-user-inst-red */
+			{ { 1123, 0, 103, 103 }, 1269, 726 },  /* led-user-inst-efx */
+			{ { 1063, 249, 79, 70 }, 1681, 586 },  /* led-edit1 */
+			{ { 1143, 249, 80, 69 }, 1681, 638 },  /* led-edit2 */
+			{ { 1224, 249, 79, 69 }, 1681, 689 },  /* led-edit3 */
+			{ { 1321, 249, 13, 17 }, 1039, 202 },  /* lcd-mark-l */
+			{ { 1304, 249, 16, 18 }, 1039, 415 },  /* lcd-mark-r */
 			{ { 0, 0, 171, 172 }, 385, 83 },  /* knob-volume */
+			{ { 759, 249, 75, 74 }, 1889, 80 },  /* button-all */
+			{ { 835, 249, 75, 74 }, 1889, 196 },  /* button-mute */
+			{ { 911, 249, 75, 74 }, 1889, 309 },  /* button-sc55-map */
+			{ { 987, 249, 75, 74 }, 1889, 424 },  /* button-sc88-map */
+			{ { 1227, 0, 81, 81 }, 2111, 75 },  /* button-part-left */
+			{ { 1309, 0, 81, 81 }, 2246, 75 },  /* button-part-right */
+			{ { 1391, 0, 151, 75 }, 2408, 80 },  /* button-instrument-left */
+			{ { 1543, 0, 151, 75 }, 2545, 80 },  /* button-instrument-right */
+			{ { 1695, 0, 151, 75 }, 2076, 195 },  /* button-level-left */
+			{ { 1847, 0, 150, 75 }, 2213, 195 },  /* button-level-right */
+			{ { 0, 173, 151, 75 }, 2408, 195 },  /* button-pan-left */
+			{ { 152, 173, 151, 75 }, 2545, 195 },  /* button-pan-right */
+			{ { 304, 173, 151, 75 }, 2076, 311 },  /* button-reverb-left */
+			{ { 456, 173, 150, 75 }, 2213, 311 },  /* button-reverb-right */
+			{ { 607, 173, 151, 75 }, 2408, 311 },  /* button-chorus-left */
+			{ { 759, 173, 151, 75 }, 2545, 311 },  /* button-chorus-right */
+			{ { 911, 173, 151, 75 }, 2076, 426 },  /* button-key-shift-left */
+			{ { 1063, 173, 150, 75 }, 2213, 426 },  /* button-key-shift-right */
+			{ { 1214, 173, 151, 75 }, 2408, 426 },  /* button-midi-ch-left */
+			{ { 1366, 173, 151, 75 }, 2545, 426 },  /* button-midi-ch-right */
+			{ { 1518, 173, 151, 75 }, 1379, 746 },  /* button-user-inst */
+			{ { 1670, 173, 151, 75 }, 1516, 746 },  /* button-select */
+			{ { 1822, 173, 150, 75 }, 1740, 746 },  /* button-edit1-left */
+			{ { 0, 249, 151, 75 }, 1876, 746 },  /* button-edit1-right */
+			{ { 152, 249, 151, 75 }, 2073, 746 },  /* button-edit2-left */
+			{ { 304, 249, 151, 75 }, 2210, 746 },  /* button-edit2-right */
+			{ { 456, 249, 150, 75 }, 2406, 746 },  /* button-edit3-left */
+			{ { 607, 249, 151, 75 }, 2542, 746 },  /* button-edit3-right */
+			{ { 772, 0, 142, 142 }, 400, 98 },  /* button-preview */
 		},
 	},
 };

@@ -50,7 +50,7 @@ struct machine
 	/* the thread's own */
 	smf_t smf;
 	bool have_smf, playing, paused, power;
-	uint64_t pos, end_frame;
+	uint64_t pos, end_frame, lead;
 	size_t next_event;
 	bool held[SCEMU_BUTTON_COUNT];
 	float gain;
@@ -201,7 +201,11 @@ static void load_song(machine_t *mc, const char *path)
 		scemu_set_map(mc->m, mc->opt.map);
 		scemu_set_midi_rate(mc->m, mc->opt.midi_rate);
 	}
-	mc->end_frame = (uint64_t)mc->smf.last_frame + (uint64_t)(mc->opt.tail * mc->rate);
+	static const uint8_t gs_reset[] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7f, 0x00, 0x41, 0xf7 };
+	scemu_midi_write(mc->m, SCEMU_MIDI_IN_A, gs_reset, sizeof(gs_reset), 0);
+	scemu_midi_write(mc->m, SCEMU_MIDI_IN_B, gs_reset, sizeof(gs_reset), 0);
+	mc->lead = mc->rate / 4;
+	mc->end_frame = (uint64_t)mc->smf.last_frame + mc->lead + (uint64_t)(mc->opt.tail * mc->rate);
 	mc->playing = true;
 	mc->paused = false;
 	set_song(mc, session_base_name(path), mc->smf.name);
@@ -209,10 +213,11 @@ static void load_song(machine_t *mc, const char *path)
 
 static void feed_events(machine_t *mc, size_t n)
 {
-	while (mc->next_event < mc->smf.count && mc->smf.events[mc->next_event].frame < mc->pos + n)
+	while (mc->next_event < mc->smf.count && mc->smf.events[mc->next_event].frame + mc->lead < mc->pos + n)
 	{
 		const smf_event_t *e = &mc->smf.events[mc->next_event++];
-		uint32_t offset = e->frame > mc->pos ? (uint32_t)(e->frame - mc->pos) : 0;
+		uint64_t at = e->frame + mc->lead;
+		uint32_t offset = at > mc->pos ? (uint32_t)(at - mc->pos) : 0;
 		if (e->tempo_change || (e->port != SMF_PORT_UNSET && e->port > 1))
 			continue;
 		int port = e->port == 1 ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A;
@@ -228,6 +233,26 @@ static void feed_events(machine_t *mc, size_t n)
 	}
 }
 
+static void render_block(machine_t *mc, size_t n);
+
+/* every note and every sound off on every part of both ports, and time for
+ * the firmware to act on it */
+static void quiet(machine_t *mc)
+{
+	for (int port = 0; port < 2; port++)
+		for (int ch = 0; ch < 16; ch++)
+		{
+			uint8_t off[6] = { (uint8_t)(0xb0 | ch), 0x7b, 0x00, (uint8_t)(0xb0 | ch), 0x78, 0x00 };
+			scemu_midi_write(mc->m, port, off, sizeof(off), 0);
+		}
+	for (size_t done = 0; done < mc->rate / 8; done += BLOCK)
+	{
+		while (mc->audio && audio_space(mc->audio) < BLOCK)
+			sleep_ms(1);
+		render_block(mc, BLOCK);
+	}
+}
+
 static void handle(machine_t *mc, const command_t *c)
 {
 	switch (c->kind)
@@ -237,9 +262,13 @@ static void handle(machine_t *mc, const command_t *c)
 			load_song(mc, c->path);
 		break;
 	case CMD_PAUSE:
+		if (mc->power && c->a && !mc->paused)
+			quiet(mc);
 		mc->paused = c->a != 0;
 		break;
 	case CMD_STOP:
+		if (mc->power && mc->have_smf)
+			quiet(mc);
 		unload_song(mc);
 		set_song(mc, "", "");
 		break;
@@ -280,12 +309,30 @@ static void to_s16(const int32_t *in, int16_t *out, size_t samples, float gain)
 	}
 }
 
-static void *run(void *user)
+static void render_block(machine_t *mc, size_t n)
 {
-	machine_t *mc = user;
 	int32_t raw[BLOCK * 2];
 	int16_t pcm[BLOCK * 2];
 	int32_t *const out[2] = { raw, NULL };
+	scemu_render(mc->m, out, n);
+	to_s16(raw, pcm, n * 2, mc->gain);
+	if (mc->audio)
+	{
+		audio_push(mc->audio, pcm, n);
+		if (!mc->started && audio_space(mc->audio) == 0)
+		{
+			audio_pause(mc->audio, false);
+			mc->started = true;
+		}
+		else if (mc->started)
+			audio_pause(mc->audio, false);
+	}
+	mc->clock_frames += n;
+}
+
+static void *run(void *user)
+{
+	machine_t *mc = user;
 	command_t c;
 
 	boot(mc, true);
@@ -348,20 +395,7 @@ static void *run(void *user)
 			if (mc->pos >= mc->end_frame)
 				mc->playing = false;
 		}
-		scemu_render(mc->m, out, n);
-		to_s16(raw, pcm, n * 2, mc->gain);
-		if (mc->audio)
-		{
-			audio_push(mc->audio, pcm, n);
-			if (!mc->started && audio_space(mc->audio) == 0)
-			{
-				audio_pause(mc->audio, false);
-				mc->started = true;
-			}
-			else if (mc->started)
-				audio_pause(mc->audio, false);
-		}
-		mc->clock_frames += n;
+		render_block(mc, n);
 		publish(mc, false);
 	}
 }

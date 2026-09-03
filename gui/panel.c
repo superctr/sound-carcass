@@ -165,7 +165,12 @@ static uint32_t over(uint32_t src, uint32_t dst)
 	return 0xff000000u | (r << 16) | (g << 8) | b;
 }
 
-static void blit_sprite(panel_t *p, uint32_t *pixels, size_t stride, panel_sprite_id_t id)
+static uint32_t dim(uint32_t c)
+{
+	return (c & 0xff000000u) | (((c >> 16) & 0xff) * 5 / 8) << 16 | (((c >> 8) & 0xff) * 5 / 8) << 8 | ((c & 0xff) * 5 / 8);
+}
+
+static void blit_sprite_dimmed(panel_t *p, uint32_t *pixels, size_t stride, panel_sprite_id_t id, bool dimmed)
 {
 	const panel_sprite_t *s = &p->size->sprite[id];
 	for (int j = 0; j < s->atlas.h; j++)
@@ -173,8 +178,13 @@ static void blit_sprite(panel_t *p, uint32_t *pixels, size_t stride, panel_sprit
 		const uint32_t *src = p->atlas.pixels + (size_t)(s->atlas.y + j) * p->atlas.width + s->atlas.x;
 		uint32_t *dst = pixels + (size_t)(s->y + j) * stride + s->x;
 		for (int i = 0; i < s->atlas.w; i++)
-			dst[i] = over(src[i], dst[i]);
+			dst[i] = over(dimmed ? dim(src[i]) : src[i], dst[i]);
 	}
+}
+
+static void blit_sprite(panel_t *p, uint32_t *pixels, size_t stride, panel_sprite_id_t id)
+{
+	blit_sprite_dimmed(p, pixels, stride, id, false);
 }
 
 static uint32_t sample(const png_image_t *img, const panel_rect_t *r, float x, float y)
@@ -291,31 +301,21 @@ static const panel_sprite_id_t led_sprite[SCEMU_LED_COUNT] = {
 	PANEL_SPRITE_LED_USER_INST, PANEL_SPRITE_LED_USER_INST_RED,
 };
 
-static void darken(uint32_t *pixels, size_t stride, const panel_rect_t *r)
-{
-	for (int j = 0; j < r->h; j++)
-	{
-		uint32_t *row = pixels + (size_t)(r->y + j) * stride + r->x;
-		for (int i = 0; i < r->w; i++)
-		{
-			uint32_t c = row[i];
-			row[i] = 0xff000000u | (((c >> 16) & 0xff) * 5 / 8) << 16 | (((c >> 8) & 0xff) * 5 / 8) << 8 | ((c & 0xff) * 5 / 8);
-		}
-	}
-}
-
 void panel_render(panel_t *p, uint32_t *pixels, size_t stride)
 {
 	for (int y = 0; y < p->base.height; y++)
 		memcpy(pixels + (size_t)y * stride, p->base.pixels + (size_t)y * p->base.width, (size_t)p->base.width * sizeof(uint32_t));
 	draw_glass(p, pixels, stride);
+	uint32_t both = (1u << SCEMU_LED_USER_INST) | (1u << SCEMU_LED_USER_INST_RED);
 	for (int n = 0; n < SCEMU_LED_COUNT; n++)
-		if (p->leds & (1u << n))
+		if ((p->leds & (1u << n)) && ((p->leds & both) != both || !((1u << n) & both)))
 			blit_sprite(p, pixels, stride, led_sprite[n]);
-	draw_knob(p, pixels, stride);
+	if ((p->leds & both) == both)
+		blit_sprite(p, pixels, stride, PANEL_SPRITE_LED_USER_INST_EFX);
 	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
-		if (p->pressed & ((uint64_t)1 << e))
-			darken(pixels, stride, &p->size->element[e]);
+		if ((p->pressed & ((uint64_t)1 << e)) && panel_element_sprite[e] >= 0)
+			blit_sprite_dimmed(p, pixels, stride, (panel_sprite_id_t)panel_element_sprite[e], true);
+	draw_knob(p, pixels, stride);
 	p->dirty = false;
 }
 
