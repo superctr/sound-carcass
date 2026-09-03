@@ -64,6 +64,31 @@ if(SCEMU_BUILD_TOOLS)
 endif()
 
 # ---------------------------------------------------------------------------
+# the front panel compositor (needs zlib for the baked artwork's PNGs); no window of its own
+find_package(ZLIB QUIET)
+if(ZLIB_FOUND)
+	set(PANEL_EMBEDS)
+	foreach(art panel_base_p4 panel_atlas_p4 panel_base_p8 panel_atlas_p8)
+		set(src ${CMAKE_CURRENT_SOURCE_DIR}/gui/${art}.png)
+		set(dst ${CMAKE_CURRENT_BINARY_DIR}/gui/${art}_png.c)
+		add_custom_command(OUTPUT ${dst}
+			COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/gui
+			COMMAND ${CMAKE_COMMAND} -DINPUT=${src} -DOUTPUT=${dst} -DSYMBOL=${art}_png
+			        -P ${CMAKE_CURRENT_SOURCE_DIR}/gui/embed.cmake
+			DEPENDS ${src} ${CMAKE_CURRENT_SOURCE_DIR}/gui/embed.cmake
+			COMMENT "embedding ${art}.png")
+		list(APPEND PANEL_EMBEDS ${dst})
+	endforeach()
+	add_library(scemu_gui STATIC gui/panel.c gui/png.c gui/lcd_font.c ${PANEL_EMBEDS})
+	target_include_directories(scemu_gui PUBLIC gui)
+	target_link_libraries(scemu_gui PUBLIC scemu PRIVATE ZLIB::ZLIB)
+	if(NOT MSVC)
+		target_compile_options(scemu_gui PRIVATE -Wall -Wextra -Wno-unused-parameter)
+	endif()
+else()
+	message(STATUS "gui skipped: needs zlib")
+endif()
+
 # scplay, the terminal player (needs SDL2 for audio and zlib to read ROM zips)
 
 if(SCEMU_BUILD_TOOLS)
