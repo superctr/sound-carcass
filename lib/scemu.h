@@ -51,6 +51,9 @@ typedef struct scemu_config
 	void *(*exec_alloc)(size_t size, void *user);
 	void (*exec_free)(void *block, void *user);
 	void *user;
+	/* run the H8/510 firmware through the interpreter rather than the
+	 * dynamic translator (also SCEMU_H8500_JIT=0 in the environment) */
+	bool h8500_interpreter;
 } scemu_config_t;
 
 /* Front panel buttons.  The matrix positions are the same on the SC-88 and the

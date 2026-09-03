@@ -1,5 +1,6 @@
 #include <string.h>
 #include "h8500.h"
+#include "h8500_jit.h"
 
 #define FLAG_C 0x0001u
 #define FLAG_V 0x0002u
@@ -38,8 +39,20 @@ static const signed char vector_slot[64] =
 
 static void wdt_write16(h8500_t *cpu, uint16_t data);
 
-static const uint8_t cyc_src[10] = { 2, 5, 5, 6, 5, 6, 5, 6, 3, 4 };
-static const uint8_t cyc_rmw[10] = { 2, 7, 7, 8, 7, 8, 7, 8, 3, 4 };
+#define mem_read8 h8500_mem_read8
+#define mem_write8 h8500_mem_write8
+#define mem_read16 h8500_mem_read16
+#define mem_write16 h8500_mem_write16
+#define peripherals_tick h8500_peripherals_tick
+#define irq_select h8500_irq_select
+#define exception h8500_exception
+#define take_interrupt h8500_take_interrupt
+#define exec_one h8500_exec_one
+
+const uint8_t h8500_cyc_src[10] = { 2, 5, 5, 6, 5, 6, 5, 6, 3, 4 };
+const uint8_t h8500_cyc_rmw[10] = { 2, 7, 7, 8, 7, 8, 7, 8, 3, 4 };
+#define cyc_src h8500_cyc_src
+#define cyc_rmw h8500_cyc_rmw
 
 /* ------------------------------------------------------------------ */
 /* memory                                                             */
@@ -69,7 +82,7 @@ static int is_internal(uint32_t addr)
 	return addr >= H8500_IO_BASE && addr < H8500_IO_BASE + H8500_IO_SIZE;
 }
 
-static uint8_t mem_read8(h8500_t *cpu, uint32_t addr)
+uint8_t h8500_mem_read8(h8500_t *cpu, uint32_t addr)
 {
 	uint8_t *p;
 	addr &= 0xffffffu;
@@ -80,7 +93,7 @@ static uint8_t mem_read8(h8500_t *cpu, uint32_t addr)
 	return cpu->bus.read8 ? cpu->bus.read8(cpu->bus.user, addr) : 0xff;
 }
 
-static void mem_write8(h8500_t *cpu, uint32_t addr, uint8_t data)
+void h8500_mem_write8(h8500_t *cpu, uint32_t addr, uint8_t data)
 {
 	uint8_t *p;
 	addr &= 0xffffffu;
@@ -99,7 +112,7 @@ static void mem_write8(h8500_t *cpu, uint32_t addr, uint8_t data)
 		cpu->bus.write8(cpu->bus.user, addr, data);
 }
 
-static uint16_t mem_read16(h8500_t *cpu, uint32_t addr)
+uint16_t h8500_mem_read16(h8500_t *cpu, uint32_t addr)
 {
 	uint8_t *p;
 	addr &= 0xffffffu;
@@ -115,7 +128,7 @@ static uint16_t mem_read16(h8500_t *cpu, uint32_t addr)
 	return 0xffff;
 }
 
-static void mem_write16(h8500_t *cpu, uint32_t addr, uint16_t data)
+void h8500_mem_write16(h8500_t *cpu, uint32_t addr, uint16_t data)
 {
 	uint8_t *p;
 	addr &= 0xffffffu;
@@ -602,7 +615,7 @@ static void adc_update(h8500_t *cpu, uint32_t cycles)
 	cpu->adc_busy = adc_conv_cycles(cpu, 0);
 }
 
-static void peripherals_tick(h8500_t *cpu, uint32_t cycles)
+void h8500_peripherals_tick(h8500_t *cpu, uint32_t cycles)
 {
 	if (!cycles)
 		return;
@@ -613,6 +626,93 @@ static void peripherals_tick(h8500_t *cpu, uint32_t cycles)
 	adc_update(cpu, cycles);
 	sci_update(cpu, 0, cycles);
 	sci_update(cpu, 1, cycles);
+}
+
+static uint32_t frt_horizon(h8500_t *cpu, int n)
+{
+	int base = (n == 0) ? R_FRT1 : R_FRT2;
+	uint8_t tcr = cpu->io[base + F_TCR];
+	uint32_t shift, d, best;
+	uint16_t ocra, ocrb, cnt;
+
+	switch (tcr & 3)
+	{
+	case 0: shift = 2; break;
+	case 1: shift = 3; break;
+	case 2: shift = 5; break;
+	default: return UINT32_MAX;
+	}
+	ocra = (uint16_t)((cpu->io[base + F_OCRAH] << 8) | cpu->io[base + F_OCRAL]);
+	ocrb = (uint16_t)((cpu->io[base + F_OCRBH] << 8) | cpu->io[base + F_OCRBL]);
+	cnt = cpu->frt_count[n];
+
+	best = (uint32_t)((uint16_t)(ocra + 1 - cnt));
+	if (!best) best = 0x10000;
+	d = (uint32_t)((uint16_t)(ocrb + 1 - cnt));
+	if (!d) d = 0x10000;
+	if (d < best) best = d;
+	d = (uint32_t)((uint16_t)(0 - cnt));
+	if (!d) d = 0x10000;
+	if (d < best) best = d;
+	return (best << shift) - cpu->frt_prescale[n];
+}
+
+static uint32_t tmr_horizon(h8500_t *cpu)
+{
+	static const uint8_t shifts[4] = { 0, 3, 6, 10 };
+	uint8_t tcr = cpu->io[R_TMRCR];
+	uint32_t shift, d, best;
+	uint8_t cnt = cpu->tmr_count;
+
+	if ((tcr & 7) == 0 || (tcr & 7) > 3)
+		return UINT32_MAX;
+	shift = shifts[tcr & 3];
+	best = (uint32_t)((uint8_t)(cpu->io[R_TCORA] + 1 - cnt));
+	if (!best) best = 0x100;
+	d = (uint32_t)((uint8_t)(cpu->io[R_TCORB] + 1 - cnt));
+	if (!d) d = 0x100;
+	if (d < best) best = d;
+	d = (uint32_t)((uint8_t)(0 - cnt));
+	if (!d) d = 0x100;
+	if (d < best) best = d;
+	return (best << shift) - cpu->tmr_prescale;
+}
+
+static uint32_t wdt_horizon(h8500_t *cpu)
+{
+	static const uint8_t shifts[8] = { 1, 5, 6, 7, 8, 9, 11, 12 };
+	uint8_t tcsr = cpu->io[R_WDT];
+	uint32_t shift = shifts[tcsr & 7];
+	if (!(tcsr & 0x20))
+		return UINT32_MAX;
+	return ((256u - cpu->io[R_WDT + 1]) << shift) - cpu->wdt_prescale;
+}
+
+static uint32_t sci_horizon(h8500_t *cpu, int ch)
+{
+	int base = ch ? R_SCI2 : R_SCI1;
+	uint32_t h = UINT32_MAX;
+	if (cpu->sci[ch].rx_pending && (cpu->io[base + S_SCR] & 0x10))
+		return 1;
+	if (cpu->sci[ch].tx_busy)
+		h = cpu->sci[ch].tx_timer ? cpu->sci[ch].tx_timer : 1;
+	return h;
+}
+
+/* Cycles that can pass before a peripheral does anything but count:
+ * a compare match, an overflow, a conversion or a character completing.
+ * Ticking fewer cycles than this, in any number of pieces, leaves the
+ * peripherals in the same state as ticking them at once. */
+uint32_t h8500_tick_horizon(h8500_t *cpu)
+{
+	uint32_t h = frt_horizon(cpu, 0), d;
+	d = frt_horizon(cpu, 1); if (d < h) h = d;
+	d = tmr_horizon(cpu); if (d < h) h = d;
+	d = wdt_horizon(cpu); if (d < h) h = d;
+	d = cpu->adc_busy ? cpu->adc_busy : UINT32_MAX; if (d < h) h = d;
+	d = sci_horizon(cpu, 0); if (d < h) h = d;
+	d = sci_horizon(cpu, 1); if (d < h) h = d;
+	return h ? h : 1;
 }
 
 /* ---- register file ---- */
@@ -843,7 +943,7 @@ static void wdt_write16(h8500_t *cpu, uint16_t data)
 /* interrupts                                                         */
 /* ------------------------------------------------------------------ */
 
-static int irq_select(h8500_t *cpu, int *out_level)
+int h8500_irq_select(h8500_t *cpu, int *out_level)
 {
 	int mask = (cpu->sr & SR_I) >> 8;
 	int best = -1, best_level = -1;
@@ -874,7 +974,7 @@ static int irq_select(h8500_t *cpu, int *out_level)
 	return best;
 }
 
-static void exception(h8500_t *cpu, int vector, uint16_t ret_pc, int level)
+void h8500_exception(h8500_t *cpu, int vector, uint16_t ret_pc, int level)
 {
 	uint32_t va = (uint32_t)vector * 4;
 	push16(cpu, ret_pc);
@@ -890,7 +990,7 @@ static void exception(h8500_t *cpu, int vector, uint16_t ret_pc, int level)
 	cpu->pc = mem_read16(cpu, va + 2);
 }
 
-static void take_interrupt(h8500_t *cpu, int vector, int level)
+void h8500_take_interrupt(h8500_t *cpu, int vector, int level)
 {
 	int i;
 	for (i = 0; i < 4; i++)
@@ -2008,7 +2108,7 @@ static int exec_11(h8500_t *cpu, uint16_t start_pc)
 	return -1;
 }
 
-static int exec_one(h8500_t *cpu)
+int h8500_exec_one(h8500_t *cpu)
 {
 	uint16_t start_pc = cpu->pc;
 	uint8_t b0 = fetch8(cpu);
@@ -2455,6 +2555,10 @@ int h8500_step(h8500_t *cpu)
 int h8500_run(h8500_t *cpu, int cycles)
 {
 	int ran = 0;
+#ifdef SCEMU_H8500_JIT
+	if (cpu->jit && cpu->jit_enabled)
+		return h8500_jit_run(cpu, cycles);
+#endif
 	while (ran < cycles)
 		ran += h8500_step(cpu);
 	return ran;

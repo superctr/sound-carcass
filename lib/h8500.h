@@ -115,6 +115,14 @@ typedef struct h8500
 
 	/* time */
 	uint64_t cycles;
+
+	/* the dynamic translator (h8500_jit.c), when attached */
+	struct h8500_jit *jit;
+	bool jit_enabled;
+	bool irq_ready;
+	uint32_t jit_pending;
+	uint32_t jit_limit;
+	uint64_t jit_deadline;
 } h8500_t;
 
 void h8500_init(h8500_t *cpu, const h8500_bus_t *bus);
@@ -139,5 +147,27 @@ void h8500_sci_rx(h8500_t *cpu, int channel, uint8_t byte);
  * uses them for tests and for the boot snapshot. */
 uint8_t h8500_io_read(h8500_t *cpu, uint16_t address);
 void h8500_io_write(h8500_t *cpu, uint16_t address, uint8_t data);
+
+/* The dynamic translator: attached to a core after its regions are mapped,
+ * it takes over h8500_run while jit_enabled is set.  Translated code is
+ * taken from the read-only regions only and cached for the life of the
+ * attachment, so remapping a region means detaching and attaching again. */
+struct jit_alloc;
+#ifdef SCEMU_H8500_JIT
+bool h8500_jit_attach(h8500_t *cpu, struct jit_alloc *alloc);
+void h8500_jit_detach(h8500_t *cpu);
+void h8500_jit_flush(h8500_t *cpu);
+size_t h8500_jit_code_size(const h8500_t *cpu);
+size_t h8500_jit_block_count(const h8500_t *cpu);
+/* blocks run, instructions handed to the interpreter, interrupts taken, peripheral flushes */
+void h8500_jit_stats(const h8500_t *cpu, uint64_t out[4]);
+#else
+static inline bool h8500_jit_attach(h8500_t *cpu, struct jit_alloc *alloc) { (void)cpu; (void)alloc; return false; }
+static inline void h8500_jit_detach(h8500_t *cpu) { (void)cpu; }
+static inline void h8500_jit_flush(h8500_t *cpu) { (void)cpu; }
+static inline size_t h8500_jit_code_size(const h8500_t *cpu) { (void)cpu; return 0; }
+static inline size_t h8500_jit_block_count(const h8500_t *cpu) { (void)cpu; return 0; }
+static inline void h8500_jit_stats(const h8500_t *cpu, uint64_t out[4]) { (void)cpu; out[0] = out[1] = out[2] = out[3] = 0; }
+#endif
 
 #endif

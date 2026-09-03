@@ -11,6 +11,7 @@ endif()
 option(SCEMU_BUILD_TOOLS "Build the command-line tools" ON)
 option(SCEMU_EXTERNAL_EXEC_ALLOCATOR
 	"Do not build sljit's executable-memory allocator; the integrator supplies one through scemu_config" OFF)
+option(SCEMU_H8500_JIT "Build the H8/510 dynamic translator (the interpreter stays the fallback)" ON)
 
 # ---------------------------------------------------------------------------
 # sljit, built from the submodule as a static library
@@ -40,6 +41,10 @@ add_library(scemu STATIC
 	lib/wave_rom.c
 	lib/jit.c
 )
+if(SCEMU_H8500_JIT)
+	target_sources(scemu PRIVATE lib/h8500_jit.c)
+	target_compile_definitions(scemu PUBLIC SCEMU_H8500_JIT=1)
+endif()
 target_include_directories(scemu PUBLIC lib)
 target_link_libraries(scemu PRIVATE sljit)
 if(NOT MSVC)

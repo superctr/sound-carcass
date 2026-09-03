@@ -299,6 +299,11 @@ bool sc88_init(sc88_t *b, scemu_model_t model, const scemu_roms_t *roms, const s
 	else
 		h8500_map(&b->cpu, 0x000000, (uint32_t)b->program_rom_size, b->program_rom, false);
 	h8500_map(&b->cpu, b->map.sram_base, SC88_SRAM_SIZE, b->sram, true);
+#ifdef SCEMU_H8500_JIT
+	h8500_jit_attach(&b->cpu, &b->jit);
+	if (config->h8500_interpreter || (getenv("SCEMU_H8500_JIT") && !atoi(getenv("SCEMU_H8500_JIT"))))
+		b->cpu.jit_enabled = false;
+#endif
 
 	xp_link_t link = { xp_irq, b->has_lsp ? xp_serial_out : NULL, b->has_lsp ? xp_serial_in : NULL, b };
 	if (!xp_init(&b->xp, &link, &b->jit, b->wave_rom, b->wave_rom_size, wave_rom_chip_size(model)))
@@ -319,6 +324,7 @@ bool sc88_init(sc88_t *b, scemu_model_t model, const scemu_roms_t *roms, const s
 
 void sc88_release(sc88_t *b)
 {
+	h8500_jit_detach(&b->cpu);
 	if (b->has_lsp)
 		lsp_release(&b->lsp);
 	xp_release(&b->xp);
@@ -481,6 +487,8 @@ bool sc88_state_load(sc88_t *b, const void *buffer, size_t size)
 	h8500_region_t regions[H8500_MAX_REGIONS];
 	memcpy(regions, b->cpu.regions, sizeof(regions));
 	int region_count = b->cpu.region_count;
+	struct h8500_jit *cpu_jit = b->cpu.jit;
+	bool cpu_jit_enabled = b->cpu.jit_enabled;
 	xp_link_t xp_link = b->xp.link;
 	const uint8_t *xp_wave = b->xp.wave;
 	int32_t *xp_eram = b->xp.eram;
@@ -503,6 +511,8 @@ bool sc88_state_load(sc88_t *b, const void *buffer, size_t size)
 	b->cpu.bus = bus;
 	memcpy(b->cpu.regions, regions, sizeof(regions));
 	b->cpu.region_count = region_count;
+	b->cpu.jit = cpu_jit;
+	b->cpu.jit_enabled = cpu_jit_enabled;
 	b->xp.link = xp_link;
 	b->xp.wave = xp_wave;
 	b->xp.eram = xp_eram;

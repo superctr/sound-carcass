@@ -271,7 +271,7 @@ static int smf_load(smf_t *s, const uint8_t *data, size_t size, uint32_t rate)
 
 static void usage(const char *argv0)
 {
-	fprintf(stderr, "usage: %s <sc88|sc88pro> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--tail N] [--state boot.state]\n", argv0);
+	fprintf(stderr, "usage: %s <sc88|sc88pro> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--tail N] [--state boot.state] [--no-jit]\n", argv0);
 }
 
 int main(int argc, char **argv)
@@ -293,6 +293,7 @@ int main(int argc, char **argv)
 
 	const char *midi_path = NULL, *state_path = NULL;
 	double seconds = 0, tail = 2.0;
+	scemu_config_t config = { 0 };
 	for (int n = 4; n < argc; n++)
 	{
 		if (!strcmp(argv[n], "--midi") && n + 1 < argc)
@@ -303,6 +304,8 @@ int main(int argc, char **argv)
 			tail = atof(argv[++n]);
 		else if (!strcmp(argv[n], "--state") && n + 1 < argc)
 			state_path = argv[++n];
+		else if (!strcmp(argv[n], "--no-jit"))
+			config.h8500_interpreter = true;
 		else
 		{
 			usage(argv[0]);
@@ -325,7 +328,7 @@ int main(int argc, char **argv)
 		if (!roms.wave_rom[n])
 			return 1;
 
-	scemu_t *m = scemu_create(set->model, &roms, NULL);
+	scemu_t *m = scemu_create(set->model, &roms, &config);
 	if (!m)
 	{
 		fprintf(stderr, "scemu_create: %s\n", scemu_error(NULL));
