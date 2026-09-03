@@ -36,34 +36,52 @@ enum
 struct lsp;
 typedef void (*lsp_sample_fn)(struct lsp *lsp);
 
-/* hist[n] is a four-deep ring of accumulator n, indexed by the slot counter. */
+/* hist[n][k] is accumulator n as it stood k slots before the last one of the sample. */
 typedef struct lsp_state
 {
 	int32_t acc[2];
-	int32_t hist[2][4];
+	int32_t hist[2][3];
 	int32_t eram_read;
 	int32_t multiplier[2];
 	int32_t eram_latch;
 	uint16_t eram_base[2];
 	uint16_t tap;
 	uint16_t eram_pos;
+	uint16_t slot;
 	uint8_t eram_tap2[2];
 	uint8_t prev_offset;
 	uint8_t buffer_pos;
-	uint8_t jump_delay;
 } lsp_state_t;
 
+/* The internal RAM is kept twice in a row, with a guard block either side, so that the compiled
+ * code addresses it from the buffer position without wrapping: iram[n] and iram_mirror[n] are
+ * always equal. */
 typedef struct lsp
 {
 	uint32_t program[LSP_PROGRAM_SIZE];
-	int32_t iram[LSP_IRAM_SIZE];
+	union
+	{
+		int32_t iram_window[4 * LSP_IRAM_SIZE];
+		struct
+		{
+			int32_t iram_below[LSP_IRAM_SIZE];
+			int32_t iram[LSP_IRAM_SIZE];
+			int32_t iram_mirror[LSP_IRAM_SIZE];
+			int32_t iram_above[LSP_IRAM_SIZE];
+		};
+	};
 	int32_t *eram;
 	uint8_t eram_cmd[16];
 	lsp_state_t state;
 	uint16_t configuration;
 	bool running;
-	bool restart;
 	bool dirty;
+
+	/* A program word whose coefficient the host has patched while the program ran is
+	 * compiled to read that byte from `program` instead of carrying it as an immediate;
+	 * `cell` records which words the live code reads that way. */
+	uint8_t patched[LSP_PROGRAM_SIZE];
+	uint8_t cell[LSP_PROGRAM_SIZE];
 
 	int32_t serial_in[2];
 	int32_t serial_out[2];
@@ -72,6 +90,10 @@ typedef struct lsp
 	uint32_t host_data;
 	uint32_t host_read;
 	uint16_t host_address;
+
+	uint32_t compiles;
+	uint32_t blocks;
+	uint32_t dynamic_blocks;
 
 	jit_alloc_t *jit;
 	jit_code_t code[2];
