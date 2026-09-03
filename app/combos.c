@@ -198,6 +198,51 @@ const combo_t combos[] = {
 	{ "View settings for 32 Parts in the Part display",
 	  "Shows all 32 Parts at once in the bar display.",
 	  { B(EDIT2_RIGHT) }, 1, B(EDIT3_LEFT), false, 153 },
+
+	/* Service notes -- "TEST MODE / Switch operations", "IDENTIFYING VERSION NUMBER"
+	 * (Roland SC-88Pro Service Notes, First Edition, Nov.1996, p.4 and p.8).  The `page`
+	 * field below is that document's page, not the owner's manual's; docs/panel/combinations.md
+	 * keeps the two apart.  The rear Select switch (MIDI / Mac / PC-1 / PC-2) that some of
+	 * these depend on is not a panel button and cannot be set from here. */
+	{ "Normal Test Mode",
+	  "Rear Select SW on MIDI: held while switching on, then PREVIEW, enters the factory Test Mode at T-1.",
+	  { B(KEY_SHIFT_LEFT), B(KEY_SHIFT_RIGHT) }, 2, B(PREVIEW), true, 4 },
+	{ "Serial Test (4')",
+	  "The same hold with the rear Select SW on Mac enters the Test Mode at the Serial Test instead.",
+	  { B(KEY_SHIFT_LEFT), B(KEY_SHIFT_RIGHT) }, 2, B(PREVIEW), true, 4 },
+	{ "THRU Check",
+	  "Rear Select SW on MIDI: held while switching on, puts the unit in the MIDI THRU check.",
+	  { B(REVERB_LEFT), B(CHORUS_RIGHT) }, 2, NONE, true, 4 },
+	{ "Identifying version number",
+	  "Held while switching on, then PREVIEW, shows the ROM, sub-CPU, SCGS-core and parameter versions.",
+	  { B(MIDI_CH_LEFT), B(MIDI_CH_RIGHT) }, 2, B(PREVIEW), true, 8 },
+	{ "To move to the next test.",
+	  "In Test Mode, steps to the following test.",
+	  { B(KEY_SHIFT_LEFT) }, 1, B(MIDI_CH_RIGHT), false, 4 },
+	{ "To return to the preceding test.",
+	  "In Test Mode, steps back to the previous test.",
+	  { B(KEY_SHIFT_LEFT) }, 1, B(MIDI_CH_LEFT), false, 4 },
+	{ "To perform the same test once again.",
+	  "In Test Mode, restarts the test that is running.",
+	  { B(KEY_SHIFT_LEFT) }, 1, B(PAN_RIGHT), false, 4 },
+	{ "1. LCD & LED Test",
+	  "In Test Mode, jumps to T-1, which lights every LCD dot and then every LED.",
+	  { B(KEY_SHIFT_LEFT) }, 1, B(PART_LEFT), false, 4 },
+	{ "2. Memory Test",
+	  "In Test Mode, jumps to T-2, which checks PROM, SRAM, DRAM, the wave ROMs and the LSP chip.",
+	  { B(KEY_SHIFT_LEFT) }, 1, B(PART_RIGHT), false, 4 },
+	{ "3. Switch Test",
+	  "In Test Mode, jumps to T-3, which names each panel switch as it is pressed.",
+	  { B(KEY_SHIFT_LEFT) }, 1, B(INSTRUMENT_LEFT), false, 4 },
+	{ "4. MIDI & Battery Test",
+	  "In Test Mode, jumps to T-4, which reads the battery voltage and loops the MIDI ports.",
+	  { B(KEY_SHIFT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, 4 },
+	{ "5. Sound & Effect Test",
+	  "In Test Mode, jumps to T-5, which walks the four outputs and the reverb, chorus and delay.",
+	  { B(KEY_SHIFT_LEFT) }, 1, B(LEVEL_LEFT), false, 4 },
+	{ "6. LSP Test",
+	  "In Test Mode, jumps to T-6, the LSP test; the notes give no procedure for it.",
+	  { B(KEY_SHIFT_LEFT) }, 1, B(LEVEL_RIGHT), false, 4 },
 };
 
 const int combo_count = (int)(sizeof combos / sizeof combos[0]);

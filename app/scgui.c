@@ -141,6 +141,7 @@ static int parse_options(int argc, char **argv, options_t *o, GPtrArray *songs)
 static void play_index(app_t *app, int index);
 static void latched_press(app_t *app, bool down);
 static void latched_clear(app_t *app);
+static gboolean combo_release(gpointer user);
 
 static const char *song_label(const char *path, char *buf, size_t size)
 {
@@ -601,6 +602,12 @@ static gboolean on_tick(gpointer user)
 			app->release_after_boot = false;
 			latched_press(app, false);
 			latched_clear(app);
+			if (app->combo_hold_count)
+			{
+				if (app->combo_press >= 0)
+					machine_button(app->mc, (scemu_button_t)app->combo_press, true);
+				g_timeout_add(150, combo_release, app);
+			}
 		}
 	}
 	if (panel_dirty(app->panel))
@@ -674,20 +681,27 @@ static void on_combo_chosen(GtkButton *b, gpointer user)
 	app_t *app = user;
 	const combo_t *c = &combos[GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "combo"))];
 	gtk_popover_popdown(GTK_POPOVER(app->combo_popover));
-	if (app->combo_hold_count || app->combo_press >= 0)
+	if (app->combo_hold_count || app->combo_press >= 0 || app->release_after_boot)
 		return;
 	for (int n = 0; n < c->hold_count; n++)
 	{
 		machine_button(app->mc, c->hold[n], true);
 		app->combo_hold[app->combo_hold_count++] = c->hold[n];
 	}
-	if (c->press != SCEMU_BUTTON_COUNT)
+	app->combo_press = c->press != SCEMU_BUTTON_COUNT ? (int)c->press : -1;
+	if (c->power_on)
 	{
-		machine_button(app->mc, c->press, true);
-		app->combo_press = c->press;
+		/* the held keys go through a power cycle; the pressed one follows the boot */
+		if (app->power)
+			machine_power(app->mc, false);
+		app->power = true;
+		machine_power(app->mc, true);
+		app->release_after_boot = true;
+		set_title(app);
+		return;
 	}
-	else
-		app->combo_press = -1;
+	if (app->combo_press >= 0)
+		machine_button(app->mc, (scemu_button_t)app->combo_press, true);
 	g_timeout_add(150, combo_release, app);
 }
 
@@ -710,7 +724,7 @@ static void combo_menu(app_t *app, int element, double x, double y)
 		gtk_button_set_has_frame(GTK_BUTTON(item), FALSE);
 		gtk_label_set_xalign(GTK_LABEL(gtk_button_get_child(GTK_BUTTON(item))), 0);
 		char tip[400];
-		snprintf(tip, sizeof(tip), "%s  (manual p.%d)", c->effect, c->page);
+		snprintf(tip, sizeof(tip), "%s  (%s p.%d)", c->effect, c->power_on ? "service notes" : "manual", c->page);
 		gtk_widget_set_tooltip_text(item, tip);
 		g_object_set_data(G_OBJECT(item), "combo", GINT_TO_POINTER(app->combo_ids[n]));
 		g_signal_connect(item, "clicked", G_CALLBACK(on_combo_chosen), app);
