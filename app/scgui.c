@@ -934,6 +934,31 @@ static void on_motion(GtkEventControllerMotion *c, double x, double y, gpointer 
 	app->pointer_y = y;
 }
 
+/* the toolkit gave up on the press (another button joined, the pointer
+ * left): whatever the mouse holds comes up */
+static void on_cancel(GtkGesture *g, GdkEventSequence *seq, gpointer user)
+{
+	app_t *app = user;
+	if (app->opposite_element >= 0)
+	{
+		machine_button(app->mc, (scemu_button_t)panel_element_button((panel_element_t)app->opposite_element), false);
+		panel_set_pressed(app->panel, (panel_element_t)app->opposite_element, false);
+		app->opposite_element = -1;
+	}
+	if (app->pressed_element >= 0)
+	{
+		int e = app->pressed_element;
+		app->pressed_element = -1;
+		machine_button(app->mc, (scemu_button_t)panel_element_button((panel_element_t)e), false);
+		panel_set_pressed(app->panel, (panel_element_t)e, false);
+		if (app->latched_down)
+		{
+			latched_press(app, false);
+			latched_clear(app);
+		}
+	}
+}
+
 static gboolean on_scroll(GtkEventControllerScroll *c, double dx, double dy, gpointer user)
 {
 	app_t *app = user;
@@ -1045,11 +1070,18 @@ int main(int argc, char **argv)
 	gtk_window_set_resizable(GTK_WINDOW(app.window), FALSE);
 	set_title(&app);
 
-	GtkGesture *click = gtk_gesture_click_new();
-	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0);
-	g_signal_connect(click, "pressed", G_CALLBACK(on_pressed), &app);
-	g_signal_connect(click, "released", G_CALLBACK(on_released), &app);
-	gtk_widget_add_controller(app.area, GTK_EVENT_CONTROLLER(click));
+	/* one gesture per mouse button, so the buttons are tracked independently
+	 * and a second one joining does not end the first's press */
+	for (guint b = GDK_BUTTON_PRIMARY; b <= GDK_BUTTON_SECONDARY; b++)
+	{
+		GtkGesture *click = gtk_gesture_click_new();
+		gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), b);
+		g_signal_connect(click, "pressed", G_CALLBACK(on_pressed), &app);
+		g_signal_connect(click, "released", G_CALLBACK(on_released), &app);
+		if (b == GDK_BUTTON_PRIMARY)
+			g_signal_connect(click, "cancel", G_CALLBACK(on_cancel), &app);
+		gtk_widget_add_controller(app.area, GTK_EVENT_CONTROLLER(click));
+	}
 	GtkEventController *motion = gtk_event_controller_motion_new();
 	g_signal_connect(motion, "motion", G_CALLBACK(on_motion), &app);
 	gtk_widget_add_controller(app.area, motion);
