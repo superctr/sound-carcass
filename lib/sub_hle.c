@@ -211,6 +211,11 @@ static void deliver(sub_hle_t *sub)
 	set_int(sub, true);
 }
 
+bool sub_hle_ready(const sub_hle_t *sub)
+{
+	return sub->queue_count + (SUB_MAX_EXCLUSIVE + SUB_BLOCK_SIZE - 1) / SUB_BLOCK_SIZE <= SUB_QUEUE_SIZE;
+}
+
 static void queue(sub_hle_t *sub, uint8_t code, uint8_t flags, uint8_t d1, uint8_t d2,
 		const uint8_t *block, uint8_t block_size)
 {

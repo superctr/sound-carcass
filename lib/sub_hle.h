@@ -70,6 +70,8 @@ typedef struct sub_hle
 void sub_hle_init(sub_hle_t *sub, void (*irq)(void *user, bool state), void (*midi_out)(void *user, uint8_t byte), void *user);
 void sub_hle_reset(sub_hle_t *sub);
 /* /RST from the main CPU's P4-0 (SC-88VL); active low */
+/* Room for the messages one more byte can produce. */
+bool sub_hle_ready(const sub_hle_t *sub);
 void sub_hle_reset_w(sub_hle_t *sub, bool state);
 uint8_t sub_hle_read(sub_hle_t *sub, uint32_t offset);
 void sub_hle_write(sub_hle_t *sub, uint32_t offset, uint8_t data);

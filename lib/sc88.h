@@ -27,8 +27,6 @@
 #define SC88_SRAM_SIZE 0x10000
 #define SC88_MIDI_PORTS 2
 #define SC88_MIDI_QUEUE_SIZE 16384
-#define SC88_MIDI_BYTE_CREDIT 256
-#define SC88_MIDI_FRAME_CREDIT 25
 
 typedef struct sc88_midi_event
 {
@@ -77,7 +75,6 @@ typedef struct sc88
 	uint64_t frame;
 	sc88_midi_event_t midi_queue[SC88_MIDI_PORTS][SC88_MIDI_QUEUE_SIZE];
 	uint32_t midi_head[SC88_MIDI_PORTS], midi_count[SC88_MIDI_PORTS];
-	uint32_t midi_credit[SC88_MIDI_PORTS];
 	uint32_t midi_drops;
 	scemu_midi_out_fn midi_out;
 	void *midi_out_user;

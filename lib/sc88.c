@@ -343,7 +343,6 @@ void sc88_reset(sc88_t *b)
 	b->frame = 0;
 	memset(b->midi_head, 0, sizeof(b->midi_head));
 	memset(b->midi_count, 0, sizeof(b->midi_count));
-	memset(b->midi_credit, 0, sizeof(b->midi_credit));
 	b->midi_drops = 0;
 	xp_reset(&b->xp);
 	if (b->has_lsp)
@@ -360,20 +359,25 @@ void sc88_deliver_midi(sc88_t *b)
 {
 	for (int port = 0; port < SC88_MIDI_PORTS; port++)
 	{
-		if (b->midi_credit[port] < SC88_MIDI_BYTE_CREDIT)
-			b->midi_credit[port] += SC88_MIDI_FRAME_CREDIT;
-		while (b->midi_count[port] && b->midi_credit[port] >= SC88_MIDI_BYTE_CREDIT)
+		while (b->midi_count[port])
 		{
 			sc88_midi_event_t *e = &b->midi_queue[port][b->midi_head[port]];
 			if (e->frame > b->frame)
 				break;
 			if (b->has_panel)
+			{
+				if (!sub_hle_ready(&b->sub))
+					break;
 				sub_hle_midi_byte(&b->sub, port, e->byte);
+			}
 			else
+			{
+				if (b->cpu.sci[port].rx_pending)
+					break;
 				h8500_sci_rx(&b->cpu, port, e->byte);
+			}
 			b->midi_head[port] = (b->midi_head[port] + 1) % SC88_MIDI_QUEUE_SIZE;
 			b->midi_count[port]--;
-			b->midi_credit[port] -= SC88_MIDI_BYTE_CREDIT;
 		}
 	}
 }
