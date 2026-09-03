@@ -15,7 +15,6 @@
 #define XP_DSP_SLOTS 256
 #define XP_IRAM_SIZE 256
 #define XP_ERAM_SIZE 0x10000
-#define XP_DSP_INPUT_SHIFT 4
 
 enum
 {
@@ -31,9 +30,11 @@ enum
 enum
 {
 	XP_CRAM_BASE = 0x2c00, XP_IRAM_BASE = 0x3000, XP_IRAM3_BASE = 0x3200, XP_IRAM3_TARGET_BASE = 0x3300,
-	XP_PRAM_BASE = 0x3400, XP_RUN_MASK = 0x3900, XP_READBACK_LOW = 0x3910, XP_READBACK_HIGH = 0x3912,
-	XP_DSP_MODE = 0x3916, XP_IRQ_STATUS = 0x3918, XP_IRQ_ACK = 0x391a, XP_ROM_PAGE = 0x3920,
-	XP_ROM_BANK = 0x3922, XP_IRAM3_RATE = 0x3928, XP_SEND_BASE = 0x3a00, XP_ROM_WINDOW = 0x3c00
+	XP_PRAM_BASE = 0x3400, XP_RUN_MASK = 0x3900, XP_ROM_SELECT = 0x3908, XP_READBACK_LOW = 0x3910,
+	XP_READBACK_HIGH = 0x3912, XP_HIGHEST_VOICE = 0x3914, XP_DSP_MODE = 0x3916, XP_IRQ_STATUS = 0x3918,
+	XP_IRQ_ACK = 0x391a, XP_STATUS = 0x391c, XP_ROM_PAGE = 0x3920, XP_ROM_BANK = 0x3922,
+	XP_SERIAL_CONFIG = 0x3924, XP_DSP_CONFIG = 0x3926, XP_IRAM3_RATE = 0x3928, XP_DIAG_SELECT = 0x3930,
+	XP_SERIAL_FORMAT = 0x3932, XP_VOICE_SELECT = 0x3934, XP_SEND_BASE = 0x3a00, XP_ROM_WINDOW = 0x3c00
 };
 
 enum { XP_IRQ_VOICE_DONE = 4, XP_IRQ_LOOP_REACHED = 5 };
@@ -78,6 +79,8 @@ typedef struct xp_voice
 	uint8_t done_reported;
 	uint16_t sub_phase;
 	int32_t predictor;
+	int32_t amplitude;
+	int32_t smooth;
 	int32_t filter_low;
 	int32_t filter_band;
 } xp_voice_t;
@@ -103,6 +106,7 @@ typedef struct xp_dsp_state
 	int32_t acc;
 	int32_t r;
 	int32_t mem;
+	int32_t input;
 	int32_t latch;
 	int32_t pend[2];
 	int32_t gain;
@@ -118,7 +122,6 @@ typedef struct xp_sched
 	uint8_t lands;
 	uint8_t latch_fresh;
 	uint8_t now_valid;
-	uint8_t r_use;
 	uint8_t gain_load;
 	uint8_t strobe;
 } xp_sched_t;
@@ -136,10 +139,11 @@ typedef struct xp
 	uint16_t regs[XP_REGS];
 	xp_voice_t voices[XP_VOICES];
 	int32_t bus[XP_BUS_COUNT];
+	uint64_t bus_written;
 	uint64_t run_mask;
+	uint64_t run_pending;
 	uint32_t read_latch;
 	uint32_t frame_counter;
-	uint32_t noise;
 	uint16_t irq_queue[XP_VOICES];
 	uint8_t irq_head;
 	uint8_t irq_count;
@@ -152,6 +156,7 @@ typedef struct xp
 	int32_t iram[XP_IRAM_SIZE];
 	int32_t *eram;
 	uint8_t iram_ramping[XP_IRAM_SIZE];
+	uint16_t iram_target[32];
 	bool dsp_enabled;
 	bool program_dirty;
 	uint8_t serial_out_word[2];

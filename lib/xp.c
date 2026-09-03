@@ -39,9 +39,15 @@ static const int16_t interp_weights[3][128] = {
 
 static const uint32_t hold_masks[4] = { 0, 7, 31, 127 };
 
-static inline int32_t wrap_add(int32_t a, int32_t b) { return (int32_t)((uint32_t)a + (uint32_t)b); }
 static inline int32_t clamp24(int64_t v) { return (int32_t)(v > 0x7fffff ? 0x7fffff : v < -0x800000 ? -0x800000 : v); }
 static inline int32_t wrap24(int32_t v) { return (int32_t)((uint32_t)v << 8) >> 8; }
+static inline int32_t wrap20(int32_t v) { return (int32_t)((uint32_t)v << 12) >> 12; }
+static inline int32_t wrap18(int32_t v) { return (int32_t)((uint32_t)v << 14) >> 14; }
+static inline int32_t gain_current(int32_t cell) { return (int16_t)(cell >> 10); }
+static inline int32_t gain_goal(int32_t cell) { return (int16_t)(uint16_t)((cell & 0x3ff) << 6); }
+static inline int voice_count(const xp_t *xp) { return (xp->regs[XP_HIGHEST_VOICE >> 1] & 0x3f) + 1; }
+static inline int slot_count(const xp_t *xp) { return voice_count(xp) * 4; }
+static inline int ramp_base(const xp_t *xp) { return XP_IRAM_SIZE - ((xp->regs[XP_DSP_CONFIG >> 1] >> 8) & 0x1f); }
 static inline int32_t min32(int32_t a, int32_t b) { return a < b ? a : b; }
 static inline int32_t max32(int32_t a, int32_t b) { return a > b ? a : b; }
 static inline bool bit(uint32_t v, int n) { return (v >> n) & 1; }
@@ -218,14 +224,16 @@ void xp_reset(xp_t *xp)
 	memset(xp->bus, 0, sizeof(xp->bus));
 	memset(xp->iram, 0, sizeof(xp->iram));
 	memset(xp->iram_ramping, 0, sizeof(xp->iram_ramping));
+	memset(xp->iram_target, 0, sizeof(xp->iram_target));
 	memset(xp->voices, 0, sizeof(xp->voices));
 	memset(&xp->dsp, 0, sizeof(xp->dsp));
 	xp->program_dirty = true;
 	xp->dsp_enabled = false;
+	xp->bus_written = 0;
 	xp->run_mask = 0;
+	xp->run_pending = 0;
 	xp->read_latch = 0;
 	xp->frame_counter = 0;
-	xp->noise = 0x2545f491;
 	xp->irq_head = 0;
 	xp->irq_count = 0;
 	update_int(xp);
@@ -281,6 +289,8 @@ static bool ramp_current(const xp_voice_t *v, int index, uint32_t *value)
 	}
 }
 
+static void commit_run_mask(xp_t *xp);
+
 static int iram_word(uint32_t address)
 {
 	return (address < XP_IRAM3_BASE ? 0 : 0x40) + (int)((address - XP_IRAM_BASE) >> 2);
@@ -289,9 +299,7 @@ static int iram_word(uint32_t address)
 static void load_latch(xp_t *xp, uint32_t address)
 {
 	const xp_voice_t *v = &xp->voices[(address >> 2) & 63];
-	if (address >= XP_IRAM3_BASE + 8 && address < XP_IRAM3_BASE + 12)
-		xp->read_latch = xp->noise;
-	else if (address < XP_CRAM_BASE && ramp_current(v, address >> 8, &xp->read_latch))
+	if (address < XP_CRAM_BASE && ramp_current(v, address >> 8, &xp->read_latch))
 		;
 	else if (address >= XP_CRAM_BASE && address < XP_IRAM_BASE)
 		xp->read_latch = xp->regs[address >> 1];
@@ -309,6 +317,8 @@ uint16_t xp_read(xp_t *xp, uint32_t offset)
 		load_latch(xp, address);
 	else if (address < XP_SEND_BASE)
 	{
+		if (address < XP_ROM_SELECT)
+			commit_run_mask(xp);
 		switch (address)
 		{
 		case XP_READBACK_LOW:
@@ -333,9 +343,9 @@ uint16_t xp_read(xp_t *xp, uint32_t offset)
 	}
 	else if (address >= XP_ROM_WINDOW)
 	{
-		const uint32_t word = ((uint32_t)(xp->regs[XP_ROM_BANK >> 1] & 0x7f) << 20)
-			| ((uint32_t)(xp->regs[XP_ROM_PAGE >> 1] & 0x7ff) << 9) | ((address - XP_ROM_WINDOW) >> 1);
-		data = (uint16_t)(wave_byte(xp, word * 2) | (wave_byte(xp, word * 2 + 1) << 8));
+		const uint32_t byte = ((uint32_t)(xp->regs[XP_ROM_BANK >> 1] & 0x7f) << 20)
+			| ((uint32_t)(xp->regs[XP_ROM_PAGE >> 1] & 0x3ff) << 10) | (address - XP_ROM_WINDOW);
+		data = (uint16_t)(wave_byte(xp, byte) | (wave_byte(xp, byte + 1) << 8));
 	}
 	return data;
 }
@@ -345,10 +355,9 @@ static void write_page(xp_t *xp, int n, int index, uint32_t value)
 	xp_voice_t *v = &xp->voices[n];
 	switch (index)
 	{
-	case XP_PAGE_CONTROL:
-		if (bit(value, 15))
-			v->start_pending = 1;
-		break;
+	case 0x0c: v->predictor = wrap18((int32_t)value); break;
+	case 0x23: v->amplitude = (int32_t)(value & 0xfffff); break;
+	case 0x27: v->smooth = (int32_t)(value & 0xffff); break;
 	case XP_PAGE_PITCH_SEED:    ramp_seed(&v->pitch, (int32_t)value, XP_LAW_LINEAR); break;
 	case XP_PAGE_PITCH_TARGET:  ramp_retarget(&v->pitch, (int32_t)value, XP_LAW_LINEAR); break;
 	case XP_PAGE_PITCH_CONTROL: ramp_configure(&v->pitch, (uint16_t)value, XP_LAW_LINEAR); break;
@@ -379,11 +388,15 @@ static void write_page(xp_t *xp, int n, int index, uint32_t value)
 
 static void write_run_mask(xp_t *xp, int word, uint16_t data)
 {
-	const uint64_t before = xp->run_mask;
-	xp->run_mask = (xp->run_mask & ~((uint64_t)0xffff << (word * 16))) | ((uint64_t)data << (word * 16));
+	const uint64_t written = (uint64_t)data << (word * 16);
+	const uint64_t field = (uint64_t)0xffff << (word * 16);
+	const uint64_t cleared = xp->run_mask & field & ~written;
+
+	xp->run_mask &= ~cleared;
+	xp->run_pending = (xp->run_pending & ~field) | (written & ~xp->run_mask);
 	for (int n = word * 16; n < word * 16 + 16; n++)
 	{
-		if (((before >> n) & 1) && !((xp->run_mask >> n) & 1))
+		if ((cleared >> n) & 1)
 		{
 			xp_voice_t *v = &xp->voices[n];
 			v->reading = 0;
@@ -394,10 +407,30 @@ static void write_run_mask(xp_t *xp, int word, uint16_t data)
 	}
 }
 
+static void commit_run_mask(xp_t *xp)
+{
+	const uint64_t launched = xp->run_pending;
+	if (!launched)
+		return;
+	xp->run_mask |= launched;
+	xp->run_pending = 0;
+	for (int n = 0; n < XP_VOICES; n++)
+		if ((launched >> n) & 1)
+			xp->voices[n].start_pending = 1;
+}
+
 static void write_iram(xp_t *xp, int word, uint32_t value)
 {
-	xp->iram[word & 0xff] = (int32_t)(value << 8) >> 8;
+	xp->iram[word & 0xff] = (word >= ramp_base(xp)) ? (int32_t)(value & 0x3ffffff) : (int32_t)(value << 8) >> 8;
 	xp->iram_ramping[word & 0xff] = 0;
+}
+
+static void write_iram_target(xp_t *xp, int word, uint16_t value)
+{
+	xp->iram_target[word & 0x1f] = value;
+	if (word >= ramp_base(xp))
+		xp->iram[word & 0xff] = (xp->iram[word & 0xff] & ~0x3ff) | (value & 0x3ff);
+	xp->iram_ramping[word & 0xff] = 1;
 }
 
 void xp_write(xp_t *xp, uint32_t offset, uint16_t data, uint16_t mask)
@@ -423,11 +456,13 @@ void xp_write(xp_t *xp, uint32_t offset, uint16_t data, uint16_t mask)
 			write_iram(xp, iram_word(address), ((uint32_t)xp->regs[(address >> 1) & ~1] << 16) | xp->regs[address >> 1]);
 	}
 	else if (address < XP_PRAM_BASE)
-		xp->iram_ramping[0xc0 + ((address & 0xff) >> 1)] = 1;
+		write_iram_target(xp, 0xe0 + ((address >> 1) & 0x1f), xp->regs[address >> 1]);
 	else if (address < XP_RUN_MASK)
 		xp->program_dirty = true;
-	else if (address < 0x3908)
+	else if (address < XP_ROM_SELECT)
 		write_run_mask(xp, (int)((address - XP_RUN_MASK) >> 1), xp->regs[address >> 1]);
+	else if (address == XP_HIGHEST_VOICE || address == XP_DSP_CONFIG)
+		xp->program_dirty = true;
 }
 
 void xp_set_serial_words(xp_t *xp, int left, int right)
@@ -450,7 +485,7 @@ static int32_t delta_at(const xp_t *xp, const xp_voice_t *v, uint32_t address)
 	const int8_t delta = (int8_t)rom_byte(xp, v, address);
 	const uint8_t shifts = rom_byte(xp, v, address >> 5);
 	const int shift = bit(address, 4) ? (shifts >> 4) : (shifts & 0x0f);
-	return (int32_t)((uint32_t)(int32_t)delta << (shift + 10));
+	return (int32_t)delta << shift;
 }
 
 static void start_reader(xp_t *xp, int n)
@@ -474,7 +509,7 @@ static void start_reader(xp_t *xp, int n)
 	v->filter_band = 0;
 	v->predictor = 0;
 	for (uint32_t a = v->address & ~0x1fu; a < v->address; a++)
-		v->predictor = wrap_add(v->predictor, delta_at(xp, v, a));
+		v->predictor = wrap18(v->predictor + delta_at(xp, v, a));
 }
 
 static address_step_t advance(const xp_voice_t *v, address_step_t s)
@@ -536,7 +571,18 @@ static void run_voice(xp_t *xp, int n)
 			v->done_reported = 1;
 			raise_irq(xp, n, XP_IRQ_VOICE_DONE);
 		}
+		if (bit(v->tva2.control, 14))
+		{
+			int64_t sum = ((int64_t)v->tva1.current + v->tva2.current) << 2;
+			sum = sum > 0x7ffff ? 0x7ffff : sum < -0x80000 ? -0x80000 : sum;
+			v->amplitude = (int32_t)sum & ~1;
+		}
+		else
+			v->amplitude = (int32_t)(((int64_t)(v->tva1.current >> 3) * (v->tva2.current >> 4)) >> 8) & ~1;
 	}
+
+	v->smooth = (7 * v->smooth + (v->amplitude >> 4) + 3) >> 3;
+	v->smooth = v->smooth < 0 ? 0 : v->smooth > 0xffff ? 0xffff : v->smooth;
 
 	int32_t sample = 0;
 	if (v->reading)
@@ -549,13 +595,13 @@ static void run_voice(xp_t *xp, int n)
 			weighted += (int64_t)interp_weights[i][phase] * delta_at(xp, v, s.address);
 			s = advance(v, s);
 		}
-		sample = wrap_add(v->predictor, (int32_t)(weighted >> 12)) >> 4;
+		sample = wrap20(v->predictor + (int32_t)(weighted >> 12)) >> (3 - ((page(xp, n, 0x10) >> 3) & 3));
 
 		const uint32_t phase_sum = (uint32_t)v->sub_phase + (uint32_t)exp_decode(xp, ramp_value_at(&v->pitch, xp->frame_counter & 7, 8));
 		v->sub_phase = phase_sum & 0xffff;
 		for (uint32_t carry = phase_sum >> 16; carry && v->reading; carry--)
 		{
-			v->predictor = wrap_add(v->predictor, delta_at(xp, v, v->address));
+			v->predictor = wrap18(v->predictor + delta_at(xp, v, v->address));
 			const address_step_t next = advance(v, (address_step_t){ v->address, v->backward != 0, false });
 			if (next.stopped)
 			{
@@ -573,34 +619,37 @@ static void run_voice(xp_t *xp, int n)
 			if (!v->loop_reported && (v->backward ? v->address <= v->loop : v->address >= v->loop))
 			{
 				v->loop_reported = 1;
-				raise_irq(xp, n, XP_IRQ_LOOP_REACHED);
+				if (bit(page(xp, n, XP_PAGE_CONTROL), 15))
+					raise_irq(xp, n, XP_IRQ_LOOP_REACHED);
 			}
 		}
 	}
 
-	const uint32_t filter = page(xp, n, XP_PAGE_FILTER);
-	if (!(filter & 0xf000))
+	const int32_t f = v->tvf.current << 2;
+	const int32_t q = v->reso.current << 2;
+	v->filter_low = clamp24(v->filter_low + ((int64_t)f * v->filter_band) / (1 << 19));
+	const int32_t high = clamp24(sample - ((int32_t)(((int64_t)q * v->filter_band) / (1 << 19)) + v->filter_low));
+	v->filter_band = clamp24(v->filter_band + ((int64_t)f * high) / (1 << 19));
+	switch ((page(xp, n, XP_PAGE_FILTER) >> 10) & 3)
 	{
-		const int32_t f = ramp_coefficient_at(&v->tvf, xp->frame_counter & 7, 8);
-		const int32_t q = ramp_coefficient_at(&v->reso, xp->frame_counter & 7, 8);
-		v->filter_low += (int32_t)(((int64_t)f * v->filter_band) >> 14);
-		const int32_t high = sample - ((int32_t)(((int64_t)q * v->filter_band) >> 14) + v->filter_low);
-		v->filter_band += (int32_t)(((int64_t)f * high) >> 14);
-		switch ((filter >> 10) & 3)
-		{
-		case 0: sample = v->filter_low; break;
-		case 1: sample = v->filter_band; break;
-		case 2: sample = high; break;
-		case 3: sample = v->filter_low - high; break;
-		}
+	case 0: sample = v->filter_low; break;
+	case 1: sample = v->filter_band; break;
+	case 2: sample = high; break;
+	case 3: sample = v->filter_low - high; break;
 	}
-	sample = (int32_t)(((int64_t)sample * ramp_coefficient_at(&v->tva1, xp->frame_counter & 1, 2)) >> 14);
-	sample = (int32_t)(((int64_t)sample * ramp_coefficient_at(&v->tva2, xp->frame_counter & 7, 8)) >> 14);
+
+	sample = clamp24(((int64_t)sample * (v->smooth << 4)) >> 19);
 
 	for (int bank = 0; bank < 4; bank++)
 	{
 		const uint16_t s = send(xp, n, bank);
-		xp->bus[s & 63] += (int32_t)(((int64_t)sample * (s >> 6)) >> 10);
+		const int word = s & 63;
+		if (!((xp->bus_written >> word) & 1))
+		{
+			xp->bus_written |= (uint64_t)1 << word;
+			xp->bus[word] = 0;
+		}
+		xp->bus[word] += (int32_t)(((int64_t)sample * (s >> 6)) >> 9);
 	}
 }
 
@@ -608,18 +657,30 @@ static void run_voice(xp_t *xp, int n)
 
 static void update_iram_ramps(xp_t *xp)
 {
-	for (int word = 0xc0; word < XP_IRAM_SIZE; word++)
+	static const int32_t dither[4] = { 0 << 15, 2 << 15, 1 << 15, 3 << 15 };
+
+	if (xp->frame_counter & 1)
+		return;
+	for (int word = ramp_base(xp); word < XP_IRAM_SIZE; word++)
 	{
 		if (!xp->iram_ramping[word])
 			continue;
-		const int32_t target = (int32_t)xp->regs[(XP_IRAM3_TARGET_BASE >> 1) + (word - 0xc0)] << 13;
-		const int32_t rate = xp->regs[(XP_IRAM3_RATE >> 1) + ((word - 0xc0) >> 4)];
-		int32_t *current = &xp->iram[word];
-		if (*current < target)
-			*current = min32(*current + rate, target);
-		else
-			*current = max32(*current - rate, target);
-		if (*current == target)
+		const int32_t target = xp->iram_target[word & 0x1f] & 0x3ff;
+		const int32_t cell = (xp->iram[word] & ~0x3ff) | target;
+		const int32_t goal = gain_goal(cell);
+		int32_t current = gain_current(cell);
+		if (target == 0x200)
+			xp->iram_ramping[word] = 0;
+		else if (current != goal)
+		{
+			const int32_t rate = xp->regs[(XP_IRAM3_RATE >> 1) + (word & 3)];
+			const int64_t distance = goal > current ? goal - current : current - goal;
+			int32_t step = (int32_t)((distance * rate + dither[(xp->frame_counter >> 1) & 3]) >> 17);
+			step = step < 1 ? 1 : step;
+			current = (current < goal) ? min32(current + step, goal) : max32(current - step, goal);
+		}
+		xp->iram[word] = ((current << 10) | target) & 0x3ffffff;
+		if (current == goal)
 			xp->iram_ramping[word] = 0;
 	}
 }
@@ -664,24 +725,25 @@ void xp_decode_program(xp_t *xp)
 
 static int32_t output_word(const xp_t *xp, int word)
 {
-	return clamp24((int64_t)xp->iram[word] * 2);
+	return clamp24(xp->iram[word]);
 }
 
 static void exchange_serial(xp_t *xp)
 {
-	if (xp->link.serial_out)
+	const uint16_t mode = xp->regs[XP_DSP_MODE >> 1];
+	if ((mode & 3) == 3 && xp->link.serial_out)
 		for (int channel = 0; channel < 2; channel++)
 			xp->link.serial_out(xp->link.user, channel, output_word(xp, xp->serial_out_word[channel]));
-	if (xp->link.serial_in)
-		for (int channel = 0; channel < 2; channel++)
-			xp->dsp.serial_frame[channel] = wrap24(xp->link.serial_in(xp->link.user, channel));
+	for (int channel = 0; channel < 2; channel++)
+		xp->dsp.serial_frame[channel] = (bit(mode, 1) && xp->link.serial_in) ? wrap24(xp->link.serial_in(xp->link.user, channel)) : 0;
 }
 
 static void dsp_frame_start(xp_t *xp)
 {
 	update_iram_ramps(xp);
 	for (int n = 0; n < XP_BUS_COUNT; n++)
-		xp->iram[0x40 + n] = clamp24(xp->bus[n] >> XP_DSP_INPUT_SHIFT);
+		if ((xp->bus_written >> n) & 1)
+			xp->iram[0x40 + n] = clamp24(xp->bus[n]);
 	exchange_serial(xp);
 }
 
@@ -692,10 +754,11 @@ void xp_schedule(xp_t *xp)
 	uint8_t reads[XP_DSP_SLOTS], loads[XP_DSP_SLOTS];
 	int strobes = 0;
 
+	const int base = ramp_base(xp);
 	for (int i = 0; i < XP_DSP_SLOTS; i++)
 	{
 		reads[i] = s[i].eram_op == 1 || s[i].col == 0x20;
-		loads[i] = s[i].st == 1 && s[i].word < 0xf0;
+		loads[i] = s[i].st == 1 && s[i].word < base;
 	}
 	for (int i = 0; i < XP_DSP_SLOTS; i++)
 	{
@@ -704,10 +767,7 @@ void xp_schedule(xp_t *xp)
 		for (int k = 0; k < 4; k++)
 			o[i].latch_fresh |= reads[(i - 2 - k) & 0xff];
 		o[i].now_valid = loads[i];
-		o[i].gain_load = s[i].st == 1 && s[i].word >= 0xf0;
-		o[i].r_use = loads[i];
-		for (int k = 1; k <= 3 && !o[i].r_use; k++)
-			o[i].r_use = loads[(i - k) & 0xff];
+		o[i].gain_load = s[i].st == 1 && s[i].word >= base;
 		o[i].strobe = 0xff;
 		if (s[i].ext == 1)
 			o[i].strobe = (uint8_t)(strobes++ & 1);
@@ -776,44 +836,51 @@ static void e_eram_index(jit_builder_t *b, uint16_t offset)
 	sljit_emit_op2(b->c, SLJIT_SHL, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 2);
 }
 
-/* R0 = the slot's operand; R1 holds the word read this slot when now_valid */
-static void e_operand(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o)
+/* dst = s32(((a * f) << shift + 0x4000) >> 15): a product against a Q15 factor */
+static void e_mulq15(jit_builder_t *b, sljit_s32 dst, sljit_s32 a, sljit_s32 f, int shift)
 {
-	switch (s->col >> 4)
+	sljit_emit_op2(b->c, SLJIT_MUL, dst, 0, a, 0, f, 0);
+	if (shift)
+		sljit_emit_op2(b->c, SLJIT_SHL, dst, 0, dst, 0, SLJIT_IMM, shift);
+	sljit_emit_op2(b->c, SLJIT_ADD, dst, 0, dst, 0, SLJIT_IMM, 0x4000);
+	sljit_emit_op2(b->c, SLJIT_ASHR, dst, 0, dst, 0, SLJIT_IMM, 15);
+	e_sext(b, dst);
+}
+
+/* R0 = the multiply input named by col[5:4]: the previous multiply's input, the accumulator, the
+   read latch, or what is arriving from memory; R1 holds the word read this slot when now_valid */
+static void e_operand(jit_builder_t *b, int mode, const xp_slot_t *s, const xp_sched_t *o)
+{
+	switch (mode)
 	{
+	case 0:
+		e_load(b, SLJIT_R0, CELL(dsp.input));
+		return;
 	case 1:
 		e_mov(b, SLJIT_R0, XP_REG_ACC, 0);
 		return;
-	case 3:
+	case 2:
+		e_load(b, SLJIT_R0, CELL(dsp.r));
+		return;
+	default:
 		if (o->latch_fresh)
-		{
 			e_load(b, SLJIT_R0, CELL(dsp.latch));
-			return;
-		}
-		if (s->st == 1)
+		else if (s->st == 1)
 		{
 			if (o->now_valid)
 				e_mov(b, SLJIT_R0, SLJIT_R1, 0);
 			else
 				e_mov(b, SLJIT_R0, SLJIT_IMM, 0);
-			return;
 		}
-		if (s->st == 2)
-		{
+		else if (s->st == 2)
 			e_load(b, SLJIT_R0, CELL(dsp.latch));
-			return;
-		}
-		break;
-	default:
-		break;
+		else
+			e_load(b, SLJIT_R0, CELL(dsp.r));
+		return;
 	}
-	if (o->r_use)
-		e_load(b, SLJIT_R0, CELL(dsp.r));
-	else
-		e_mov(b, SLJIT_R0, SLJIT_IMM, 0);
 }
 
-/* R2 = "now_valid ? now : 0" */
+/* dst = "now_valid ? now : 0" */
 static void e_now(jit_builder_t *b, const xp_sched_t *o, sljit_s32 dst)
 {
 	if (o->now_valid)
@@ -822,183 +889,273 @@ static void e_now(jit_builder_t *b, const xp_sched_t *o, sljit_s32 dst)
 		e_mov(b, dst, SLJIT_IMM, 0);
 }
 
-/* the ALU: acc in XP_REG_ACC, the previous product in XP_REG_PPREV, this slot's product left in R2 */
-static void e_execute(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o)
+/* dst = min or max of dst and (src, srcw) */
+static void e_minmax(jit_builder_t *b, sljit_s32 dst, sljit_s32 src, sljit_sw srcw, bool max)
 {
-	const int nibble = s->col & 0xf;
-	e_operand(b, s, o);
+	struct sljit_jump *keep = sljit_emit_cmp(b->c, max ? SLJIT_SIG_GREATER_EQUAL : SLJIT_SIG_LESS_EQUAL, dst, 0, src, srcw);
+	e_mov(b, dst, src, srcw);
+	sljit_set_label(keep, sljit_emit_label(b->c));
+}
 
-	if (s->col == 0x30 && s->cram <= 0x000f)
-	{
-		e_now(b, o, SLJIT_R2);
-		switch (s->cram & 0xf)
-		{
-		case 0:
-		case 2:
-			e_load(b, SLJIT_R3, CELL(dsp.mem));
-			e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_R3, 0);
-			break;
-		case 4:
-			e_load(b, XP_REG_ACC, CELL(dsp.mem));
-			break;
-		case 5:
-			e_mov(b, XP_REG_ACC, XP_REG_PPREV, 0);
-			break;
-		case 9:
-			e_load(b, SLJIT_R3, CELL(dsp.mem));
-			e_add(b, XP_REG_ACC, SLJIT_R3, XP_REG_PPREV, 0);
-			break;
-		default:
-			e_add(b, XP_REG_ACC, XP_REG_ACC, XP_REG_PPREV, 0);
-			break;
-		}
-		return;
-	}
+/* acc = |acc| */
+static void e_abs(jit_builder_t *b)
+{
+	sljit_emit_op2(b->c, SLJIT_SUB, SLJIT_R3, 0, SLJIT_IMM, 0, XP_REG_ACC, 0);
+	struct sljit_jump *positive = sljit_emit_cmp(b->c, SLJIT_SIG_GREATER_EQUAL, XP_REG_ACC, 0, SLJIT_IMM, 0);
+	e_mov(b, XP_REG_ACC, SLJIT_R3, 0);
+	sljit_set_label(positive, sljit_emit_label(b->c));
+}
 
-	if (s->col == 0x30 && (s->cram & 0x3e80) == 0x0280)
-	{
-		const int code = s->cram & 0xf;
-		const int select = (s->cram >> 4) & 3;
-		e_load(b, SLJIT_R4, CELL(dsp.gain));
-
-		if (code == 5)
-		{
-			if (select == 1)
-				e_mov(b, SLJIT_R3, (s->st == 3) ? XP_REG_ACC : XP_REG_ABP, 0);
-			else if (select == 2)
-				e_load(b, SLJIT_R3, CELL(dsp.mem));
-			else if (o->latch_fresh || o->now_valid)
-				e_mov(b, SLJIT_R3, SLJIT_R0, 0);
-			else
-				e_load(b, SLJIT_R3, CELL(dsp.mem));
-			e_mul13(b, SLJIT_R2, SLJIT_R3, SLJIT_R4, 0);
-			e_mov(b, XP_REG_ACC, XP_REG_PPREV, 0);
-			return;
-		}
-
-		if (code == 3 && select == 2)
-		{
-			e_load(b, SLJIT_R3, CELL(dsp.mem));
-			e_mul13(b, SLJIT_R2, SLJIT_R3, SLJIT_R4, 0);
-		}
-		else if (code == 1 && select == 2)
-		{
-			if (o->now_valid)
-				e_mov(b, SLJIT_R3, SLJIT_R1, 0);
-			else if (o->r_use)
-				e_load(b, SLJIT_R3, CELL(dsp.r));
-			else
-				e_mov(b, SLJIT_R3, SLJIT_IMM, 0);
-			e_mul13(b, SLJIT_R2, SLJIT_R3, SLJIT_R4, 0);
-		}
-		else if ((code == 1 || code == 3) && select == 3)
-			e_mul13(b, SLJIT_R2, SLJIT_R0, SLJIT_R4, 0);
-		else if (code == 1 || code == 2 || code == 3)
-			e_mul13(b, SLJIT_R2, XP_REG_ACC, SLJIT_R4, 0);
-		else
-			e_mov(b, SLJIT_R2, SLJIT_R0, 0);
-
-		if (code == 2 || code == 3)
-			e_add(b, XP_REG_ACC, XP_REG_ACC, XP_REG_PPREV, 0);
-		else
-		{
-			e_mul13(b, SLJIT_R3, XP_REG_ACC, SLJIT_R4, 0);
-			e_add(b, XP_REG_ACC, SLJIT_R3, XP_REG_PPREV, 0);
-		}
-		return;
-	}
-
-	if (s->col == 0x30 && (s->cram == 0x1001 || s->cram == 0x2801 || s->cram == 0x0231 || s->cram == 0x0325))
-	{
-		e_mov(b, SLJIT_R2, SLJIT_IMM, 0);
-		switch (s->cram)
-		{
-		case 0x1001:
-			e_wrap24(b, XP_REG_ACC);
-			break;
-		case 0x2801:
-		{
-			e_wrap24(b, XP_REG_ACC);
-			sljit_emit_op2(b->c, SLJIT_SUB, SLJIT_R3, 0, SLJIT_IMM, 0, XP_REG_ACC, 0);
-			struct sljit_jump *positive = sljit_emit_cmp(b->c, SLJIT_SIG_GREATER_EQUAL, XP_REG_ACC, 0, SLJIT_IMM, 0);
-			e_mov(b, XP_REG_ACC, SLJIT_R3, 0);
-			sljit_set_label(positive, sljit_emit_label(b->c));
-			break;
-		}
-		case 0x0231:
-			e_now(b, o, SLJIT_R3);
-			e_load(b, SLJIT_R4, CELL(dsp.latch));
-			sljit_emit_op2(b->c, SLJIT_SUB, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_R3, 0);
-			e_sext(b, SLJIT_R4);
-			sljit_emit_op1(b->c, SLJIT_MOV_U16, SLJIT_R0, 0, CELL(dsp.fraction));
-			sljit_emit_op2(b->c, SLJIT_MUL, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_R0, 0);
-			sljit_emit_op2(b->c, SLJIT_ASHR, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, 12);
-			e_sext(b, SLJIT_R4);
-			e_add(b, XP_REG_ACC, SLJIT_R3, SLJIT_R4, 0);
-			break;
-		default:
-			break;
-		}
-		return;
-	}
-
-	if (s->col == 0x0c)
-	{
-		e_load(b, SLJIT_R3, CELL(dsp.serial_in));
-		e_mul13(b, SLJIT_R2, SLJIT_R3, SLJIT_IMM, s->coefficient);
-		return;
-	}
-
-	if (nibble == 0 && s->col != 0x30)
-		e_mov(b, SLJIT_R2, SLJIT_R0, 0);
-	else
-		e_mul13(b, SLJIT_R2, SLJIT_R0, SLJIT_IMM, s->coefficient);
-
-	switch (s->col)
-	{
-	case 0x11:
-		if (o->now_valid)
-			e_mov(b, XP_REG_ACC, SLJIT_R1, 0);
-		return;
-	case 0x14:
-		e_load(b, XP_REG_ACC, CELL(dsp.mem));
-		return;
-	case 0x0f:
-		e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_IMM, s->raw);
-		return;
-	case 0x1f:
-		e_load(b, SLJIT_R3, CELL(dsp.mem));
-		e_add(b, XP_REG_ACC, SLJIT_R3, SLJIT_IMM, s->raw);
-		return;
-	case 0x2f:
-		e_add(b, XP_REG_ACC, XP_REG_PPREV, SLJIT_IMM, s->raw);
-		return;
-	case 0x20:
-	case 0x21:
-		return;
-	case 0x32:
-		e_add(b, XP_REG_ACC, XP_REG_ACC, XP_REG_PPREV, 0);
-		return;
-	default:
-		break;
-	}
-
-	switch (nibble)
+/* R4 = the parallel op's factor as Q15: the latched fraction, |acc| >> 8, acc >> 8, or the gain register */
+static void e_factor(jit_builder_t *b, int factor, bool complement)
+{
+	switch (factor)
 	{
 	case 0:
-	case 3:
+		sljit_emit_op1(b->c, SLJIT_MOV_U16, SLJIT_R4, 0, CELL(dsp.fraction));
+		if (complement)
+			sljit_emit_op2(b->c, SLJIT_SUB, SLJIT_R4, 0, SLJIT_IMM, 0x1000, SLJIT_R4, 0);
+		sljit_emit_op2(b->c, SLJIT_SHL, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, 3);
+		break;
+	case 1:
+		e_mov(b, SLJIT_R4, XP_REG_ACC, 0);
+		sljit_emit_op2(b->c, SLJIT_SUB, SLJIT_R3, 0, SLJIT_IMM, 0, SLJIT_R4, 0);
+		{
+			struct sljit_jump *positive = sljit_emit_cmp(b->c, SLJIT_SIG_GREATER_EQUAL, SLJIT_R4, 0, SLJIT_IMM, 0);
+			e_mov(b, SLJIT_R4, SLJIT_R3, 0);
+			sljit_set_label(positive, sljit_emit_label(b->c));
+		}
+		sljit_emit_op2(b->c, SLJIT_ASHR, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, 8);
+		break;
+	case 2:
+		sljit_emit_op2(b->c, SLJIT_ASHR, SLJIT_R4, 0, XP_REG_ACC, 0, SLJIT_IMM, 8);
+		break;
+	default:
+		e_load(b, SLJIT_R4, CELL(dsp.gain));
+		if (complement)
+			sljit_emit_op2(b->c, SLJIT_SUB, SLJIT_R4, 0, SLJIT_IMM, 0, SLJIT_R4, 0);
+		break;
+	}
+}
+
+/* the ALU functions both encodings share: p is XP_REG_PPREV, r the read latch */
+static void e_alu(jit_builder_t *b, int fn, int mode, int32_t raw)
+{
+	switch (fn)
+	{
+	case 0x2:
+		e_load(b, SLJIT_R3, CELL(dsp.mem));
+		e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_R3, 0);
+		break;
+	case 0x3:
 		e_add(b, XP_REG_ACC, XP_REG_ACC, XP_REG_PPREV, 0);
 		break;
-	case 5:
+	case 0x4:
+		e_load(b, XP_REG_ACC, CELL(dsp.mem));
+		break;
+	case 0x5:
 		e_mov(b, XP_REG_ACC, XP_REG_PPREV, 0);
 		break;
-	case 9:
+	case 0x6:
+		sljit_emit_op2(b->c, SLJIT_SUB, XP_REG_ACC, 0, SLJIT_IMM, 0, XP_REG_ACC, 0);
+		e_sext(b, XP_REG_ACC);
+		break;
+	case 0x7:
+		e_load(b, SLJIT_R3, CELL(dsp.mem));
+		sljit_emit_op2(b->c, SLJIT_SUB, XP_REG_ACC, 0, SLJIT_R3, 0, XP_REG_ACC, 0);
+		e_sext(b, XP_REG_ACC);
+		break;
+	case 0x8:
+		sljit_emit_op2(b->c, SLJIT_SUB, XP_REG_ACC, 0, XP_REG_PPREV, 0, XP_REG_ACC, 0);
+		e_sext(b, XP_REG_ACC);
+		break;
+	case 0x9:
 		e_load(b, SLJIT_R3, CELL(dsp.mem));
 		e_add(b, XP_REG_ACC, SLJIT_R3, XP_REG_PPREV, 0);
 		break;
+	case 0xa:
+	case 0xb:
+		e_load(b, SLJIT_R3, CELL(dsp.mem));
+		e_minmax(b, XP_REG_ACC, SLJIT_R3, 0, fn == 0xb);
+		break;
+	case 0xc:
+		if (mode == 2)
+		{
+			sljit_emit_op2(b->c, SLJIT_ASHR, SLJIT_R3, 0, XP_REG_PPREV, 0, SLJIT_IMM, 13);
+			e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_R3, 0);
+		}
+		else if (mode == 3)
+			sljit_emit_op2(b->c, SLJIT_ASHR, XP_REG_ACC, 0, XP_REG_PPREV, 0, SLJIT_IMM, 13);
+		break;
+	case 0xd:
+		if (mode < 3)
+			sljit_emit_op2(b->c, mode == 0 ? SLJIT_AND : mode == 1 ? SLJIT_OR : SLJIT_XOR, XP_REG_ACC, 0, XP_REG_ACC, 0, SLJIT_IMM, raw);
+		break;
+	case 0xe:
+		if (mode < 2)
+			e_minmax(b, XP_REG_ACC, SLJIT_IMM, raw, mode == 1);
+		break;
+	case 0xf:
+		switch (mode)
+		{
+		case 0:
+			e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_IMM, raw);
+			break;
+		case 1:
+			e_load(b, SLJIT_R3, CELL(dsp.mem));
+			e_add(b, XP_REG_ACC, SLJIT_R3, SLJIT_IMM, raw);
+			break;
+		case 2:
+			e_add(b, XP_REG_ACC, XP_REG_PPREV, SLJIT_IMM, raw);
+			break;
+		default:
+			sljit_emit_op2(b->c, SLJIT_SUB, XP_REG_ACC, 0, SLJIT_IMM, raw, XP_REG_ACC, 0);
+			e_sext(b, XP_REG_ACC);
+			break;
+		}
+		break;
 	default:
 		break;
 	}
+}
+
+/* col 0x30: the CRAM word is a second instruction; the product is left in R2 */
+static void e_parallel(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o)
+{
+	static const int shifts[4] = { 0, 1, 2, 4 };
+	const uint16_t c = s->cram;
+	const int fn = c & 0xf;
+	const int input = (c >> 4) & 3;
+	const int factor = (c >> 6) & 3;
+	const bool complement = bit(c, 8);
+	const bool multiply = bit(c, 9);
+	const int post = (c >> 11) & 7;
+	const int shift = shifts[c >> 14];
+
+	if (!multiply)
+	{
+		e_now(b, o, SLJIT_R0);
+		e_mov(b, SLJIT_R2, SLJIT_R0, 0);
+	}
+	else if (fn == 9)
+	{
+		e_operand(b, 3, s, o);
+		e_mov(b, SLJIT_R2, SLJIT_R0, 0);
+	}
+	else
+	{
+		switch (input)
+		{
+		case 0:
+			e_load(b, SLJIT_R0, CELL(dsp.input));
+			break;
+		case 1:
+			e_mov(b, SLJIT_R0, (fn == 5 && s->st != 3) ? XP_REG_ABP : XP_REG_ACC, 0);
+			break;
+		case 2:
+			if (fn == 1)
+			{
+				if (o->now_valid)
+					e_mov(b, SLJIT_R0, SLJIT_R1, 0);
+				else
+					e_load(b, SLJIT_R0, CELL(dsp.r));
+			}
+			else
+				e_load(b, SLJIT_R0, CELL(dsp.mem));
+			break;
+		default:
+			e_operand(b, 3, s, o);
+			break;
+		}
+		e_factor(b, factor, complement);
+		e_mulq15(b, SLJIT_R2, SLJIT_R0, SLJIT_R4, shift);
+	}
+	e_store(b, CELL(dsp.input), SLJIT_R0);
+
+	switch (fn)
+	{
+	case 0x0:
+	case 0x2:
+		e_load(b, SLJIT_R3, CELL(dsp.mem));
+		e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_R3, 0);
+		break;
+	case 0x1:
+	case 0x9:
+		if (multiply)
+		{
+			e_factor(b, factor, complement);
+			e_mulq15(b, SLJIT_R3, XP_REG_ACC, SLJIT_R4, shift);
+			e_add(b, XP_REG_ACC, SLJIT_R3, XP_REG_PPREV, 0);
+		}
+		else if (fn == 9)
+		{
+			e_load(b, SLJIT_R3, CELL(dsp.mem));
+			e_add(b, XP_REG_ACC, SLJIT_R3, XP_REG_PPREV, 0);
+		}
+		break;
+	default:
+		e_alu(b, fn, input, s->raw);
+		break;
+	}
+
+	if (bit(c, 10))
+		e_wrap24(b, XP_REG_ACC);
+	switch (post)
+	{
+	case 1:
+		e_abs(b);
+		break;
+	case 2:
+		e_wrap24(b, XP_REG_ACC);
+		break;
+	case 3:
+		sljit_emit_op2(b->c, SLJIT_AND, SLJIT_R3, 0, XP_REG_ACC, 0, SLJIT_IMM, 0xffffff);
+		sljit_emit_op2(b->c, SLJIT_LSHR, SLJIT_R4, 0, SLJIT_R3, 0, SLJIT_IMM, 23);
+		sljit_emit_op2(b->c, SLJIT_LSHR, SLJIT_R0, 0, SLJIT_R3, 0, SLJIT_IMM, 6);
+		sljit_emit_op2(b->c, SLJIT_XOR, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_R0, 0);
+		sljit_emit_op2(b->c, SLJIT_LSHR, SLJIT_R0, 0, SLJIT_R3, 0, SLJIT_IMM, 1);
+		sljit_emit_op2(b->c, SLJIT_XOR, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_R0, 0);
+		sljit_emit_op2(b->c, SLJIT_AND, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, 1);
+		sljit_emit_op2(b->c, SLJIT_SHL, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 1);
+		sljit_emit_op2(b->c, SLJIT_OR, XP_REG_ACC, 0, SLJIT_R3, 0, SLJIT_R4, 0);
+		e_wrap24(b, XP_REG_ACC);
+		break;
+	case 5:
+		e_wrap24(b, XP_REG_ACC);
+		{
+			struct sljit_jump *positive = sljit_emit_cmp(b->c, SLJIT_SIG_GREATER_EQUAL, XP_REG_ACC, 0, SLJIT_IMM, 0);
+			sljit_emit_op2(b->c, SLJIT_XOR, XP_REG_ACC, 0, XP_REG_ACC, 0, SLJIT_IMM, -1);
+			sljit_set_label(positive, sljit_emit_label(b->c));
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+/* the grid: the multiply input by col[5:4] and the function by col[3:0]; this slot's product is left in R2 */
+static void e_execute(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o)
+{
+	if (s->col == 0x30)
+	{
+		e_parallel(b, s, o);
+		return;
+	}
+
+	const int mode = s->col >> 4;
+	const int fn = s->col & 0xf;
+
+	if (fn == 0xc && mode == 0)
+		e_load(b, SLJIT_R0, CELL(dsp.serial_in));
+	else
+		e_operand(b, mode, s, o);
+	e_store(b, CELL(dsp.input), SLJIT_R0);
+	if (fn == 0xc && mode == 1)
+		e_mov(b, SLJIT_R2, SLJIT_IMM, 0);
+	else
+		e_mul13(b, SLJIT_R2, SLJIT_R0, SLJIT_IMM, s->coefficient);
+
+	e_alu(b, fn, mode, s->raw);
 }
 
 static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t *o)
@@ -1041,7 +1198,8 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 
 	if (o->gain_load)
 	{
-		sljit_emit_op2(b->c, SLJIT_ASHR, SLJIT_R3, 0, SLJIT_R1, 0, SLJIT_IMM, 8);
+		sljit_emit_op2(b->c, SLJIT_ASHR, SLJIT_R3, 0, SLJIT_R1, 0, SLJIT_IMM, 10);
+		sljit_emit_op1(b->c, SLJIT_MOV_S16, SLJIT_R3, 0, SLJIT_R3, 0);
 		e_store(b, CELL(dsp.gain), SLJIT_R3);
 	}
 	if (s->st == 2)
@@ -1090,7 +1248,7 @@ static bool compile_program(xp_t *xp)
 	e_mov(&b, XP_REG_PPREV, SLJIT_IMM, 0);
 	e_mov(&b, XP_REG_ABEF, XP_REG_ACC, 0);
 	sljit_emit_op1(b.c, SLJIT_MOV_P, XP_REG_ERAM, 0, CELL(eram));
-	for (int i = 0; i < XP_DSP_SLOTS; i++)
+	for (int i = 0; i < slot_count(xp); i++)
 		e_slot(&b, i, &xp->slots[i], &xp->sched[i]);
 	e_store(&b, CELL(dsp.acc), XP_REG_ACC);
 
@@ -1114,7 +1272,7 @@ static bool compile_program(xp_t *xp)
 
 void xp_run_dsp(xp_t *xp)
 {
-	xp->dsp_enabled = bit(xp->regs[XP_DSP_MODE >> 1], 1);
+	xp->dsp_enabled = bit(xp->regs[XP_DSP_MODE >> 1], 2);
 	if (!xp->dsp_enabled)
 		return;
 	if (xp->program_dirty)
@@ -1131,13 +1289,10 @@ void xp_run_dsp(xp_t *xp)
 
 void xp_run_frame(xp_t *xp)
 {
-	memset(xp->bus, 0, sizeof(xp->bus));
-	for (int n = 0; n < XP_VOICES; n++)
+	xp->bus_written = 0;
+	for (int n = 0; n < voice_count(xp); n++)
 		run_voice(xp, n);
 	xp->frame_counter++;
-	xp->noise ^= xp->noise << 13;
-	xp->noise ^= xp->noise >> 17;
-	xp->noise ^= xp->noise << 5;
 
 	xp_run_dsp(xp);
 }

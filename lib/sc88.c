@@ -77,7 +77,7 @@ static void sub_midi_out(void *user, uint8_t byte)
 static void xp_serial_out(void *user, int channel, int32_t word)
 {
 	sc88_t *b = user;
-	lsp_serial_write(&b->lsp, channel, word);
+	lsp_serial_write(&b->lsp, channel, word << 2);
 	if (channel == 1)
 		lsp_run_sample(&b->lsp);
 }
@@ -85,7 +85,7 @@ static void xp_serial_out(void *user, int channel, int32_t word)
 static int32_t xp_serial_in(void *user, int channel)
 {
 	sc88_t *b = user;
-	return b->lsp_mute ? 0 : -(lsp_serial_read(&b->lsp, channel ^ 1) >> 9);
+	return b->lsp_mute ? 0 : -(lsp_serial_read(&b->lsp, channel ^ 1) >> 10);
 }
 
 /* ---------------------------------------------------------------- the H8's bus */
