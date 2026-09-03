@@ -153,6 +153,11 @@ int scemu_output_count(const scemu_t *m);
 void scemu_reset(scemu_t *m);
 uint64_t scemu_boot(scemu_t *m);
 
+/* True while the firmware holds the analog outputs muted (from reset until
+ * the boot is done); a host that renders the boot itself, to animate the
+ * display, polls this instead of calling scemu_boot. */
+bool scemu_muted(const scemu_t *m);
+
 /* Render `frames` frames.  out[pair] points at interleaved stereo, one 32-bit
  * word per channel holding the DAC's 24-bit sample, sign extended.  An out
  * pointer may be NULL.  MIDI queued with an offset inside the range is

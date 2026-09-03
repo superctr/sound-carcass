@@ -75,6 +75,11 @@ uint64_t scemu_boot(scemu_t *m)
 	return m->machine.frame - start;
 }
 
+bool scemu_muted(const scemu_t *m)
+{
+	return !sc88_idle(&m->machine);
+}
+
 void scemu_render(scemu_t *m, int32_t *const out[2], size_t frames)
 {
 	sc88_t *b = &m->machine;
