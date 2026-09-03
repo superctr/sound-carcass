@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "sjis.h"
 #include "smf.h"
 
 static uint32_t read_be32(const uint8_t *p) { return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3]; }
@@ -23,6 +24,15 @@ static uint32_t read_vlq(const uint8_t **p, const uint8_t *end)
 			break;
 	}
 	return v;
+}
+
+static void take_title(char *out, size_t size, const uint8_t *p, size_t length)
+{
+	sjis_text(p, length, out, size);
+	for (const char *q = out; *q; q++)
+		if (*q != ' ')
+			return;
+	out[0] = 0;
 }
 
 static smf_event_t *smf_add(smf_t *s)
@@ -42,7 +52,7 @@ static smf_event_t *smf_add(smf_t *s)
 	return e;
 }
 
-static int parse_track(smf_t *s, const uint8_t *p, const uint8_t *end)
+static int parse_track(smf_t *s, unsigned track, const uint8_t *p, const uint8_t *end, char *text, size_t text_size)
 {
 	uint64_t tick = 0;
 	uint8_t running = 0;
@@ -78,12 +88,9 @@ static int parse_track(smf_t *s, const uint8_t *p, const uint8_t *end)
 					s->ports |= (uint8_t)(1u << port);
 			}
 			else if (type == 0x03 && !s->name[0] && length)
-			{
-				size_t copy = length < sizeof(s->name) - 1 ? length : sizeof(s->name) - 1;
-				for (size_t n = 0; n < copy; n++)
-					s->name[n] = (p[n] >= 0x20 && p[n] < 0x7f) ? (char)p[n] : ' ';
-				s->name[copy] = 0;
-			}
+				take_title(s->name, sizeof(s->name), p, length);
+			else if (type == 0x01 && track == 0 && !text[0] && length)
+				take_title(text, text_size, p, length);
 			if (type == 0x2f)
 				break;
 			p += length;
@@ -180,6 +187,8 @@ int smf_load(smf_t *s, const char *path, uint32_t rate)
 		smf_free(s);
 		return 0;
 	}
+	char text[sizeof(s->name)];
+	text[0] = 0;
 	const uint8_t *p = data + 8 + read_be32(data + 4);
 	for (uint16_t t = 0; t < tracks && p + 8 <= data + size; t++)
 	{
@@ -189,13 +198,16 @@ int smf_load(smf_t *s, const char *path, uint32_t rate)
 		const uint8_t *end = p + 8 + length;
 		if (end > data + size || end < p)
 			end = data + size;
-		if (!parse_track(s, p + 8, end))
+		if (!parse_track(s, t, p + 8, end, text, sizeof(text)))
 		{
 			smf_free(s);
 			return 0;
 		}
 		p = end;
 	}
+	if (!s->name[0] && text[0])
+		memcpy(s->name, text, strlen(text) + 1);
+
 	qsort(s->events, s->count, sizeof(smf_event_t), compare_events);
 
 	double seconds = 0;

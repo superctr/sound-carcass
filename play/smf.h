@@ -29,7 +29,7 @@ typedef struct smf
 	size_t count, capacity;
 	uint16_t division;
 	uint32_t last_frame;
-	char name[64];
+	char name[128];
 	uint8_t ports;
 } smf_t;
 

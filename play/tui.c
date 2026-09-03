@@ -8,6 +8,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>
+#include <locale.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -15,6 +16,7 @@
 #include <string.h>
 #include <termios.h>
 #include <unistd.h>
+#include "sjis.h"
 #include "tui.h"
 
 #define FRAME_MAX 16384
@@ -63,6 +65,8 @@ tui_t *tui_open(void)
 {
 	if (!isatty(STDOUT_FILENO))
 		return NULL;
+
+	setlocale(LC_CTYPE, "");
 
 	tui_t *t = calloc(1, sizeof(*t));
 	if (!t)
@@ -298,9 +302,10 @@ static void build_frame(tui_t *t, const tui_state_t *st)
 	time_text(total, sizeof(total), st->total);
 
 	put(&b, "\n");
-	put(&b, " %sscplay%s  %s%s%s  %s%.40s%s", PLAIN, OFF, LIT, st->model, OFF, PLAIN, st->song, OFF);
+	put(&b, " %sscplay%s  %s%s%s  %s%.*s%s", PLAIN, OFF, LIT, st->model, OFF, PLAIN,
+	    (int)sjis_fit(st->song, 40), st->song, OFF);
 	if (st->title && st->title[0])
-		put(&b, "  %s%.32s%s", DIM, st->title, OFF);
+		put(&b, "  %s%.*s%s", DIM, (int)sjis_fit(st->title, 32), st->title, OFF);
 	put(&b, "\n");
 	put(&b, "\n");
 
@@ -325,8 +330,8 @@ static void build_frame(tui_t *t, const tui_state_t *st)
 		}
 		else
 		{
-			int lw = LEFT_W - 1 - (int)strlen(left_value[pair]);
-			int rw = RIGHT_W - (int)strlen(right_value[pair]);
+			int lw = LEFT_W - 1 - sjis_columns(left_value[pair]);
+			int rw = RIGHT_W - sjis_columns(right_value[pair]);
 			put(&b, "%s %s%s", LIT, left_value[pair], OFF);
 			pad(&b, lw > 0 ? lw : 0);
 			put(&b, "%s%s%s", LIT, right_value[pair], OFF);

@@ -122,6 +122,12 @@ same pixel the hardware wires them to.
 The LED row shows the panel's nine lamps; the SC-88's third button is labelled EQ, the Pro's second
 lens die appears as EFX.
 
+Above the panel stand the model, the file name and the song's own title: its first track name, or a
+text event on the first track for the many files that put the title there instead.  A title is kept as
+it stands when it is well-formed UTF-8 and decoded as Shift-JIS when it is not, so the Japanese titles
+most of the older files carry read as they were written; the line is cut by display columns, counting a
+full-width character as two.
+
 The terminal wants to be at least 70 columns wide and 22 rows tall (30 with the key list showing).  The
 display is redrawn at most thirty times a second and only when something changed.  Colour is 256-colour
 ANSI; the terminal is left as it was found, including after Ctrl-C.
