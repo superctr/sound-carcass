@@ -22,6 +22,7 @@ and starts instantly on later runs.
 | `--no-audio` | render as fast as the host allows and open no sound card; for `--wav` |
 | `--no-cache` | boot the firmware instead of loading the cached boot state, and use no cached settings memory |
 | `--keep-settings` | start from the settings memory the last `--keep-settings` run left, and save it again on exit |
+| `--midi-rate BAUD` | the speed of the MIDI input: 31250 is the cable and the default, 38400 the SC-88Pro's computer port, 0 removes the limit.  Faster than the firmware can take loses messages inside it: a song with a large setup block right after its GS reset plays with wrong sounds and levels at 0 |
 | `--tail N` | seconds to keep running after the last MIDI event (default 4) |
 | `--port 0 \| 1` | deliver the file to MIDI IN A or MIDI IN B (default A) |
 | `--map sc55 \| sc88 \| sc88pro` | play every part from that instrument map whatever the song selects: the file's bank select LSBs are rewritten, a part gets the selection before its first program change, and every reset (GS, GM, XG, SC-88 mode set) is followed by the selection on all sixteen parts.  The SC-88 has no SC-88Pro map and plays its own for it |

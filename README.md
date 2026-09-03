@@ -46,7 +46,8 @@ directory named after the model, beside the program or in `~/.mame/roms` — boo
 caches the booted machine, so later runs start instantly from factory settings (`--keep-settings` keeps
 the machine's settings memory across sessions instead).  `--no-audio --wav out.wav` renders a file
 about ten times faster than real time instead, and `--map sc55` (or `sc88`, `sc88pro`) plays every part
-from that instrument map whatever the song selects.  See [docs/scplay.md](docs/scplay.md).  It needs SDL2 and
+from that instrument map whatever the song selects; `--midi-rate 38400` feeds the file at the
+computer port's speed instead of the cable's.  See [docs/scplay.md](docs/scplay.md).  It needs SDL2 and
 zlib; without them the library and `scemu-cli` still build.
 
 ## Status

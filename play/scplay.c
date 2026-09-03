@@ -283,6 +283,7 @@ typedef struct options
 	bool keep_settings;
 	bool hold;
 	scemu_map_t map;
+	uint32_t midi_rate;
 } options_t;
 
 static void usage(FILE *fp)
@@ -301,6 +302,8 @@ static void usage(FILE *fp)
 	        "  --port 0|1                    MIDI IN A or B (default A)\n"
 	        "  --map sc55|sc88|sc88pro       play every part from that instrument map, whatever\n"
 	        "                                the song selects (the SC-88 has no SC-88Pro map)\n"
+	        "  --midi-rate BAUD              speed of the MIDI input: 31250 (the cable, default),\n"
+	        "                                38400 (the computer port), 0 for no limit\n"
 	        "  --hold                        wait for a key when the song ends\n"
 	        "  --help\n");
 }
@@ -309,6 +312,7 @@ static int parse_options(int argc, char **argv, options_t *o)
 {
 	memset(o, 0, sizeof(*o));
 	o->tail = 4.0;
+	o->midi_rate = 31250;
 	for (int n = 1; n < argc; n++)
 	{
 		const char *a = argv[n];
@@ -338,6 +342,8 @@ static int parse_options(int argc, char **argv, options_t *o)
 				return -1;
 			}
 		}
+		else if (!strcmp(a, "--midi-rate") && n + 1 < argc)
+			o->midi_rate = (uint32_t)atoi(argv[++n]);
 		else if (!strcmp(a, "--no-audio"))
 			o->no_audio = true;
 		else if (!strcmp(a, "--no-cache"))
@@ -516,6 +522,7 @@ int main(int argc, char **argv)
 	}
 
 	scemu_set_map(m, opt.map);
+	scemu_set_midi_rate(m, opt.midi_rate);
 
 	scplay_audio_t *audio = NULL;
 	if (!opt.no_audio && !g_quit)
