@@ -25,7 +25,10 @@
 #define SC88_H8_HALF_CYCLES_PER_FRAME 625u
 
 #define SC88_SRAM_SIZE 0x10000
-#define SC88_MIDI_QUEUE_SIZE 4096
+#define SC88_MIDI_PORTS 2
+#define SC88_MIDI_QUEUE_SIZE 16384
+#define SC88_MIDI_BYTE_CREDIT 256
+#define SC88_MIDI_FRAME_CREDIT 25
 
 typedef struct sc88_midi_event
 {
@@ -72,8 +75,10 @@ typedef struct sc88
 	scemu_computer_switch_t computer_switch;
 
 	uint64_t frame;
-	sc88_midi_event_t midi_queue[SC88_MIDI_QUEUE_SIZE];
-	uint32_t midi_head, midi_count;
+	sc88_midi_event_t midi_queue[SC88_MIDI_PORTS][SC88_MIDI_QUEUE_SIZE];
+	uint32_t midi_head[SC88_MIDI_PORTS], midi_count[SC88_MIDI_PORTS];
+	uint32_t midi_credit[SC88_MIDI_PORTS];
+	uint32_t midi_drops;
 	scemu_midi_out_fn midi_out;
 	void *midi_out_user;
 } sc88_t;
@@ -86,6 +91,7 @@ void sc88_run_frame(sc88_t *b);
 bool sc88_idle(const sc88_t *b);
 
 void sc88_queue_midi(sc88_t *b, int port, uint8_t byte, uint32_t frame_offset);
+void sc88_deliver_midi(sc88_t *b);
 
 /* The whole machine at a frame boundary: the struct with its pointers put back on load, then the ERAMs. */
 size_t sc88_state_size(const sc88_t *b);

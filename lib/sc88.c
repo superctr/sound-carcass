@@ -341,7 +341,10 @@ void sc88_reset(sc88_t *b)
 	b->mute = true;
 	b->lsp_mute = true;
 	b->frame = 0;
-	b->midi_head = b->midi_count = 0;
+	memset(b->midi_head, 0, sizeof(b->midi_head));
+	memset(b->midi_count, 0, sizeof(b->midi_count));
+	memset(b->midi_credit, 0, sizeof(b->midi_credit));
+	b->midi_drops = 0;
 	xp_reset(&b->xp);
 	if (b->has_lsp)
 		lsp_reset(&b->lsp);
@@ -353,25 +356,31 @@ void sc88_reset(sc88_t *b)
 
 /* ---------------------------------------------------------------- the frame */
 
-static void deliver_midi(sc88_t *b)
+void sc88_deliver_midi(sc88_t *b)
 {
-	while (b->midi_count)
+	for (int port = 0; port < SC88_MIDI_PORTS; port++)
 	{
-		sc88_midi_event_t *e = &b->midi_queue[b->midi_head];
-		if (e->frame > b->frame)
-			break;
-		if (b->has_panel)
-			sub_hle_midi_byte(&b->sub, e->port, e->byte);
-		else
-			h8500_sci_rx(&b->cpu, e->port, e->byte);
-		b->midi_head = (b->midi_head + 1) % SC88_MIDI_QUEUE_SIZE;
-		b->midi_count--;
+		if (b->midi_credit[port] < SC88_MIDI_BYTE_CREDIT)
+			b->midi_credit[port] += SC88_MIDI_FRAME_CREDIT;
+		while (b->midi_count[port] && b->midi_credit[port] >= SC88_MIDI_BYTE_CREDIT)
+		{
+			sc88_midi_event_t *e = &b->midi_queue[port][b->midi_head[port]];
+			if (e->frame > b->frame)
+				break;
+			if (b->has_panel)
+				sub_hle_midi_byte(&b->sub, port, e->byte);
+			else
+				h8500_sci_rx(&b->cpu, port, e->byte);
+			b->midi_head[port] = (b->midi_head[port] + 1) % SC88_MIDI_QUEUE_SIZE;
+			b->midi_count[port]--;
+			b->midi_credit[port] -= SC88_MIDI_BYTE_CREDIT;
+		}
 	}
 }
 
 void sc88_run_frame(sc88_t *b)
 {
-	deliver_midi(b);
+	sc88_deliver_midi(b);
 
 	b->cpu_half_cycles += SC88_H8_HALF_CYCLES_PER_FRAME;
 	int cycles = (int)(b->cpu_half_cycles >> 1);
@@ -396,13 +405,17 @@ bool sc88_idle(const sc88_t *b)
 
 void sc88_queue_midi(sc88_t *b, int port, uint8_t byte, uint32_t frame_offset)
 {
-	if (b->midi_count >= SC88_MIDI_QUEUE_SIZE)
+	port &= SC88_MIDI_PORTS - 1;
+	if (b->midi_count[port] >= SC88_MIDI_QUEUE_SIZE)
+	{
+		b->midi_drops++;
 		return;
-	uint32_t slot = (b->midi_head + b->midi_count) % SC88_MIDI_QUEUE_SIZE;
-	b->midi_queue[slot].frame = (uint32_t)b->frame + frame_offset;
-	b->midi_queue[slot].port = (uint8_t)(port & 1);
-	b->midi_queue[slot].byte = byte;
-	b->midi_count++;
+	}
+	uint32_t slot = (b->midi_head[port] + b->midi_count[port]) % SC88_MIDI_QUEUE_SIZE;
+	b->midi_queue[port][slot].frame = (uint32_t)b->frame + frame_offset;
+	b->midi_queue[port][slot].port = (uint8_t)port;
+	b->midi_queue[port][slot].byte = byte;
+	b->midi_count[port]++;
 }
 
 /* Matrix position of each button: strobe row and return bit. */
