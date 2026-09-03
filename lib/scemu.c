@@ -127,6 +127,16 @@ static void send_preset(scemu_t *m)
 	}
 }
 
+void scemu_set_midi_rate(scemu_t *m, uint32_t baud)
+{
+	m->machine.midi_baud = baud;
+}
+
+uint32_t scemu_midi_rate(const scemu_t *m)
+{
+	return m->machine.midi_baud;
+}
+
 void scemu_set_map(scemu_t *m, scemu_map_t map)
 {
 	midi_map_reset(&m->map, (uint8_t)map);
@@ -182,8 +192,10 @@ size_t scemu_state_save(const scemu_t *m, void *buffer, size_t size)
 
 bool scemu_state_load(scemu_t *m, const void *buffer, size_t size)
 {
+	uint32_t baud = m->machine.midi_baud;
 	if (!sc88_state_load(&m->machine, buffer, size))
 		return false;
+	m->machine.midi_baud = baud;
 	scemu_set_map(m, (scemu_map_t)m->map.map);
 	return true;
 }

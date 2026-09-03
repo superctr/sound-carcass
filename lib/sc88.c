@@ -254,6 +254,7 @@ static void bus_sci_tx(void *user, int channel, uint8_t byte)
 
 bool sc88_init(sc88_t *b, scemu_model_t model, const scemu_roms_t *roms, const scemu_config_t *config)
 {
+	b->midi_baud = SC88_MIDI_DEFAULT_BAUD;
 	memset(b, 0, sizeof(*b));
 	b->model = model;
 	jit_alloc_init(&b->jit, config);
@@ -343,6 +344,7 @@ void sc88_reset(sc88_t *b)
 	b->frame = 0;
 	memset(b->midi_head, 0, sizeof(b->midi_head));
 	memset(b->midi_count, 0, sizeof(b->midi_count));
+	memset(b->midi_credit, 0, sizeof(b->midi_credit));
 	b->midi_drops = 0;
 	xp_reset(&b->xp);
 	if (b->has_lsp)
@@ -359,7 +361,9 @@ void sc88_deliver_midi(sc88_t *b)
 {
 	for (int port = 0; port < SC88_MIDI_PORTS; port++)
 	{
-		while (b->midi_count[port])
+		if (b->midi_credit[port] < SC88_MIDI_BYTE_UNITS)
+			b->midi_credit[port] += b->midi_baud;
+		while (b->midi_count[port] && (!b->midi_baud || b->midi_credit[port] >= SC88_MIDI_BYTE_UNITS))
 		{
 			sc88_midi_event_t *e = &b->midi_queue[port][b->midi_head[port]];
 			if (e->frame > b->frame)
@@ -378,6 +382,8 @@ void sc88_deliver_midi(sc88_t *b)
 			}
 			b->midi_head[port] = (b->midi_head[port] + 1) % SC88_MIDI_QUEUE_SIZE;
 			b->midi_count[port]--;
+			if (b->midi_baud)
+				b->midi_credit[port] -= SC88_MIDI_BYTE_UNITS;
 		}
 	}
 }

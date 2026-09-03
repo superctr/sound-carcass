@@ -182,6 +182,14 @@ void scemu_render(scemu_t *m, int32_t *const out[2], size_t frames);
 void scemu_midi_write(scemu_t *m, int port, const uint8_t *bytes, size_t count, uint32_t frame_offset);
 void scemu_set_midi_out(scemu_t *m, scemu_midi_out_fn fn, void *user);
 
+/* The speed of the MIDI input, in baud (ten bits per byte): 31250 is the
+ * cable and the default, 38400 the SC-88Pro's computer port; 0 removes the
+ * limit and delivers as fast as the firmware acknowledges messages, which
+ * loses messages inside the firmware on songs that send large setup blocks
+ * right after a reset. */
+void scemu_set_midi_rate(scemu_t *m, uint32_t baud);
+uint32_t scemu_midi_rate(const scemu_t *m);
+
 /* Force one instrument map on every part, whatever the song asks for: the
  * MIDI input is rewritten (bank select LSB replaced, a selection put before
  * the first program change of a part and after every reset), and the
