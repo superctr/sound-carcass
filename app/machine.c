@@ -282,7 +282,6 @@ static void handle(machine_t *mc, const command_t *c)
 		{
 			scemu_reset(mc->m);
 			boot(mc, false);
-			mc->started = false;
 		}
 		else if (!c->a && mc->power)
 		{
@@ -384,6 +383,10 @@ static void *run(void *user)
 		}
 		if (n == 0)
 		{
+			/* a full queue on a paused device would wait forever: after a
+			 * pause or a power-off the device is what must move first */
+			if (mc->audio && mc->started)
+				audio_pause(mc->audio, false);
 			sleep_ms(1);
 			continue;
 		}
