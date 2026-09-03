@@ -3,7 +3,6 @@
  * Copyright (c) 2026 ian karlsson
  * SPDX-License-Identifier: BSD-3-Clause
  */
-#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #include "panel.h"
@@ -170,9 +169,8 @@ static uint32_t dim(uint32_t c)
 	return (c & 0xff000000u) | (((c >> 16) & 0xff) * 5 / 8) << 16 | (((c >> 8) & 0xff) * 5 / 8) << 8 | ((c & 0xff) * 5 / 8);
 }
 
-static void blit_sprite_dimmed(panel_t *p, uint32_t *pixels, size_t stride, panel_sprite_id_t id, bool dimmed)
+static void blit(panel_t *p, uint32_t *pixels, size_t stride, const panel_sprite_t *s, bool dimmed)
 {
-	const panel_sprite_t *s = &p->size->sprite[id];
 	for (int j = 0; j < s->atlas.h; j++)
 	{
 		const uint32_t *src = p->atlas.pixels + (size_t)(s->atlas.y + j) * p->atlas.width + s->atlas.x;
@@ -184,52 +182,13 @@ static void blit_sprite_dimmed(panel_t *p, uint32_t *pixels, size_t stride, pane
 
 static void blit_sprite(panel_t *p, uint32_t *pixels, size_t stride, panel_sprite_id_t id)
 {
-	blit_sprite_dimmed(p, pixels, stride, id, false);
-}
-
-static uint32_t sample(const png_image_t *img, const panel_rect_t *r, float x, float y)
-{
-	int x0 = (int)floorf(x), y0 = (int)floorf(y);
-	float fx = x - (float)x0, fy = y - (float)y0;
-	uint32_t acc[4] = { 0, 0, 0, 0 };
-	for (int j = 0; j < 2; j++)
-		for (int i = 0; i < 2; i++)
-		{
-			int sx = x0 + i, sy = y0 + j;
-			float wgt = (i ? fx : 1 - fx) * (j ? fy : 1 - fy);
-			if (sx < 0 || sy < 0 || sx >= r->w || sy >= r->h || wgt <= 0)
-				continue;
-			uint32_t c = img->pixels[(size_t)(r->y + sy) * img->width + r->x + sx];
-			uint32_t w256 = (uint32_t)(wgt * 256 + 0.5f);
-			acc[0] += (c >> 24) * w256;
-			acc[1] += ((c >> 16) & 0xff) * w256;
-			acc[2] += ((c >> 8) & 0xff) * w256;
-			acc[3] += (c & 0xff) * w256;
-		}
-	uint32_t a = acc[0] >> 8, rr = acc[1] >> 8, g = acc[2] >> 8, b = acc[3] >> 8;
-	if (a > 255) a = 255;
-	if (rr > a) rr = a;
-	if (g > a) g = a;
-	if (b > a) b = a;
-	return (a << 24) | (rr << 16) | (g << 8) | b;
+	blit(p, pixels, stride, &p->size->sprite[id], false);
 }
 
 static void draw_knob(panel_t *p, uint32_t *pixels, size_t stride)
 {
-	const panel_sprite_t *s = &p->size->sprite[PANEL_SPRITE_KNOB_VOLUME];
-	const panel_rect_t *k = &p->size->element[PANEL_KNOB_VOLUME];
-	float cx = k->x + k->w / 2.0f - s->x, cy = k->y + k->h / 2.0f - s->y;
-	float angle = p->knob * 270.0f * 3.14159265f / 180.0f;
-	float c = cosf(angle), sn = sinf(angle);
-	for (int j = -1; j <= s->atlas.h; j++)
-		for (int i = -1; i <= s->atlas.w; i++)
-		{
-			float dx = i + 0.5f - cx, dy = j + 0.5f - cy;
-			float sx = cx + dx * c + dy * sn - 0.5f, sy = cy - dx * sn + dy * c - 0.5f;
-			uint32_t src = sample(&p->atlas, &s->atlas, sx, sy);
-			uint32_t *dst = pixels + (size_t)(s->y + j) * stride + s->x + i;
-			*dst = over(src, *dst);
-		}
+	int frame = (int)(p->knob * (PANEL_KNOB_FRAMES - 1) + 0.5f);
+	blit(p, pixels, stride, &p->size->knob[frame], (p->pressed >> PANEL_BUTTON_PREVIEW) & 1);
 }
 
 static const uint8_t *cell_pattern(const panel_t *p, uint8_t code, uint8_t *rows)
@@ -314,7 +273,7 @@ void panel_render(panel_t *p, uint32_t *pixels, size_t stride)
 		blit_sprite(p, pixels, stride, PANEL_SPRITE_LED_USER_INST_EFX);
 	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
 		if ((p->pressed & ((uint64_t)1 << e)) && panel_element_sprite[e] >= 0)
-			blit_sprite_dimmed(p, pixels, stride, (panel_sprite_id_t)panel_element_sprite[e], true);
+			blit(p, pixels, stride, &p->size->sprite[panel_element_sprite[e]], true);
 	draw_knob(p, pixels, stride);
 	p->dirty = false;
 }
