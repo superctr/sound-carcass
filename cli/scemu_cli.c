@@ -271,7 +271,7 @@ static int smf_load(smf_t *s, const uint8_t *data, size_t size, uint32_t rate)
 
 static void usage(const char *argv0)
 {
-	fprintf(stderr, "usage: %s <sc88|sc88pro> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--tail N] [--state boot.state] [--no-jit]\n", argv0);
+	fprintf(stderr, "usage: %s <sc88|sc88pro> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--tail N] [--state boot.state] [--map sc55|sc88|sc88pro] [--no-jit]\n", argv0);
 }
 
 int main(int argc, char **argv)
@@ -294,6 +294,7 @@ int main(int argc, char **argv)
 	const char *midi_path = NULL, *state_path = NULL;
 	double seconds = 0, tail = 2.0;
 	scemu_config_t config = { 0 };
+	scemu_map_t map = SCEMU_MAP_NATIVE;
 	for (int n = 4; n < argc; n++)
 	{
 		if (!strcmp(argv[n], "--midi") && n + 1 < argc)
@@ -306,6 +307,17 @@ int main(int argc, char **argv)
 			state_path = argv[++n];
 		else if (!strcmp(argv[n], "--no-jit"))
 			config.h8500_interpreter = true;
+		else if (!strcmp(argv[n], "--map") && n + 1 < argc)
+		{
+			const char *name = argv[++n];
+			map = !strcmp(name, "sc55") ? SCEMU_MAP_SC55 : !strcmp(name, "sc88") ? SCEMU_MAP_SC88
+					: !strcmp(name, "sc88pro") ? SCEMU_MAP_SC88PRO : SCEMU_MAP_NATIVE;
+			if (map == SCEMU_MAP_NATIVE)
+			{
+				usage(argv[0]);
+				return 2;
+			}
+		}
 		else
 		{
 			usage(argv[0]);
@@ -369,6 +381,8 @@ int main(int argc, char **argv)
 			free(state);
 		}
 	}
+
+	scemu_set_map(m, map);
 
 	smf_t smf = { 0 };
 	uint8_t *midi_data = NULL;
