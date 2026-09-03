@@ -282,6 +282,7 @@ typedef struct options
 	bool no_cache;
 	bool keep_settings;
 	bool hold;
+	scemu_map_t map;
 } options_t;
 
 static void usage(FILE *fp)
@@ -298,6 +299,8 @@ static void usage(FILE *fp)
 	        "                                last --keep-settings run instead of factory settings\n"
 	        "  --tail N                      seconds to keep running after the last event (default 4)\n"
 	        "  --port 0|1                    MIDI IN A or B (default A)\n"
+	        "  --map sc55|sc88|sc88pro       play every part from that instrument map, whatever\n"
+	        "                                the song selects (the SC-88 has no SC-88Pro map)\n"
 	        "  --hold                        wait for a key when the song ends\n"
 	        "  --help\n");
 }
@@ -324,6 +327,17 @@ static int parse_options(int argc, char **argv, options_t *o)
 			o->tail = atof(argv[++n]);
 		else if (!strcmp(a, "--port") && n + 1 < argc)
 			o->port = atoi(argv[++n]) ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A;
+		else if (!strcmp(a, "--map") && n + 1 < argc)
+		{
+			const char *name = argv[++n];
+			o->map = !strcmp(name, "sc55") ? SCEMU_MAP_SC55 : !strcmp(name, "sc88") ? SCEMU_MAP_SC88
+					: !strcmp(name, "sc88pro") ? SCEMU_MAP_SC88PRO : SCEMU_MAP_NATIVE;
+			if (o->map == SCEMU_MAP_NATIVE)
+			{
+				fprintf(stderr, "scplay: --map takes sc55, sc88 or sc88pro\n");
+				return -1;
+			}
+		}
 		else if (!strcmp(a, "--no-audio"))
 			o->no_audio = true;
 		else if (!strcmp(a, "--no-cache"))
@@ -500,6 +514,8 @@ int main(int argc, char **argv)
 		fprintf(stderr, "scplay: cannot write %s\n", opt.wav);
 		g_quit = 1;
 	}
+
+	scemu_set_map(m, opt.map);
 
 	scplay_audio_t *audio = NULL;
 	if (!opt.no_audio && !g_quit)

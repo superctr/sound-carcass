@@ -24,6 +24,7 @@ and starts instantly on later runs.
 | `--keep-settings` | start from the settings memory the last `--keep-settings` run left, and save it again on exit |
 | `--tail N` | seconds to keep running after the last MIDI event (default 4) |
 | `--port 0 \| 1` | deliver the file to MIDI IN A or MIDI IN B (default A) |
+| `--map sc55 \| sc88 \| sc88pro` | play every part from that instrument map whatever the song selects: the file's bank select LSBs are rewritten, a part gets the selection before its first program change, and every reset (GS, GM, XG, SC-88 mode set) is followed by the selection on all sixteen parts.  The SC-88 has no SC-88Pro map and plays its own for it |
 | `--hold` | wait for a key when the song ends instead of exiting |
 | `--help` | usage |
 
