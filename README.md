@@ -58,12 +58,14 @@ with the SC-88's wave ROMs.  What is emulated:
 
 | part | how | checked against |
 |---|---|---|
-| H8/510 main CPU, its timers, serial ports and A/D | interpreter, and a dynamic translator for the firmware | MAME's core, instruction by instruction; the translator against the interpreter in lockstep |
+| H8/510 main CPU, its timers, serial ports and A/D | interpreter, and a dynamic translator for the firmware | MAME*'s core, instruction by instruction; the translator against the interpreter in lockstep |
 | XP tone generator (voices, ramps, filters, host interface) and its DSP program (reverb, chorus, delay, EQ) | voice engine in C; the DSP program compiled per frame, recompiled when the firmware patches a coefficient | MAME's device, every register every frame |
 | LSP insertion-effect processor (SC-88Pro) | the 384-word program compiled per sample, coefficient patches without recompiling | MAME's device on 171 firmware programs, and an SC-8850 |
 | gate array (interrupts, LEDs, LCD interface), LCD controller | C | firmware behaviour |
 | sub-CPU (MIDI in, panel matrix, MIDI out) | high-level emulation; its ROM is not dumped | firmware behaviour |
 | wave ROMs | unscrambled on load | descrambled chips |
+
+`*`: MAME refers to a branch containing a previous version of the XP/LSP emulator created by this author.
 
 Speed: a 32 kHz frame costs about 2.3 µs when playing on this machine's x86-64 (the tone generator
 now dominates), so a render runs around 12× real time and playback takes a few percent of a core.
