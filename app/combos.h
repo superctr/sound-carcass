@@ -18,6 +18,8 @@ typedef struct combo
 {
 	const char *name;           /* the manual's name for the operation */
 	const char *effect;         /* one sentence */
+	const char *mode;           /* the display or edit mode the combination applies in, in the
+	                               manual's words; NULL when it applies anywhere */
 	scemu_button_t hold[3];     /* held first, in this order */
 	int hold_count;
 	scemu_button_t press;       /* pressed while they are held; SCEMU_BUTTON_COUNT if none */

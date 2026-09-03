@@ -819,7 +819,9 @@ static void combo_menu(app_t *app, int element, double x, double y)
 		char keys[300], *name = g_markup_escape_text(c->name, -1);
 		combo_text(c, keys, sizeof(keys));
 		char *keys_markup = g_markup_escape_text(keys, -1);
-		char *markup = g_strdup_printf("<b>%s</b>\n<small>%s</small>", name, keys_markup);
+		char *mode = g_markup_escape_text(c->mode ? c->mode : "any mode", -1);
+		char *markup = g_strdup_printf("<b>%s</b>  <small><i>%s</i></small>\n<small>%s</small>", name, mode, keys_markup);
+		g_free(mode);
 		GtkWidget *label = gtk_label_new(NULL);
 		gtk_label_set_markup(GTK_LABEL(label), markup);
 		gtk_label_set_xalign(GTK_LABEL(label), 0);
