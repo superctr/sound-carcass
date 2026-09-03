@@ -48,7 +48,11 @@ the machine's settings memory across sessions instead).  `--no-audio --wav out.w
 about ten times faster than real time instead, and `--map sc55` (or `sc88`, `sc88pro`) plays every part
 from that instrument map whatever the song selects; `--midi-rate 38400` feeds the file at the
 computer port's speed instead of the cable's.  A dual-port file (tracks with port events, the
-32-part songs written for a Pro on both MIDI INs) plays on both blocks.  See [docs/scplay.md](docs/scplay.md).  It needs SDL2 and
+32-part songs written for a Pro on both MIDI INs) plays on both blocks.  See [docs/scplay.md](docs/scplay.md).
+
+`scgui` is the same player as a desktop window: the front panel drawn from `gui/`'s artwork, its
+buttons under the mouse, the volume knob under the wheel, a playlist in a second window.  It needs
+GTK 4 besides SDL2 and zlib.  See [docs/scgui.md](docs/scgui.md).  It needs SDL2 and
 zlib; without them the library and `scemu-cli` still build.
 
 ## Status

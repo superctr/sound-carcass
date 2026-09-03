@@ -21,9 +21,9 @@
 #include "roms.h"
 #include "smf.h"
 #include "tui.h"
+#include "session.h"
 
 #define BLOCK 256
-#define BOOT_LIMIT_SECONDS 20
 #define BUTTON_HOLD_FRAMES 1600
 
 static volatile sig_atomic_t g_quit;
@@ -99,113 +99,6 @@ static double now_seconds(void)
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return (double)ts.tv_sec + ts.tv_nsec / 1e9;
-}
-
-static void exe_directory(const char *argv0, char *out, size_t size)
-{
-	char path[PATH_MAX];
-	ssize_t got = readlink("/proc/self/exe", path, sizeof(path) - 1);
-	if (got > 0)
-		path[got] = 0;
-	else
-		snprintf(path, sizeof(path), "%s", argv0 ? argv0 : "");
-	char *slash = strrchr(path, '/');
-	if (slash)
-		*slash = 0;
-	else
-		snprintf(path, sizeof(path), ".");
-	snprintf(out, size, "%s", path);
-}
-
-static const char *base_name(const char *path)
-{
-	const char *slash = strrchr(path, '/');
-	return slash ? slash + 1 : path;
-}
-
-static int make_dir(const char *path)
-{
-	if (mkdir(path, 0755) == 0 || errno == EEXIST)
-		return 1;
-	return 0;
-}
-
-static int cache_dir(char *out, size_t size)
-{
-	char dir[900];
-	const char *xdg = getenv("XDG_CACHE_HOME");
-	const char *home = getenv("HOME");
-	if (xdg && *xdg)
-		snprintf(dir, sizeof(dir), "%s", xdg);
-	else if (home && *home)
-	{
-		snprintf(dir, sizeof(dir), "%s/.cache", home);
-		if (!make_dir(dir))
-			return 0;
-	}
-	else
-		return 0;
-	if (!make_dir(dir))
-		return 0;
-	snprintf(out, size, "%s/scemu", dir);
-	return make_dir(out);
-}
-
-static int read_file_exact(const char *path, void *buffer, size_t size)
-{
-	FILE *fp = fopen(path, "rb");
-	if (!fp)
-		return 0;
-	int ok = fread(buffer, 1, size, fp) == size && fgetc(fp) == EOF;
-	fclose(fp);
-	return ok;
-}
-
-static void write_file_atomic(const char *path, const void *data, size_t size)
-{
-	char tmp[PATH_MAX + 8];
-	snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-	FILE *fp = fopen(tmp, "wb");
-	if (!fp)
-		return;
-	int ok = fwrite(data, 1, size, fp) == size;
-	fclose(fp);
-	if (ok)
-		rename(tmp, path);
-	else
-		remove(tmp);
-}
-
-static bool load_cached_state(scemu_t *m, const char *path)
-{
-	FILE *fp = fopen(path, "rb");
-	if (!fp)
-		return false;
-	fseek(fp, 0, SEEK_END);
-	long size = ftell(fp);
-	fseek(fp, 0, SEEK_SET);
-	if (size <= 0)
-	{
-		fclose(fp);
-		return false;
-	}
-	void *buf = malloc((size_t)size);
-	bool ok = buf && fread(buf, 1, (size_t)size, fp) == (size_t)size &&
-	          scemu_state_load(m, buf, (size_t)size);
-	free(buf);
-	fclose(fp);
-	return ok;
-}
-
-static void save_cached_state(const scemu_t *m, const char *path)
-{
-	size_t size = scemu_state_size(m);
-	void *buf = malloc(size);
-	if (!buf)
-		return;
-	if (scemu_state_save(m, buf, size) == size)
-		write_file_atomic(path, buf, size);
-	free(buf);
 }
 
 /* ---------------------------------------------------------------- panel */
@@ -377,6 +270,35 @@ static int parse_options(int argc, char **argv, options_t *o)
 
 /* ---------------------------------------------------------------- main */
 
+typedef struct boot_progress
+{
+	tui_t *tui;
+	tui_state_t *st;
+	scemu_t *m;
+	uint32_t rate;
+	double next_draw;
+} boot_progress_t;
+
+static bool boot_progress(void *user, uint64_t frames)
+{
+	boot_progress_t *b = user;
+	int key;
+	while ((key = tui_key(b->tui)) != TUI_KEY_NONE)
+		if (key == 'q' || key == TUI_KEY_ESC)
+			g_quit = 1;
+	double t = now_seconds();
+	if (b->tui && t >= b->next_draw)
+	{
+		b->next_draw = t + 1.0 / 30;
+		b->st->status = "▪ booting the firmware";
+		b->st->elapsed = (double)frames / b->rate;
+		b->st->total = 8.0;
+		b->st->leds = scemu_leds(b->m);
+		tui_draw(b->tui, b->st);
+	}
+	return !g_quit;
+}
+
 int main(int argc, char **argv)
 {
 	options_t opt;
@@ -388,7 +310,7 @@ int main(int argc, char **argv)
 	signal(SIGTERM, on_signal);
 
 	char exe_dir[PATH_MAX];
-	exe_directory(argv[0], exe_dir, sizeof(exe_dir));
+	session_exe_directory(argv[0], exe_dir, sizeof(exe_dir));
 
 	char err[512];
 	scplay_roms_t roms;
@@ -428,7 +350,7 @@ int main(int argc, char **argv)
 	tui_state_t st;
 	memset(&st, 0, sizeof(st));
 	st.model = scplay_model_label(roms.model);
-	st.song = base_name(opt.midi);
+	st.song = session_base_name(opt.midi);
 	st.title = smf.name;
 	st.lcd = scemu_lcd(m);
 	st.has_efx_led = roms.model == SCEMU_MODEL_SC88PRO;
@@ -440,77 +362,14 @@ int main(int argc, char **argv)
 
 	/* ------------------------------------------------------------ boot */
 
-	char cache_root[1024], state_file[PATH_MAX];
-	char factory_file[PATH_MAX], settings_file[PATH_MAX];
-	bool have_cache = !opt.no_cache && cache_dir(cache_root, sizeof(cache_root));
-	size_t nvram_size = scemu_nvram_size(m);
-	uint8_t *nvram = malloc(nvram_size);
-	bool have_seed = false, seed_is_user = false;
+	session_t session;
+	session_init(&session, m, roms.model_name, roms.hash, opt.no_cache, opt.keep_settings);
 
-	if (have_cache && nvram)
-	{
-		snprintf(factory_file, sizeof(factory_file), "%s/%s-factory.nvram", cache_root, roms.model_name);
-		snprintf(settings_file, sizeof(settings_file), "%s/%s.nvram", cache_root, roms.model_name);
-		if (opt.keep_settings && read_file_exact(settings_file, nvram, nvram_size) &&
-		    scemu_nvram_set(m, nvram, nvram_size))
-			have_seed = seed_is_user = true;
-		else if (read_file_exact(factory_file, nvram, nvram_size) &&
-		         scemu_nvram_set(m, nvram, nvram_size))
-			have_seed = true;
-		snprintf(state_file, sizeof(state_file), "%s/boot-%s-%016llx.state",
-		         cache_root, roms.model_name, (unsigned long long)roms.hash);
-	}
-
-	/* The cached boot state is a machine that has just come up from the
-	 * firmware's own factory initialisation, so it carries no settings from an
-	 * earlier session; a machine seeded with the user's own settings memory is
-	 * booted every time instead. */
-	bool use_state = have_cache && !seed_is_user;
-
+	boot_progress_t progress = { tui, &st, m, rate, 0 };
 	double boot_start = now_seconds();
-	bool from_cache = use_state && load_cached_state(m, state_file);
-	uint64_t boot_frames = 0;
-
-	if (!from_cache)
-	{
-		double next_draw = 0;
-		bool released = false;
-		while (!released && !g_quit && boot_frames < (uint64_t)BOOT_LIMIT_SECONDS * rate)
-		{
-			scemu_render(m, out, BLOCK);
-			boot_frames += BLOCK;
-			released = !scemu_muted(m);
-			int key;
-			while ((key = tui_key(tui)) != TUI_KEY_NONE)
-				if (key == 'q' || key == TUI_KEY_ESC)
-					g_quit = 1;
-			double t = now_seconds();
-			if (tui && t >= next_draw)
-			{
-				next_draw = t + 1.0 / 30;
-				st.status = "▪ booting the firmware";
-				st.elapsed = (double)boot_frames / rate;
-				st.total = 8.0;
-				st.leds = scemu_leds(m);
-				tui_draw(tui, &st);
-			}
-		}
-		/* A blank settings memory sends the firmware through a first power-on
-		 * initialisation that takes a longer path than any later start.  Keep
-		 * what that boot wrote — it is the firmware's own factory image, not
-		 * anyone's settings — and let the next run, which starts from a machine
-		 * that has been switched on before, be the one that is cached. */
-		if (have_cache && released)
-		{
-			if (!have_seed && nvram && scemu_nvram_get(m, nvram, nvram_size) == nvram_size)
-			{
-				write_file_atomic(factory_file, nvram, nvram_size);
-				have_seed = true;
-			}
-			else if (use_state)
-				save_cached_state(m, state_file);
-		}
-	}
+	session_boot(&session, true, boot_progress, &progress);
+	bool from_cache = session.from_cache;
+	uint64_t boot_frames = session.boot_frames;
 	double boot_seconds = now_seconds() - boot_start;
 
 	/* ------------------------------------------------------------ play */
@@ -658,15 +517,8 @@ int main(int argc, char **argv)
 	audio_close(audio);
 	wav_close(&wav);
 
-	/* Only on request: the machine keeps what this session left in it. */
-	bool nvram_written = false;
-	if (opt.keep_settings && have_cache && nvram &&
-	    scemu_nvram_get(m, nvram, nvram_size) == nvram_size)
-	{
-		write_file_atomic(settings_file, nvram, nvram_size);
-		nvram_written = true;
-	}
-	free(nvram);
+	bool nvram_written = session_save_settings(&session);
+	session_free(&session);
 
 	double play_seconds = now_seconds() - play_start;
 	if (from_cache)

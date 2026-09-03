@@ -1,0 +1,471 @@
+/* scgui: the machine on its own thread.
+ *
+ * Copyright (c) 2026 ian karlsson
+ * SPDX-License-Identifier: BSD-3-Clause
+ */
+#define _POSIX_C_SOURCE 200809L
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include "machine.h"
+#include "audio.h"
+#include "roms.h"
+#include "session.h"
+#include "smf.h"
+
+#define BLOCK 256
+#define QUEUE_SIZE 64
+
+typedef enum command_kind
+{
+	CMD_PLAY, CMD_PAUSE, CMD_STOP, CMD_BUTTON, CMD_POWER, CMD_GAIN, CMD_QUIT
+} command_kind_t;
+
+typedef struct command
+{
+	command_kind_t kind;
+	int a, b;
+	float f;
+	char *path;
+} command_t;
+
+struct machine
+{
+	scplay_roms_t roms;
+	scemu_t *m;
+	uint32_t rate;
+	session_t session;
+	scplay_audio_t *audio;
+	machine_options_t opt;
+	char audio_driver[64];
+
+	pthread_t thread;
+	pthread_mutex_t lock;
+	command_t queue[QUEUE_SIZE];
+	int q_head, q_count;
+	machine_state_t state;
+
+	/* the thread's own */
+	smf_t smf;
+	bool have_smf, playing, paused, power;
+	uint64_t pos, end_frame;
+	size_t next_event;
+	bool held[SCEMU_BUTTON_COUNT];
+	float gain;
+	double clock_start;
+	uint64_t clock_frames;
+	bool started;
+};
+
+static double now_seconds(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (double)ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+static void sleep_ms(int ms)
+{
+	struct timespec ts = { 0, ms * 1000000L };
+	nanosleep(&ts, NULL);
+}
+
+static void post(machine_t *mc, command_t c)
+{
+	pthread_mutex_lock(&mc->lock);
+	if (mc->q_count < QUEUE_SIZE)
+	{
+		mc->queue[(mc->q_head + mc->q_count) % QUEUE_SIZE] = c;
+		mc->q_count++;
+	}
+	else
+		free(c.path);
+	pthread_mutex_unlock(&mc->lock);
+}
+
+static bool take(machine_t *mc, command_t *c)
+{
+	pthread_mutex_lock(&mc->lock);
+	bool got = mc->q_count > 0;
+	if (got)
+	{
+		*c = mc->queue[mc->q_head];
+		mc->q_head = (mc->q_head + 1) % QUEUE_SIZE;
+		mc->q_count--;
+	}
+	pthread_mutex_unlock(&mc->lock);
+	return got;
+}
+
+/* ---------------------------------------------------------------- the snapshot */
+
+static void publish(machine_t *mc, bool booting)
+{
+	machine_state_t s;
+	memset(&s, 0, sizeof(s));
+	if (mc->power)
+	{
+		const scemu_lcd_t *lcd = scemu_lcd(mc->m);
+		s.lcd = *lcd;
+		s.leds = scemu_leds(mc->m);
+	}
+	s.power = mc->power;
+	s.booting = booting;
+	s.playing = mc->playing;
+	s.paused = mc->paused;
+	s.finished = mc->have_smf && !mc->playing && mc->pos >= mc->end_frame;
+	s.position = (double)mc->pos / mc->rate;
+	s.length = mc->have_smf ? (double)mc->end_frame / mc->rate : 0;
+	s.underruns = mc->audio ? audio_underruns(mc->audio) : 0;
+	pthread_mutex_lock(&mc->lock);
+	snprintf(s.song, sizeof(s.song), "%s", mc->state.song);
+	snprintf(s.title, sizeof(s.title), "%s", mc->state.title);
+	s.generation = mc->state.generation;
+	if (memcmp(&s.lcd, &mc->state.lcd, sizeof(s.lcd)) != 0 || s.leds != mc->state.leds || s.power != mc->state.power
+	    || s.booting != mc->state.booting || s.playing != mc->state.playing || s.paused != mc->state.paused
+	    || s.finished != mc->state.finished || s.position != mc->state.position || s.underruns != mc->state.underruns)
+		s.generation++;
+	mc->state = s;
+	pthread_mutex_unlock(&mc->lock);
+}
+
+static void set_song(machine_t *mc, const char *song, const char *title)
+{
+	pthread_mutex_lock(&mc->lock);
+	snprintf(mc->state.song, sizeof(mc->state.song), "%s", song ? song : "");
+	snprintf(mc->state.title, sizeof(mc->state.title), "%s", title ? title : "");
+	mc->state.generation++;
+	pthread_mutex_unlock(&mc->lock);
+}
+
+void machine_snapshot(machine_t *mc, machine_state_t *out)
+{
+	pthread_mutex_lock(&mc->lock);
+	*out = mc->state;
+	pthread_mutex_unlock(&mc->lock);
+}
+
+/* ---------------------------------------------------------------- the thread */
+
+static bool boot_progress(void *user, uint64_t frames)
+{
+	machine_t *mc = user;
+	if (frames % (BLOCK * 16) == 0)
+		publish(mc, true);
+	return true;
+}
+
+static void hold_keys(machine_t *mc)
+{
+	for (int n = 0; n < SCEMU_BUTTON_COUNT; n++)
+		if (mc->held[n])
+			scemu_button(mc->m, (scemu_button_t)n, true);
+}
+
+static void boot(machine_t *mc, bool use_cache)
+{
+	mc->power = true;
+	hold_keys(mc);
+	publish(mc, true);
+	session_boot(&mc->session, use_cache, boot_progress, mc);
+	scemu_set_map(mc->m, mc->opt.map);
+	scemu_set_midi_rate(mc->m, mc->opt.midi_rate);
+	publish(mc, false);
+}
+
+static void unload_song(machine_t *mc)
+{
+	if (mc->have_smf)
+		smf_free(&mc->smf);
+	mc->have_smf = mc->playing = false;
+	mc->pos = mc->end_frame = 0;
+	mc->next_event = 0;
+}
+
+static void load_song(machine_t *mc, const char *path)
+{
+	unload_song(mc);
+	if (!smf_load(&mc->smf, path, mc->rate))
+	{
+		set_song(mc, session_base_name(path), "not a Standard MIDI File");
+		return;
+	}
+	mc->have_smf = true;
+	/* every song starts from the machine as it came up, unless the user
+	 * keeps the settings across sessions, or there is no cached boot */
+	if (!mc->opt.keep_settings && session_restore(&mc->session))
+	{
+		hold_keys(mc);
+		scemu_set_map(mc->m, mc->opt.map);
+		scemu_set_midi_rate(mc->m, mc->opt.midi_rate);
+	}
+	mc->end_frame = (uint64_t)mc->smf.last_frame + (uint64_t)(mc->opt.tail * mc->rate);
+	mc->playing = true;
+	mc->paused = false;
+	set_song(mc, session_base_name(path), mc->smf.name);
+}
+
+static void feed_events(machine_t *mc, size_t n)
+{
+	while (mc->next_event < mc->smf.count && mc->smf.events[mc->next_event].frame < mc->pos + n)
+	{
+		const smf_event_t *e = &mc->smf.events[mc->next_event++];
+		uint32_t offset = e->frame > mc->pos ? (uint32_t)(e->frame - mc->pos) : 0;
+		if (e->tempo_change || (e->port != SMF_PORT_UNSET && e->port > 1))
+			continue;
+		int port = e->port == 1 ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A;
+		if (e->status[0] == 0xf0 && e->bytes)
+		{
+			scemu_midi_write(mc->m, port, e->status, 1, offset);
+			scemu_midi_write(mc->m, port, e->bytes, e->length - 1u, offset);
+		}
+		else if (e->bytes)
+			scemu_midi_write(mc->m, port, e->bytes, e->length, offset);
+		else
+			scemu_midi_write(mc->m, port, e->status, e->length, offset);
+	}
+}
+
+static void handle(machine_t *mc, const command_t *c)
+{
+	switch (c->kind)
+	{
+	case CMD_PLAY:
+		if (mc->power)
+			load_song(mc, c->path);
+		break;
+	case CMD_PAUSE:
+		mc->paused = c->a != 0;
+		break;
+	case CMD_STOP:
+		unload_song(mc);
+		set_song(mc, "", "");
+		break;
+	case CMD_BUTTON:
+		mc->held[c->a] = c->b != 0;
+		if (mc->power)
+			scemu_button(mc->m, (scemu_button_t)c->a, c->b != 0);
+		break;
+	case CMD_POWER:
+		if (c->a && !mc->power)
+		{
+			scemu_reset(mc->m);
+			boot(mc, false);
+			mc->started = false;
+		}
+		else if (!c->a && mc->power)
+		{
+			mc->power = false;
+			unload_song(mc);
+			set_song(mc, "", "");
+			publish(mc, false);
+		}
+		break;
+	case CMD_GAIN:
+		mc->gain = c->f;
+		break;
+	case CMD_QUIT:
+		break;
+	}
+}
+
+static void to_s16(const int32_t *in, int16_t *out, size_t samples, float gain)
+{
+	for (size_t n = 0; n < samples; n++)
+	{
+		float v = (float)(in[n] >> 8) * gain;
+		out[n] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+	}
+}
+
+static void *run(void *user)
+{
+	machine_t *mc = user;
+	int32_t raw[BLOCK * 2];
+	int16_t pcm[BLOCK * 2];
+	int32_t *const out[2] = { raw, NULL };
+	command_t c;
+
+	boot(mc, true);
+	mc->clock_start = now_seconds();
+	mc->clock_frames = 0;
+
+	for (;;)
+	{
+		while (take(mc, &c))
+		{
+			if (c.kind == CMD_QUIT)
+			{
+				free(c.path);
+				return NULL;
+			}
+			handle(mc, &c);
+			free(c.path);
+		}
+		if (!mc->power)
+		{
+			if (mc->audio)
+				audio_pause(mc->audio, true);
+			sleep_ms(10);
+			continue;
+		}
+		if (mc->paused && mc->playing)
+		{
+			if (mc->audio)
+				audio_pause(mc->audio, true);
+			publish(mc, false);
+			sleep_ms(10);
+			mc->clock_start = now_seconds();
+			mc->clock_frames = 0;
+			continue;
+		}
+
+		size_t n = BLOCK;
+		if (mc->audio)
+		{
+			size_t space = audio_space(mc->audio);
+			if (space < n)
+				n = space;
+		}
+		else
+		{
+			double due = (now_seconds() - mc->clock_start) * mc->rate - (double)mc->clock_frames;
+			if (due < (double)n)
+				n = due < 0 ? 0 : (size_t)due;
+		}
+		if (n == 0)
+		{
+			sleep_ms(1);
+			continue;
+		}
+
+		if (mc->playing)
+		{
+			feed_events(mc, n);
+			mc->pos += n;
+			if (mc->pos >= mc->end_frame)
+				mc->playing = false;
+		}
+		scemu_render(mc->m, out, n);
+		to_s16(raw, pcm, n * 2, mc->gain);
+		if (mc->audio)
+		{
+			audio_push(mc->audio, pcm, n);
+			if (!mc->started && audio_space(mc->audio) == 0)
+			{
+				audio_pause(mc->audio, false);
+				mc->started = true;
+			}
+			else if (mc->started)
+				audio_pause(mc->audio, false);
+		}
+		mc->clock_frames += n;
+		publish(mc, false);
+	}
+}
+
+/* ---------------------------------------------------------------- the front */
+
+machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size)
+{
+	machine_t *mc = calloc(1, sizeof(*mc));
+	if (!mc)
+		return NULL;
+	mc->opt = *o;
+	if (!scplay_roms_load(&mc->roms, o->model, o->rom, o->exe_dir, err, err_size))
+	{
+		free(mc);
+		return NULL;
+	}
+	mc->m = scemu_create(mc->roms.model, &mc->roms.roms, NULL);
+	if (!mc->m)
+	{
+		snprintf(err, err_size, "%s", scemu_error(NULL));
+		scplay_roms_free(&mc->roms);
+		free(mc);
+		return NULL;
+	}
+	mc->rate = scemu_sample_rate(mc->m);
+	session_init(&mc->session, mc->m, mc->roms.model_name, mc->roms.hash, o->no_cache, o->keep_settings);
+	if (!o->no_audio)
+	{
+		char aerr[256];
+		mc->audio = audio_open(mc->rate, aerr, sizeof(aerr));
+		if (!mc->audio)
+			fprintf(stderr, "scgui: no audio (%s), running silently\n", aerr);
+		else
+			snprintf(mc->audio_driver, sizeof(mc->audio_driver), "%s", audio_driver(mc->audio));
+	}
+	mc->gain = 0.75f * 0.75f;
+	pthread_mutex_init(&mc->lock, NULL);
+	if (pthread_create(&mc->thread, NULL, run, mc) != 0)
+	{
+		snprintf(err, err_size, "cannot start the machine's thread");
+		machine_stop(mc);
+		return NULL;
+	}
+	return mc;
+}
+
+void machine_stop(machine_t *mc)
+{
+	if (!mc)
+		return;
+	if (mc->thread)
+	{
+		command_t c = { CMD_QUIT, 0, 0, 0, NULL };
+		post(mc, c);
+		pthread_join(mc->thread, NULL);
+	}
+	if (mc->power)
+		session_save_settings(&mc->session);
+	unload_song(mc);
+	audio_close(mc->audio);
+	session_free(&mc->session);
+	scemu_destroy(mc->m);
+	scplay_roms_free(&mc->roms);
+	pthread_mutex_destroy(&mc->lock);
+	free(mc);
+}
+
+scemu_model_t machine_model(const machine_t *mc) { return mc->roms.model; }
+const char *machine_model_label(const machine_t *mc) { return scplay_model_label(mc->roms.model); }
+const char *machine_audio_driver(const machine_t *mc) { return mc->audio ? mc->audio_driver : "none"; }
+
+void machine_play(machine_t *mc, const char *path)
+{
+	command_t c = { CMD_PLAY, 0, 0, 0, strdup(path) };
+	post(mc, c);
+}
+
+void machine_pause(machine_t *mc, bool paused)
+{
+	command_t c = { CMD_PAUSE, paused, 0, 0, NULL };
+	post(mc, c);
+}
+
+void machine_stop_song(machine_t *mc)
+{
+	command_t c = { CMD_STOP, 0, 0, 0, NULL };
+	post(mc, c);
+}
+
+void machine_button(machine_t *mc, scemu_button_t b, bool down)
+{
+	command_t c = { CMD_BUTTON, b, down, 0, NULL };
+	post(mc, c);
+}
+
+void machine_power(machine_t *mc, bool on)
+{
+	command_t c = { CMD_POWER, on, 0, 0, NULL };
+	post(mc, c);
+}
+
+void machine_set_gain(machine_t *mc, float gain)
+{
+	command_t c = { CMD_GAIN, 0, 0, gain, NULL };
+	post(mc, c);
+}
