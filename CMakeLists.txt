@@ -40,6 +40,7 @@ add_library(scemu STATIC
 	lib/lcd.c
 	lib/wave_rom.c
 	lib/jit.c
+	lib/midi_map.c
 )
 if(SCEMU_H8500_JIT)
 	target_sources(scemu PRIVATE lib/h8500_jit.c)

@@ -101,8 +101,42 @@ void scemu_render(scemu_t *m, int32_t *const out[2], size_t frames)
 
 void scemu_midi_write(scemu_t *m, int port, const uint8_t *bytes, size_t count, uint32_t frame_offset)
 {
+	if (!m->map.map)
+	{
+		for (size_t n = 0; n < count; n++)
+			sc88_queue_midi(&m->machine, port, bytes[n], frame_offset);
+		return;
+	}
+	uint8_t out[MIDI_MAP_MAX_OUT];
 	for (size_t n = 0; n < count; n++)
-		sc88_queue_midi(&m->machine, port, bytes[n], frame_offset);
+	{
+		size_t len = midi_map_filter(&m->map, port, bytes[n], out);
+		for (size_t i = 0; i < len; i++)
+			sc88_queue_midi(&m->machine, port, out[i], frame_offset);
+	}
+}
+
+static void send_preset(scemu_t *m)
+{
+	uint8_t out[MIDI_MAP_MAX_OUT];
+	for (int port = 0; port < MIDI_MAP_PORTS; port++)
+	{
+		size_t len = midi_map_preset(&m->map, port, out);
+		for (size_t i = 0; i < len; i++)
+			sc88_queue_midi(&m->machine, port, out[i], 0);
+	}
+}
+
+void scemu_set_map(scemu_t *m, scemu_map_t map)
+{
+	midi_map_reset(&m->map, (uint8_t)map);
+	if (map != SCEMU_MAP_NATIVE)
+		send_preset(m);
+}
+
+scemu_map_t scemu_map(const scemu_t *m)
+{
+	return (scemu_map_t)m->map.map;
 }
 
 void scemu_set_midi_out(scemu_t *m, scemu_midi_out_fn fn, void *user)
@@ -148,7 +182,10 @@ size_t scemu_state_save(const scemu_t *m, void *buffer, size_t size)
 
 bool scemu_state_load(scemu_t *m, const void *buffer, size_t size)
 {
-	return sc88_state_load(&m->machine, buffer, size);
+	if (!sc88_state_load(&m->machine, buffer, size))
+		return false;
+	scemu_set_map(m, (scemu_map_t)m->map.map);
+	return true;
 }
 
 size_t scemu_nvram_size(const scemu_t *m)

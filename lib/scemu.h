@@ -102,6 +102,15 @@ typedef enum scemu_computer_switch
 	SCEMU_COMPUTER_MAC
 } scemu_computer_switch_t;
 
+/* Instrument maps, as the parts select them with bank select LSB. */
+typedef enum scemu_map
+{
+	SCEMU_MAP_NATIVE = 0,   /* whatever the song and the machine choose */
+	SCEMU_MAP_SC55 = 1,
+	SCEMU_MAP_SC88 = 2,
+	SCEMU_MAP_SC88PRO = 3   /* the SC-88 has no such map and plays its own */
+} scemu_map_t;
+
 /* LED bit positions in the mask returned by scemu_leds(). */
 typedef enum scemu_led
 {
@@ -172,6 +181,14 @@ void scemu_render(scemu_t *m, int32_t *const out[2], size_t frames);
  * render call. */
 void scemu_midi_write(scemu_t *m, int port, const uint8_t *bytes, size_t count, uint32_t frame_offset);
 void scemu_set_midi_out(scemu_t *m, scemu_midi_out_fn fn, void *user);
+
+/* Force one instrument map on every part, whatever the song asks for: the
+ * MIDI input is rewritten (bank select LSB replaced, a selection put before
+ * the first program change of a part and after every reset), and the
+ * selection is sent to all parts at once when the map is set.  NATIVE
+ * stops rewriting and leaves the parts as they are. */
+void scemu_set_map(scemu_t *m, scemu_map_t map);
+scemu_map_t scemu_map(const scemu_t *m);
 
 /* Panel. */
 void scemu_button(scemu_t *m, scemu_button_t button, bool down);
