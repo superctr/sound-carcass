@@ -38,6 +38,15 @@ battery-backed settings memory, can be saved and restored.
 
 `scemu-cli <sc88|sc88pro> <romdir> <out.wav> [seconds]` boots the machine and renders to a WAV file.
 
+`scplay song.mid` plays a Standard MIDI File to the speakers with the front panel drawn in the terminal:
+the LCD's text fields, the sixteen level bars animating from the CGRAM patterns the firmware writes, the
+LEDs and a clock, with the panel buttons on the keyboard.  It finds its ROM images by itself — a zip or a
+directory named after the model, beside the program or in `~/.mame/roms` — boots the firmware once and
+caches the booted machine, so later runs start instantly from factory settings (`--keep-settings` keeps
+the machine's settings memory across sessions instead).  `--no-audio --wav out.wav` renders a file
+about ten times faster than real time instead.  See [docs/scplay.md](docs/scplay.md).  It needs SDL2 and
+zlib; without them the library and `scemu-cli` still build.
+
 ## Status
 
 Scaffold.  Nothing plays yet.
