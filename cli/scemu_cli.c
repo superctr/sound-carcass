@@ -111,6 +111,7 @@ typedef struct midi_event
 	uint32_t frame;
 	uint16_t length;
 	uint8_t tempo_change;
+	uint8_t port;
 	const uint8_t *bytes;
 	uint8_t status[3];
 	uint32_t tempo;
@@ -156,6 +157,7 @@ static int smf_parse_track(smf_t *s, const uint8_t *p, const uint8_t *end)
 {
 	uint64_t tick = 0;
 	uint8_t running = 0;
+	uint8_t port = 0;
 	while (p < end)
 	{
 		tick += read_vlq(&p, end);
@@ -174,6 +176,8 @@ static int smf_parse_track(smf_t *s, const uint8_t *p, const uint8_t *end)
 				e->tempo_change = 1;
 				e->tempo = ((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2];
 			}
+			else if (type == 0x21 && length == 1)
+				port = p[0] & 1;
 			if (type == 0x2f)
 				break;
 			p += length;
@@ -184,6 +188,7 @@ static int smf_parse_track(smf_t *s, const uint8_t *p, const uint8_t *end)
 			uint32_t length = read_vlq(&p, end);
 			midi_event_t *e = smf_add(s);
 			e->tick = tick;
+			e->port = port;
 			if (status == 0xf0)
 			{
 				e->status[0] = 0xf0;
@@ -211,6 +216,7 @@ static int smf_parse_track(smf_t *s, const uint8_t *p, const uint8_t *end)
 			int data = (status >= 0xc0 && status < 0xe0) ? 1 : 2;
 			midi_event_t *e = smf_add(s);
 			e->tick = tick;
+			e->port = port;
 			e->status[0] = status;
 			for (int n = 0; n < data && p < end; n++)
 				e->status[1 + n] = *p++;
@@ -418,15 +424,16 @@ int main(int argc, char **argv)
 			uint32_t offset = e->frame > done ? (uint32_t)(e->frame - done) : 0;
 			if (e->tempo_change)
 				continue;
+			int port = e->port ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A;
 			if (e->status[0] == 0xf0 && e->bytes)
 			{
-				scemu_midi_write(m, SCEMU_MIDI_IN_A, e->status, 1, offset);
-				scemu_midi_write(m, SCEMU_MIDI_IN_A, e->bytes, e->length - 1, offset);
+				scemu_midi_write(m, port, e->status, 1, offset);
+				scemu_midi_write(m, port, e->bytes, e->length - 1, offset);
 			}
 			else if (e->bytes)
-				scemu_midi_write(m, SCEMU_MIDI_IN_A, e->bytes, e->length, offset);
+				scemu_midi_write(m, port, e->bytes, e->length, offset);
 			else
-				scemu_midi_write(m, SCEMU_MIDI_IN_A, e->status, e->length, offset);
+				scemu_midi_write(m, port, e->status, e->length, offset);
 		}
 		int32_t *const out[2] = { buf + done * 2, NULL };
 		scemu_render(m, out, n);

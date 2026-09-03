@@ -16,6 +16,7 @@ typedef struct smf_event
 	uint32_t frame;
 	uint16_t length;
 	uint8_t tempo_change;
+	uint8_t port;
 	const uint8_t *bytes;
 	uint8_t status[3];
 	uint32_t tempo;
@@ -29,7 +30,10 @@ typedef struct smf
 	uint16_t division;
 	uint32_t last_frame;
 	char name[64];
+	uint8_t ports;
 } smf_t;
+
+#define SMF_PORT_UNSET 0xff
 
 int smf_load(smf_t *s, const char *path, uint32_t rate);
 void smf_free(smf_t *s);

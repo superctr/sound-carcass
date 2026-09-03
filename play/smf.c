@@ -46,6 +46,7 @@ static int parse_track(smf_t *s, const uint8_t *p, const uint8_t *end)
 {
 	uint64_t tick = 0;
 	uint8_t running = 0;
+	uint8_t port = SMF_PORT_UNSET;
 	while (p < end)
 	{
 		tick += read_vlq(&p, end);
@@ -70,6 +71,11 @@ static int parse_track(smf_t *s, const uint8_t *p, const uint8_t *end)
 				e->tempo_change = 1;
 				e->tempo = ((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2];
 			}
+			else if (type == 0x21 && length == 1)
+			{
+				port = p[0];
+				s->ports |= (uint8_t)(1u << (port & 1));
+			}
 			else if (type == 0x03 && !s->name[0] && length)
 			{
 				size_t copy = length < sizeof(s->name) - 1 ? length : sizeof(s->name) - 1;
@@ -91,6 +97,7 @@ static int parse_track(smf_t *s, const uint8_t *p, const uint8_t *end)
 			if (!e)
 				return 0;
 			e->tick = tick;
+			e->port = port;
 			e->bytes = p;
 			if (status == 0xf0)
 			{
@@ -117,6 +124,7 @@ static int parse_track(smf_t *s, const uint8_t *p, const uint8_t *end)
 			if (!e)
 				return 0;
 			e->tick = tick;
+			e->port = port;
 			e->status[0] = status;
 			for (int n = 0; n < data && p < end; n++)
 				e->status[1 + n] = *p++;
