@@ -1155,6 +1155,7 @@ static void e_parallel(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o
 		e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_R3, 0);
 		break;
 	case 0x1:
+		break;
 	case 0x9:
 		if (multiply)
 		{
@@ -1162,7 +1163,7 @@ static void e_parallel(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o
 			e_mulq15(b, SLJIT_R3, XP_REG_ACC, SLJIT_R4, shift);
 			e_add(b, XP_REG_ACC, SLJIT_R3, XP_REG_PPREV, 0);
 		}
-		else if (fn == 9)
+		else
 		{
 			e_load(b, SLJIT_R3, CELL(dsp.mem));
 			e_add(b, XP_REG_ACC, SLJIT_R3, XP_REG_PPREV, 0);
