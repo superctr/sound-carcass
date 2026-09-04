@@ -702,7 +702,6 @@ void xp_decode_program(xp_t *xp)
 		s->ext = (w >> 25) & 7;
 		s->eram_op = 0;
 		s->eram_offset = 0;
-		s->read_bypass = s->col == 0x30 && (c & 0x3e3f) == 0x0221;
 		s->cram = c;
 		s->coefficient = mantissa << shifts[c >> 14];
 		s->raw = bit(c, 15) ? (int32_t)((c & 0x3fff) << 13) : mantissa;
@@ -1053,15 +1052,7 @@ static void e_parallel(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o
 			e_mov(b, SLJIT_R0, (fn == 5 && s->st != 3) ? XP_REG_ABP : XP_REG_ACC, 0);
 			break;
 		case 2:
-			if (fn == 1)
-			{
-				if (o->now_valid)
-					e_mov(b, SLJIT_R0, SLJIT_R1, 0);
-				else
-					e_load(b, SLJIT_R0, CELL(dsp.r));
-			}
-			else
-				e_load(b, SLJIT_R0, CELL(dsp.mem));
+			e_load(b, SLJIT_R0, CELL(dsp.mem));
 			break;
 		default:
 			e_operand(b, 3, s, o);
@@ -1229,8 +1220,7 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 	if (o->now_valid)
 	{
 		e_store(b, CELL(dsp.r), SLJIT_R1);
-		if (!s->read_bypass)
-			e_store(b, CELL(dsp.mem), SLJIT_R1);
+		e_store(b, CELL(dsp.mem), SLJIT_R1);
 	}
 	e_mov(b, XP_REG_PPREV, SLJIT_R2, 0);
 }

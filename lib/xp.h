@@ -93,7 +93,6 @@ typedef struct xp_slot
 	uint8_t col;
 	uint8_t ext;
 	uint8_t eram_op;
-	bool read_bypass;
 	uint16_t eram_offset;
 	uint16_t cram;
 	int32_t coefficient;
