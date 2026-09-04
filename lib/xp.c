@@ -38,135 +38,86 @@ static const int16_t interp_weights[3][128] = {
 };
 
 static const uint32_t hold_masks[4] = { 0, 7, 31, 127 };
+static const uint8_t phase_dither[4] = { 0, 2, 1, 3 };
+static const uint8_t shift_select[4] = { 0, 1, 2, 4 };
+
+enum { RAMP_PITCH, RAMP_TVF, RAMP_RESO, RAMP_TVA2, RAMP_TVA1 };
+
+typedef struct ramp_pages
+{
+	uint8_t current, control, target, step, reason;
+} ramp_pages_t;
+
+static const ramp_pages_t RAMPS[5] = {
+	{ XP_PAGE_PITCH_SEED, XP_PAGE_PITCH_CONTROL, XP_PAGE_PITCH_TARGET, XP_PAGE_PITCH_STEP, XP_IRQ_PITCH_DONE },
+	{ XP_PAGE_TVF_SEED, XP_PAGE_TVF_CONTROL, XP_PAGE_TVF_TARGET, XP_PAGE_TVF_STEP, XP_IRQ_TVF_DONE },
+	{ XP_PAGE_RESO_SEED, XP_PAGE_RESO_CONTROL, XP_PAGE_RESO_TARGET, 0, XP_IRQ_RESO_DONE },
+	{ XP_PAGE_TVA2_SEED, XP_PAGE_TVA2_CONTROL, XP_PAGE_TVA2_TARGET, 0, XP_IRQ_TVA2_DONE },
+	{ XP_PAGE_TVA1_SEED, XP_PAGE_TVA1_CONTROL, XP_PAGE_TVA1_TARGET, XP_PAGE_TVA1_STEP, XP_IRQ_VOICE_DONE },
+};
 
 static inline int32_t clamp24(int64_t v) { return (int32_t)(v > 0x7fffff ? 0x7fffff : v < -0x800000 ? -0x800000 : v); }
+static inline int32_t clamp29(int64_t v) { return (int32_t)(v > 0x0fffffff ? 0x0fffffff : v < -0x10000000 ? -0x10000000 : v); }
+static inline int32_t wrap29(int64_t v) { return (int32_t)((int64_t)((uint64_t)v << 35) >> 35); }
 static inline int32_t wrap24(int32_t v) { return (int32_t)((uint32_t)v << 8) >> 8; }
 static inline int32_t wrap20(int32_t v) { return (int32_t)((uint32_t)v << 12) >> 12; }
 static inline int32_t wrap18(int32_t v) { return (int32_t)((uint32_t)v << 14) >> 14; }
 static inline int32_t gain_current(int32_t cell) { return (int16_t)(cell >> 10); }
-static inline int32_t gain_goal(int32_t cell) { return (int16_t)(uint16_t)((cell & 0x3ff) << 6); }
 static inline int voice_count(const xp_t *xp) { return (xp->regs[XP_HIGHEST_VOICE >> 1] & 0x3f) + 1; }
 static inline int slot_count(const xp_t *xp) { return voice_count(xp) * 4; }
-static inline int ramp_base(const xp_t *xp) { return XP_IRAM_SIZE - ((xp->regs[XP_DSP_CONFIG >> 1] >> 8) & 0x1f); }
+static inline int ramp_base(const xp_t *xp) { return 256 - ((xp->regs[XP_DSP_CONFIG >> 1] >> 8) & 0x1f); }
 static inline int32_t min32(int32_t a, int32_t b) { return a < b ? a : b; }
 static inline int32_t max32(int32_t a, int32_t b) { return a > b ? a : b; }
 static inline bool bit(uint32_t v, int n) { return (v >> n) & 1; }
+static inline int32_t multiply(int32_t operand, int32_t coefficient) { return clamp29(((int64_t)operand * coefficient) / 8192); }
+static inline int32_t multiply_q15(int32_t operand, int32_t factor, int shift) { return clamp29((((int64_t)operand * factor) << shift) / 32768); }
 
-/* ---------------------------------------------------------------- ramps */
-
-static int ramp_rate(const xp_ramp_t *r) { return r->control & 0xfff; }
-static uint32_t ramp_hold_mask(const xp_ramp_t *r) { return hold_masks[(r->control >> 12) & 3]; }
-
-static xp_law_t ramp_control_law(const xp_ramp_t *r)
+static inline int cell_of(int word, int parity)
 {
-	switch (r->control >> 14)
-	{
-	case 0: return XP_LAW_EXPONENTIAL;
-	case 1: return XP_LAW_LINEAR;
-	default: return XP_LAW_S_CURVE;
-	}
+	if (word < 0x80)
+		return ((bit(word, 6) ^ parity) << 6) | (word & 0x3f);
+	if (word < 0xc0)
+		return (bit(word, 5) << 6) | 0x20 | (word & 0x1f);
+	return 0x80 | (word & 0x3f);
 }
 
-static void ramp_arm(xp_ramp_t *r, xp_law_t law)
+static inline int cell(const xp_t *xp, int word) { return cell_of(word, xp->parity); }
+
+static int32_t gain_goal(int32_t cell)
 {
-	switch (law)
-	{
-	case XP_LAW_LINEAR:
-		r->step = (int32_t)(((int64_t)r->target - r->current) * ramp_rate(r) >> 13);
-		if (r->step == 0 && r->target > r->current)
-			r->step = 1;
-		r->active = r->current != r->target;
-		break;
-	case XP_LAW_EXPONENTIAL:
-		r->active = r->current != r->target;
-		break;
-	case XP_LAW_S_CURVE:
-		r->target = 0;
-		r->step = 0;
-		r->midpoint = r->current / 2;
-		r->active = r->current != 0;
-		break;
-	}
+	const int target = cell & 0x3ff;
+	int32_t goal = (int16_t)(uint16_t)(target << 6);
+	if (target > 0 && target < 0x1ff)
+		goal++;
+	return goal;
 }
 
-static void ramp_seed(xp_ramp_t *r, int32_t value, xp_law_t law)
+static int32_t fold24(int32_t value)
 {
-	r->current = value;
-	r->previous = value;
-	r->counter = 0;
-	r->accumulator = (int32_t)((uint32_t)value << 10);
-	ramp_arm(r, law);
+	uint32_t v = (uint32_t)value & 0xffffff;
+	if (bit(v, 23) != bit(v, 22))
+		v ^= 0x7fffff;
+	return wrap24((int32_t)v);
 }
 
-static void ramp_retarget(xp_ramp_t *r, int32_t value, xp_law_t law)
+static uint32_t page_mask(int index)
 {
-	r->target = value;
-	r->accumulator = (int32_t)((uint32_t)r->current << 10);
-	ramp_arm(r, law);
+	if (index <= 0x04 || (index >= 0x20 && index <= 0x26))
+		return 0xfffff;
+	if (index >= 0x08 && index <= 0x0b)
+		return 0xfff;
+	if (index >= 0x0c && index <= 0x1e)
+		return 0x3ffff;
+	if (index == 0x27)
+		return 0xffff;
+	if (index >= 0x28 && index <= 0x2a)
+		return 0xffffff;
+	return 0xffffffff;
 }
 
-static void ramp_configure(xp_ramp_t *r, uint16_t value, xp_law_t law)
+static int bit_reverse4(int v)
 {
-	r->control = value;
-	ramp_arm(r, law);
-}
-
-static bool ramp_update(xp_ramp_t *r, xp_law_t law)
-{
-	r->previous = r->current;
-	if (!r->active)
-		return false;
-	r->counter++;
-	if (r->counter & ramp_hold_mask(r))
-		return false;
-	switch (law)
-	{
-	case XP_LAW_LINEAR:
-		r->current += r->step;
-		r->current = (r->step > 0) ? min32(r->current, r->target) : max32(r->current, r->target);
-		if (r->current == r->target)
-		{
-			r->step = 0;
-			r->active = false;
-		}
-		break;
-	case XP_LAW_EXPONENTIAL:
-	{
-		const int32_t error = (int16_t)(((int32_t)((uint32_t)r->target << 10) - r->accumulator) >> 13);
-		int32_t delta = error * ramp_rate(r);
-		delta = (delta < 0) ? min32(delta, -0x400) : max32(delta, 0x400);
-		r->accumulator += delta;
-		r->current = r->accumulator >> 10;
-		r->active = r->current != r->target;
-		break;
-	}
-	case XP_LAW_S_CURVE:
-		if (r->current > r->midpoint)
-		{
-			r->step -= ramp_rate(r);
-			r->current += r->step;
-		}
-		else
-		{
-			r->step += ramp_rate(r);
-			r->current = (r->step > 0) ? 0 : r->current + r->step;
-		}
-		if (r->current == 0)
-			r->active = false;
-		break;
-	}
-	return !r->active;
-}
-
-static int32_t ramp_value_at(const xp_ramp_t *r, int phase, int period)
-{
-	return r->previous + (int32_t)(((int64_t)(r->current - r->previous) * (phase + 1)) / period);
-}
-
-static int16_t ramp_coefficient_at(const xp_ramp_t *r, int phase, int period)
-{
-	int32_t v = ramp_value_at(r, phase, period) >> 3;
-	return (int16_t)(v > 0x7fff ? 0x7fff : v < -0x8000 ? -0x8000 : v);
+	return ((v & 1) << 3) | ((v & 2) << 1) | ((v & 4) >> 1) | ((v & 8) >> 3);
 }
 
 /* ---------------------------------------------------------------- device */
@@ -195,6 +146,8 @@ bool xp_init(xp_t *xp, const xp_link_t *link, jit_alloc_t *jit, const uint8_t *w
 		return false;
 	for (int i = 0; i <= 256; i++)
 		xp->exp_table[i] = (int32_t)floor(exp2(17.0 + i / 256.0));
+	if (getenv("SCEMU_XP_JIT") && !atoi(getenv("SCEMU_XP_JIT")))
+		xp->interpret = true;
 	return true;
 }
 
@@ -202,7 +155,7 @@ void xp_release(xp_t *xp)
 {
 	jit_code_free(xp->jit, &xp->code[0]);
 	jit_code_free(xp->jit, &xp->code[1]);
-	xp->frame = NULL;
+	xp->frame[0] = xp->frame[1] = NULL;
 	free(xp->eram);
 	xp->eram = NULL;
 }
@@ -220,111 +173,68 @@ void xp_reset(xp_t *xp)
 {
 	memset(xp->regs, 0, sizeof(xp->regs));
 	memset(xp->eram, 0, XP_ERAM_SIZE * sizeof(int32_t));
-	memset(xp->bus, 0, sizeof(xp->bus));
 	memset(xp->iram, 0, sizeof(xp->iram));
 	memset(xp->iram_ramping, 0, sizeof(xp->iram_ramping));
-	memset(xp->iram_target, 0, sizeof(xp->iram_target));
 	memset(xp->voices, 0, sizeof(xp->voices));
 	memset(&xp->dsp, 0, sizeof(xp->dsp));
+	xp->dsp.latch = -0x800000;
+	memset(xp->line_word, 0, sizeof(xp->line_word));
+	memset(xp->block_a_out, 0, sizeof(xp->block_a_out));
 	xp->program_dirty = true;
 	xp->dsp_enabled = false;
+	xp->parity = 0;
 	xp->bus_written = 0;
 	xp->run_mask = 0;
 	xp->run_pending = 0;
 	xp->read_latch = 0;
+	xp->write_latch = 0;
 	xp->frame_counter = 0;
-	memset(xp->irq_pending, 0, sizeof(xp->irq_pending));
 	xp->irq_event = 0;
 	xp->irq_active = false;
+	xp->irq_frame_used = false;
 	update_int(xp);
 }
 
-static void next_irq(xp_t *xp)
+static bool offer_irq(xp_t *xp, int voice, int reason)
 {
-	for (int reason = 0; !xp->irq_active && reason < XP_IRQ_REASONS; reason++)
-		for (int voice = 0; voice < XP_VOICES; voice++)
-			if ((xp->irq_pending[reason] >> voice) & 1)
-			{
-				xp->irq_event = (uint16_t)((voice << 8) | reason);
-				xp->irq_active = true;
-				break;
-			}
-}
+	if (!bit(xp->regs[XP_IRQ_STATUS >> 1], reason))
+		return true;
+	if (xp->irq_active || xp->irq_frame_used)
+		return false;
 
-static void raise_irq(xp_t *xp, int voice, int reason)
-{
-	if (!((xp->regs[XP_IRQ_STATUS >> 1] >> reason) & 1))
-		return;
-
-	xp->irq_pending[reason] |= (uint64_t)1 << (voice & 63);
-	next_irq(xp);
+	xp->irq_event = (uint16_t)((voice << 8) | reason);
+	xp->irq_active = true;
+	xp->irq_frame_used = true;
 	update_int(xp);
+	return true;
 }
 
 /* ---------------------------------------------------------------- host interface */
 
-static int page_word(int voice, int index)
+static inline int page_word(int voice, int index)
 {
 	return ((index & 0xff) << 7) | ((voice & 63) << 1);
 }
 
-static uint32_t page(const xp_t *xp, int voice, int index)
+static inline uint32_t page(const xp_t *xp, int voice, int index)
 {
 	const int word = page_word(voice, index);
 	return ((uint32_t)xp->regs[word] << 16) | xp->regs[word | 1];
 }
 
-static uint16_t page_high(const xp_t *xp, int voice, int index)
+static inline void set_page(xp_t *xp, int voice, int index, uint32_t value)
 {
-	return xp->regs[page_word(voice, index)];
+	const int word = page_word(voice, index);
+	xp->regs[word] = (uint16_t)(value >> 16);
+	xp->regs[word | 1] = (uint16_t)value;
 }
 
-static bool update_ramp(xp_t *xp, int n, xp_ramp_t *r, int index, xp_law_t law)
-{
-	if (bit(page_high(xp, n, index), 1))
-	{
-		r->previous = r->current;
-		return false;
-	}
-
-	return ramp_update(r, law);
-}
-
-static void ramp_arrived(xp_t *xp, int n, int index, int reason)
-{
-	if (!bit(page_high(xp, n, index), 0))
-		return;
-
-	xp->regs[page_word(n, index)] |= 2;
-	raise_irq(xp, n, reason);
-}
-
-static void marker_reached(xp_t *xp, int n)
-{
-	const uint32_t control = page(xp, n, XP_PAGE_CONTROL);
-	if (bit(control, 16))
-		return;
-
-	xp->regs[page_word(n, XP_PAGE_CONTROL)] |= bit(control, 17) ? 1 : 2;
-	if (bit(control, 15))
-		raise_irq(xp, n, bit(control, 14) ? XP_IRQ_LOOP_ALTERNATE : XP_IRQ_LOOP_REACHED);
-}
-
-static void update_mute(xp_t *xp, int n)
-{
-	const uint32_t control = page(xp, n, XP_PAGE_CONTROL);
-	if (bit(control, 19) == bit(control, 18))
-		return;
-
-	xp->regs[page_word(n, XP_PAGE_CONTROL)] ^= 4;
-	if (bit(control, 15))
-		raise_irq(xp, n, XP_IRQ_MUTE_CHANGED);
-}
-
-static uint16_t send(const xp_t *xp, int voice, int bank)
+static inline uint16_t send(const xp_t *xp, int voice, int bank)
 {
 	return xp->regs[(XP_SEND_BASE >> 1) + (bank & 3) * 64 + (voice & 63)];
 }
+
+static inline bool running(const xp_t *xp, int voice) { return bit((uint32_t)(xp->run_mask >> (voice & 63)), 0); }
 
 static inline uint8_t wave_byte(const xp_t *xp, uint32_t address)
 {
@@ -336,56 +246,98 @@ static inline uint8_t wave_byte(const xp_t *xp, uint32_t address)
 	return n < xp->wave_size ? xp->wave[n] : 0;
 }
 
-static inline uint8_t rom_byte(const xp_t *xp, const xp_voice_t *v, uint32_t offset)
+static inline uint8_t rom_byte(const xp_t *xp, int region, uint32_t offset)
 {
-	return wave_byte(xp, (v->region << 20) | (offset & 0xfffff));
+	return wave_byte(xp, ((uint32_t)(region & 0x7f) << 20) | (offset & 0xfffff));
 }
 
-static bool ramp_current(const xp_voice_t *v, int index, uint32_t *value)
+static inline int host_cell(uint32_t address) { return (int)((address - XP_IRAM_BASE) >> 2); }
+
+static void write_iram(xp_t *xp, int c, uint32_t value)
 {
-	switch (index)
+	xp->iram[c] = c >= 0x80 ? (int32_t)(value << 6) >> 6 : wrap24((int32_t)value);
+	if (c >= 0x80)
+		xp->iram_ramping[c & 0x3f] = 0;
+}
+
+static void write_iram_target(xp_t *xp, int word, uint16_t value)
+{
+	const int c = cell(xp, word);
+	if (word >= ramp_base(xp))
 	{
-	case XP_PAGE_PITCH_SEED: *value = (uint32_t)v->pitch.current; return true;
-	case XP_PAGE_TVF_SEED:   *value = (uint32_t)v->tvf.current; return true;
-	case XP_PAGE_TVA2_SEED:  *value = (uint32_t)v->tva2.current; return true;
-	case XP_PAGE_TVA1_SEED:  *value = (uint32_t)v->tva1.current; return true;
-	case XP_PAGE_RESO_SEED:  *value = (uint32_t)v->reso.current << 2; return true;
-	default:                 return false;
+		xp->iram[c] = (xp->iram[c] & ~0x3ff) | (value & 0x3ff);
+		xp->iram_ramping[c & 0x3f] = 1;
 	}
-}
-
-static void commit_run_mask(xp_t *xp);
-
-static int iram_word(uint32_t address)
-{
-	return (address < XP_IRAM3_BASE ? 0 : 0x40) + (int)((address - XP_IRAM_BASE) >> 2);
+	else
+	{
+		xp->iram[c] = value;
+		xp->iram_ramping[c & 0x3f] = 0;
+	}
 }
 
 static void load_latch(xp_t *xp, uint32_t address)
 {
-	const xp_voice_t *v = &xp->voices[(address >> 2) & 63];
-	if (address < XP_CRAM_BASE && ramp_current(v, address >> 8, &xp->read_latch))
-		;
-	else if (address >= XP_CRAM_BASE && address < XP_IRAM_BASE)
+	if (address < XP_CRAM_BASE)
+	{
+		if (bit(address, 1))
+			xp->read_latch = page(xp, (address >> 2) & 63, address >> 8) & page_mask(address >> 8);
+	}
+	else if (address < XP_IRAM_BASE)
 		xp->read_latch = xp->regs[address >> 1];
-	else if (address >= XP_IRAM_BASE && address < XP_IRAM3_TARGET_BASE)
-		xp->read_latch = (uint32_t)xp->iram[iram_word(address)];
-	else
-		xp->read_latch = ((uint32_t)xp->regs[(address >> 1) & ~1] << 16) | xp->regs[(address >> 1) | 1];
+	else if (address < XP_IRAM3_TARGET_BASE)
+	{
+		if (bit(address, 1))
+		{
+			const int c = host_cell(address);
+			xp->read_latch = (uint32_t)xp->iram[c] & (c >= 128 ? 0x3ffffff : 0xffffff);
+		}
+	}
+	else if (address < XP_PRAM_BASE)
+		xp->read_latch = 0;
+	else if (address < XP_RUN_MASK)
+	{
+		if (bit(address, 1))
+			xp->read_latch = (((uint32_t)xp->regs[(address >> 1) & ~1] << 16) | xp->regs[address >> 1]) & 0x0fffffff;
+	}
+	else if (address >= XP_SEND_BASE && address < XP_ROM_WINDOW)
+		xp->read_latch = xp->regs[address >> 1];
+	else if (address >= XP_ROM_WINDOW)
+	{
+		const uint32_t byte = ((uint32_t)(xp->regs[XP_ROM_BANK >> 1] & 0x7f) << 20)
+			| ((uint32_t)(xp->regs[XP_ROM_PAGE >> 1] & 0x3ff) << 10) | (address - XP_ROM_WINDOW);
+		xp->read_latch = wave_byte(xp, byte) | ((uint32_t)wave_byte(xp, byte + 1) << 8);
+	}
 }
+
+static uint32_t translate(const xp_t *xp, uint32_t address)
+{
+	if (address >= XP_VOICE_WINDOW && address < XP_VOICE_WINDOW_END)
+		return ((address - XP_VOICE_WINDOW) >> 2) * 0x100 + (xp->regs[XP_VOICE_SELECT >> 1] & 0x3f) * 4 + (address & 2);
+	if (address >= XP_SEND_WINDOW && address < XP_SEND_BASE)
+		return XP_SEND_BASE + ((address - XP_SEND_WINDOW) >> 1) * 0x80 + (xp->regs[XP_VOICE_SELECT >> 1] & 0x3f) * 2;
+	return address;
+}
+
+static void write_run_mask(xp_t *xp, int word, uint16_t data);
+static void commit_run_mask(xp_t *xp);
 
 uint16_t xp_read(xp_t *xp, uint32_t offset)
 {
-	const uint32_t address = (offset << 1) & 0x3ffe;
-	uint16_t data = xp->regs[address >> 1];
-	if (address < XP_RUN_MASK)
+	const uint32_t address = translate(xp, (offset << 1) & 0x3ffe);
+	uint16_t data = 0;
+
+	if (address < XP_RUN_MASK || address >= XP_SEND_BASE)
 		load_latch(xp, address);
-	else if (address < XP_SEND_BASE)
+	else
 	{
 		if (address < XP_ROM_SELECT)
 			commit_run_mask(xp);
 		switch (address)
 		{
+		case XP_RUN_MASK: case XP_RUN_MASK + 2: case XP_RUN_MASK + 4: case XP_RUN_MASK + 6:
+		case XP_DSP_MODE:
+		case XP_VOICE_SELECT:
+			break;
 		case XP_READBACK_LOW:
 			data = xp->read_latch & 0xffff;
 			break;
@@ -393,63 +345,76 @@ uint16_t xp_read(xp_t *xp, uint32_t offset)
 			data = (uint16_t)(xp->read_latch >> 16);
 			break;
 		case XP_IRQ_STATUS:
-			data = xp->irq_active ? xp->irq_event : 0;
+			data = xp->irq_event;
 			break;
 		case XP_IRQ_ACK:
-			if (xp->irq_active)
-			{
-				xp->irq_pending[xp->irq_event & 0xf] &= ~((uint64_t)1 << ((xp->irq_event >> 8) & 63));
-				xp->irq_active = false;
-				next_irq(xp);
-			}
+			xp->irq_active = false;
 			update_int(xp);
-			data = 0;
+			break;
+		case XP_STATUS:
+			data = (xp->regs[XP_STATUS >> 1] & ~0x40) | (((xp->regs[XP_DIAG_SELECT >> 1] & 0x7ff) >= 0x5a0) ? 0x40 : 0);
+			break;
+		default:
+			data = xp->regs[address >> 1];
 			break;
 		}
-	}
-	else if (address >= XP_ROM_WINDOW)
-	{
-		const uint32_t byte = ((uint32_t)(xp->regs[XP_ROM_BANK >> 1] & 0x7f) << 20)
-			| ((uint32_t)(xp->regs[XP_ROM_PAGE >> 1] & 0x3ff) << 10) | (address - XP_ROM_WINDOW);
-		data = (uint16_t)(wave_byte(xp, byte) | (wave_byte(xp, byte + 1) << 8));
 	}
 	return data;
 }
 
-static void write_page(xp_t *xp, int n, int index, uint32_t value)
+void xp_write(xp_t *xp, uint32_t offset, uint16_t data, uint16_t mask)
 {
-	xp_voice_t *v = &xp->voices[n];
-	switch (index)
+	const uint32_t address = translate(xp, (offset << 1) & 0x3ffe);
+	data = (uint16_t)((xp->regs[address >> 1] & ~mask) | (data & mask));
+
+	if (address < XP_CRAM_BASE)
 	{
-	case 0x0c: v->predictor = wrap18((int32_t)value); break;
-	case 0x23: v->amplitude = (int32_t)(value & 0xfffff); break;
-	case 0x27: v->smooth = (int32_t)(value & 0xffff); break;
-	case XP_PAGE_PITCH_SEED:    ramp_seed(&v->pitch, (int32_t)value, XP_LAW_LINEAR); break;
-	case XP_PAGE_PITCH_TARGET:  ramp_retarget(&v->pitch, (int32_t)value, XP_LAW_LINEAR); break;
-	case XP_PAGE_PITCH_CONTROL: ramp_configure(&v->pitch, (uint16_t)value, XP_LAW_LINEAR); break;
-	case XP_PAGE_TVF_SEED:      ramp_seed(&v->tvf, exp_decode(xp, (int32_t)value), XP_LAW_LINEAR); break;
-	case XP_PAGE_TVF_TARGET:    ramp_retarget(&v->tvf, exp_decode(xp, (int32_t)value), XP_LAW_LINEAR); break;
-	case XP_PAGE_TVF_CONTROL:   ramp_configure(&v->tvf, (uint16_t)value, XP_LAW_LINEAR); break;
-	case XP_PAGE_RESO_SEED:     ramp_seed(&v->reso, (int32_t)value >> 2, XP_LAW_EXPONENTIAL); break;
-	case XP_PAGE_RESO_TARGET:   ramp_retarget(&v->reso, (int32_t)value, XP_LAW_EXPONENTIAL); break;
-	case XP_PAGE_RESO_CONTROL:  ramp_configure(&v->reso, (uint16_t)value, XP_LAW_EXPONENTIAL); break;
-	case XP_PAGE_TVA2_SEED:     ramp_seed(&v->tva2, (int32_t)value, XP_LAW_EXPONENTIAL); break;
-	case XP_PAGE_TVA2_TARGET:   ramp_retarget(&v->tva2, (int32_t)value, XP_LAW_EXPONENTIAL); break;
-	case XP_PAGE_TVA2_CONTROL:  ramp_configure(&v->tva2, (uint16_t)value, XP_LAW_EXPONENTIAL); break;
-	case XP_PAGE_TVA1_SEED:     ramp_seed(&v->tva1, (int32_t)value, ramp_control_law(&v->tva1)); break;
-	case XP_PAGE_TVA1_TARGET:   ramp_retarget(&v->tva1, (int32_t)value, ramp_control_law(&v->tva1)); break;
-	case XP_PAGE_TVA1_CONTROL:
-		v->tva1.control = (uint16_t)value;
-		ramp_arm(&v->tva1, ramp_control_law(&v->tva1));
-		if (ramp_control_law(&v->tva1) == XP_LAW_S_CURVE && !v->tva1.active && !v->done_reported)
+		if (!bit(address, 1))
+			xp->write_latch = data;
+		else
 		{
-			v->done_reported = 1;
-			raise_irq(xp, n, XP_IRQ_VOICE_DONE);
+			xp->regs[(address >> 1) & ~1] = xp->write_latch;
+			xp->regs[address >> 1] = data;
 		}
-		break;
-	default:
-		break;
 	}
+	else if (address < XP_IRAM_BASE)
+	{
+		xp->regs[address >> 1] = data;
+		xp->program_dirty = true;
+	}
+	else if (address < XP_IRAM3_TARGET_BASE)
+	{
+		if (!bit(address, 1))
+			xp->write_latch = data;
+		else
+			write_iram(xp, host_cell(address), ((uint32_t)xp->write_latch << 16) | data);
+	}
+	else if (address < XP_PRAM_BASE)
+	{
+		xp->regs[address >> 1] = data;
+		write_iram_target(xp, 0xe0 + ((address >> 1) & 0x1f), data);
+	}
+	else if (address < XP_RUN_MASK)
+	{
+		if (!bit(address, 1))
+			xp->write_latch = data;
+		else
+		{
+			xp->regs[(address >> 1) & ~1] = xp->write_latch;
+			xp->regs[address >> 1] = data;
+			xp->program_dirty = true;
+		}
+	}
+	else if (address < XP_SEND_BASE)
+	{
+		xp->regs[address >> 1] = data;
+		if (address < XP_ROM_SELECT)
+			write_run_mask(xp, (int)((address - XP_RUN_MASK) >> 1), data);
+		else if (address == XP_HIGHEST_VOICE || address == XP_DSP_CONFIG)
+			xp->program_dirty = true;
+	}
+	else if (address < XP_ROM_WINDOW)
+		xp->regs[address >> 1] = data;
 }
 
 static void write_run_mask(xp_t *xp, int word, uint16_t data)
@@ -461,16 +426,8 @@ static void write_run_mask(xp_t *xp, int word, uint16_t data)
 	xp->run_mask &= ~cleared;
 	xp->run_pending = (xp->run_pending & ~field) | (written & ~xp->run_mask);
 	for (int n = word * 16; n < word * 16 + 16; n++)
-	{
 		if ((cleared >> n) & 1)
-		{
-			xp_voice_t *v = &xp->voices[n];
-			v->reading = 0;
-			v->predictor = 0;
-			v->filter_low = 0;
-			v->filter_band = 0;
-		}
-	}
+			xp->voices[n].phase = XP_IDLE;
 }
 
 static void commit_run_mask(xp_t *xp)
@@ -482,59 +439,125 @@ static void commit_run_mask(xp_t *xp)
 	xp->run_pending = 0;
 	for (int n = 0; n < XP_VOICES; n++)
 		if ((launched >> n) & 1)
-			xp->voices[n].start_pending = 1;
+			xp->voices[n].phase = XP_PRELOAD;
 }
 
-static void write_iram(xp_t *xp, int word, uint32_t value)
-{
-	xp->iram[word & 0xff] = (word >= ramp_base(xp)) ? (int32_t)(value & 0x3ffffff) : (int32_t)(value << 8) >> 8;
-	xp->iram_ramping[word & 0xff] = 0;
-}
+/* ---------------------------------------------------------------- ramps */
 
-static void write_iram_target(xp_t *xp, int word, uint16_t value)
+static bool linear_law(int index, uint32_t control)
 {
-	xp->iram_target[word & 0x1f] = value;
-	if (word >= ramp_base(xp))
-		xp->iram[word & 0xff] = (xp->iram[word & 0xff] & ~0x3ff) | (value & 0x3ff);
-	xp->iram_ramping[word & 0xff] = 1;
-}
-
-void xp_write(xp_t *xp, uint32_t offset, uint16_t data, uint16_t mask)
-{
-	const uint32_t address = (offset << 1) & 0x3ffe;
-	uint16_t *reg = &xp->regs[address >> 1];
-	*reg = (uint16_t)((*reg & ~mask) | (data & mask));
-
-	if (address < XP_CRAM_BASE)
+	switch (index)
 	{
-		if (bit(address, 1))
+	case RAMP_PITCH: case RAMP_TVF: return true;
+	case RAMP_TVA1: return ((control >> 14) & 3) == 1;
+	default: return false;
+	}
+}
+
+static bool s_curve_law(int index, uint32_t control)
+{
+	return index == RAMP_TVA1 && ((control >> 14) & 3) >= 2;
+}
+
+static void service_ramp(xp_t *xp, int n, int k)
+{
+	const ramp_pages_t *rp = &RAMPS[k];
+	uint32_t control = page(xp, n, rp->control);
+	if (bit(control, 17))
+		return;
+
+	const bool linear = linear_law(k, control);
+	const bool s_curve = s_curve_law(k, control);
+	const int rate = control & 0xfff;
+	const bool reso = k == RAMP_RESO;
+	const uint32_t tpage = page(xp, n, rp->target);
+	const int32_t target = s_curve ? 0 : reso ? (int32_t)(tpage & 0x3fffe) << 2 : (int32_t)(tpage & 0x3fffe);
+	int32_t current = (int32_t)(page(xp, n, rp->current) & (reso ? 0xfffff : 0x3ffff));
+	int32_t step = rp->step ? wrap20((int32_t)page(xp, n, rp->step)) : 0;
+
+	if (!bit(tpage, 0))
+	{
+		set_page(xp, n, rp->target, tpage | 1);
+		if (linear)
 		{
-			const int voice = (address >> 2) & 63;
-			const int index = address >> 8;
-			write_page(xp, voice, index, page(xp, voice, index));
+			const int32_t diff = target - current;
+			step = 2 * (((diff >> 3) * rate) >> 10) + (diff > 0 ? 1 : 0);
+			set_page(xp, n, rp->step, (uint32_t)step & 0xfffff);
 		}
 	}
-	else if (address < XP_IRAM_BASE)
-		xp->program_dirty = true;
-	else if (address < XP_IRAM3_TARGET_BASE)
+
+	const uint32_t tick = (k == RAMP_TVA1) ? (xp->frame_counter >> 1) : (xp->frame_counter >> 3);
+	if (tick & hold_masks[(control >> 12) & 3])
+		return;
+	const int32_t parity = tick & 1;
+
+	if (s_curve)
 	{
-		if (bit(address, 1))
-			write_iram(xp, iram_word(address), ((uint32_t)xp->regs[(address >> 1) & ~1] << 16) | xp->regs[address >> 1]);
+		if (current > 0)
+		{
+			int32_t speed = -step;
+			const int64_t stopping = rate ? ((int64_t)speed * (speed + rate)) / (2 * rate) : 0;
+			if (speed < 0 || stopping < current)
+				speed += rate;
+			else
+				speed -= rate;
+			speed = max32(speed, 1);
+			current = max32(current - speed, 0);
+			step = -speed;
+			set_page(xp, n, rp->step, (uint32_t)step & 0xfffff);
+		}
 	}
-	else if (address < XP_PRAM_BASE)
-		write_iram_target(xp, 0xe0 + ((address >> 1) & 0x1f), xp->regs[address >> 1]);
-	else if (address < XP_RUN_MASK)
-		xp->program_dirty = true;
-	else if (address < XP_ROM_SELECT)
-		write_run_mask(xp, (int)((address - XP_RUN_MASK) >> 1), xp->regs[address >> 1]);
-	else if (address == XP_HIGHEST_VOICE || address == XP_DSP_CONFIG)
-		xp->program_dirty = true;
+	else if (linear)
+	{
+		if (current != target)
+		{
+			const int32_t moved = current + ((step + parity) >> 1);
+			current = (target > current) ? min32(moved, target) : max32(moved, target);
+		}
+	}
+	else if (reso)
+	{
+		const int32_t quarter = (target - current) >> 2;
+		int32_t s = ((quarter >> 3) * rate) >> 10;
+		if (!s)
+			s = quarter > 0 ? parity : quarter < 0 ? -1 : 0;
+		current = (current + (s << 2)) & ~1;
+		current = (quarter > 0) ? min32(current, target) : max32(current, target);
+	}
+	else
+	{
+		const int32_t diff = target - current;
+		int32_t s = ((diff >> 3) * rate) >> 10;
+		if (!s)
+			s = diff > 0 ? parity : diff < 0 ? -1 : 0;
+		current = max32(min32(current + s, 0x3ffff), 0);
+		current = (diff > 0) ? min32(current, target) : max32(current, target);
+	}
+	set_page(xp, n, rp->current, (uint32_t)current);
+
+	if (current == target)
+	{
+		if (s_curve && ((control >> 14) & 3) == 2)
+			control |= 0x4000;
+		if (bit(control, 16) && offer_irq(xp, n, rp->reason))
+			control |= 0x20000;
+		set_page(xp, n, rp->control, control);
+	}
 }
 
-void xp_set_serial_words(xp_t *xp, int left, int right)
+static void update_amplitude(xp_t *xp, int n)
 {
-	xp->serial_out_word[0] = (uint8_t)left;
-	xp->serial_out_word[1] = (uint8_t)right;
+	const int32_t tva1 = page(xp, n, XP_PAGE_TVA1_SEED) & 0x3ffff;
+	const int32_t tva2 = page(xp, n, XP_PAGE_TVA2_SEED) & 0x3ffff;
+	int32_t amplitude;
+	if (bit(page(xp, n, XP_PAGE_TVA2_CONTROL), 14))
+	{
+		int64_t sum = ((int64_t)tva1 + tva2) << 2;
+		amplitude = (int32_t)(sum > 0xffffe ? 0xffffe : sum < 0 ? 0 : sum) & ~1;
+	}
+	else
+		amplitude = (int32_t)(((int64_t)(tva1 >> 3) * (tva2 >> 4)) >> 8) & ~1;
+	set_page(xp, n, XP_PAGE_AMPLITUDE, (uint32_t)amplitude);
 }
 
 /* ---------------------------------------------------------------- address generator and DPCM */
@@ -543,233 +566,310 @@ typedef struct address_step
 {
 	uint32_t address;
 	bool backward;
-	bool stopped;
 } address_step_t;
 
-static int32_t delta_at(const xp_t *xp, const xp_voice_t *v, uint32_t address)
+static int32_t delta_at(const xp_t *xp, int n, uint32_t control, uint32_t address)
 {
-	const int8_t delta = (int8_t)rom_byte(xp, v, address);
-	const uint8_t shifts = rom_byte(xp, v, address >> 5);
-	const int shift = bit(address, 4) ? (shifts >> 4) : (shifts & 0x0f);
-	return (int32_t)delta << shift;
+	const uint8_t byte = rom_byte(xp, (int)control, address);
+	const xp_voice_t *v = &xp->voices[n];
+	if (bit(v->format, 1))
+	{
+		const int shift = (byte >> 4) & 7;
+		const int mantissa = byte & 0x0f;
+		const int32_t magnitude = (shift ? (mantissa + 16) << (shift - 1) : mantissa) << 6;
+		return bit(byte, 7) ? -magnitude : magnitude;
+	}
+	if (bit(v->format, 0))
+		return (int8_t)byte;
+
+	const uint8_t shifts = rom_byte(xp, (int)control, address >> 5);
+	return (int32_t)(int8_t)byte << (bit(address, 4) ? (shifts >> 4) : (shifts & 0x0f));
 }
 
-static void start_reader(xp_t *xp, int n)
+static void launch(xp_t *xp, int n)
 {
 	xp_voice_t *v = &xp->voices[n];
 	const uint32_t control = page(xp, n, XP_PAGE_CONTROL);
-	v->start_pending = 0;
-	v->region = control & 0x7f;
-	v->alternate = bit(control, 12);
-	v->reverse = bit(control, 11);
+
+	v->format = (uint8_t)((bit(control, 9) << 1) | bit(control, 7));
 	v->start = page(xp, n, XP_PAGE_ADDRESS) & 0xfffff;
-	v->loop = page(xp, n, XP_PAGE_LOOP) & 0xfffff;
-	v->end = page(xp, n, XP_PAGE_END) & 0xfffff;
-	v->backward = v->reverse;
-	v->address = v->reverse ? v->end : v->start;
-	v->sub_phase = 0;
-	v->reading = 1;
-	v->done_reported = 0;
-	v->filter_low = 0;
-	v->filter_band = 0;
-	v->predictor = 0;
-	for (uint32_t a = v->address & ~0x1fu; a < v->address; a++)
-		v->predictor = wrap18(v->predictor + delta_at(xp, v, a));
+	if (bit(control, 11))
+		set_page(xp, n, XP_PAGE_ADDRESS, page(xp, n, XP_PAGE_END) & 0xfffff);
+	set_page(xp, n, XP_PAGE_CONTROL, control | 0x80);
+
+	const uint32_t address = page(xp, n, XP_PAGE_ADDRESS) & 0xfffff;
+	const uint32_t span = (address >> 5) & ~1u;
+	set_page(xp, n, XP_PAGE_EXPONENTS, rom_byte(xp, (int)control, span) | ((uint32_t)rom_byte(xp, (int)control, span + 1) << 8));
 }
 
-static address_step_t advance(const xp_voice_t *v, address_step_t s)
+static address_step_t advance(const xp_t *xp, int n, uint32_t control, address_step_t s)
 {
-	const bool looping = v->loop < v->end;
+	const uint32_t loop = page(xp, n, XP_PAGE_LOOP) & 0xfffff;
+	const uint32_t end = page(xp, n, XP_PAGE_END) & 0xfffff;
+	const bool looping = loop < end;
+	const bool alternate = bit(control, 12);
+	const bool reverse = bit(control, 11);
+
 	if (!s.backward)
 	{
 		if (!looping)
-		{
-			if (s.address + 1 >= v->end)
-				return (address_step_t){ s.address, false, true };
-			return (address_step_t){ s.address + 1, false, false };
-		}
-		if (s.address >= v->end)
-		{
-			if (v->alternate)
-				return (address_step_t){ s.address, true, false };
-			return (address_step_t){ v->loop, false, false };
-		}
-		return (address_step_t){ s.address + 1, false, false };
+			return (address_step_t){ s.address >= end ? s.address : s.address + 1, false };
+		if (s.address >= end)
+			return alternate ? (address_step_t){ s.address, true } : (address_step_t){ loop, false };
+		return (address_step_t){ s.address + 1, false };
 	}
-	const uint32_t bound = (v->alternate && looping) ? v->loop : (v->reverse ? v->start : v->loop);
+
+	const uint32_t bound = (alternate && looping) ? loop : (reverse && !looping) ? xp->voices[n].start : loop;
 	if (s.address <= bound)
 	{
-		if (v->alternate && looping)
-			return (address_step_t){ s.address, false, false };
-		return (address_step_t){ s.address, true, true };
+		if (alternate && looping)
+			return (address_step_t){ s.address, false };
+		return (address_step_t){ s.address, true };
 	}
-	return (address_step_t){ s.address - 1, true, false };
+	return (address_step_t){ s.address - 1, true };
+}
+
+static bool at_marker(const xp_t *xp, int n, address_step_t s)
+{
+	const uint32_t loop = page(xp, n, XP_PAGE_LOOP) & 0xfffff;
+	return s.backward ? (s.address <= loop) : (s.address >= loop);
+}
+
+static void marker_reached(xp_t *xp, int n)
+{
+	const uint32_t control = page(xp, n, XP_PAGE_CONTROL);
+	if (bit(control, 16))
+		return;
+	if (bit(control, 15) && !offer_irq(xp, n, bit(control, 14) ? XP_IRQ_LOOP_ALTERNATE : XP_IRQ_LOOP_REACHED))
+		return;
+	set_page(xp, n, XP_PAGE_CONTROL, control | (bit(control, 17) ? 0x10000 : 0x20000));
+}
+
+static void update_mute(xp_t *xp, int n)
+{
+	const uint32_t control = page(xp, n, XP_PAGE_CONTROL);
+	if (bit(control, 19) == bit(control, 18))
+		return;
+	if (bit(control, 15) && !offer_irq(xp, n, XP_IRQ_MUTE_CHANGED))
+		return;
+	set_page(xp, n, XP_PAGE_CONTROL, control ^ 0x40000);
 }
 
 /* ---------------------------------------------------------------- the voice */
 
+static void deposit(xp_t *xp, int n, int bank)
+{
+	const uint16_t s = send(xp, n, bank);
+	const int word = s & 63;
+	const int c = cell_of(0x40 + word, xp->parity ^ 1);
+
+	if (!((xp->bus_written >> word) & 1))
+	{
+		xp->bus_written |= (uint64_t)1 << word;
+		xp->iram[c] = 0;
+	}
+	const int32_t output = running(xp, n) ? wrap24((int32_t)page(xp, n, XP_PAGE_OUTPUT)) : 0;
+	xp->iram[c] = clamp24(xp->iram[c] + ((int64_t)output * (s >> 6)) / 512);
+}
+
 static void run_voice(xp_t *xp, int n)
 {
 	xp_voice_t *v = &xp->voices[n];
-	if (!((xp->run_mask >> n) & 1))
+
+	if (!running(xp, n))
+	{
+		const int32_t smooth = page(xp, n, XP_PAGE_SMOOTH) & 0xffff;
+		set_page(xp, n, XP_PAGE_SMOOTH, (uint32_t)max32((smooth * 7) >> 3, 1));
+		set_page(xp, n, XP_PAGE_OUTPUT, 0);
 		return;
-	if (v->start_pending)
-		start_reader(xp, n);
+	}
 
 	update_mute(xp, n);
 
-	if ((xp->frame_counter & 7) == 0)
+	switch (v->phase)
 	{
-		if (update_ramp(xp, n, &v->pitch, XP_PAGE_PITCH_CONTROL, XP_LAW_LINEAR))
-		{
-			ramp_arrived(xp, n, XP_PAGE_PITCH_CONTROL, XP_IRQ_PITCH_DONE);
-			if (v->pitch.current == 0)
-			{
-				v->reading = 0;
-				v->predictor = 0;
-				v->done_reported = 1;
-			}
-		}
-		if (update_ramp(xp, n, &v->tvf, XP_PAGE_TVF_CONTROL, XP_LAW_LINEAR))
-			ramp_arrived(xp, n, XP_PAGE_TVF_CONTROL, XP_IRQ_TVF_DONE);
-		if (update_ramp(xp, n, &v->reso, XP_PAGE_RESO_CONTROL, XP_LAW_EXPONENTIAL))
-			ramp_arrived(xp, n, XP_PAGE_RESO_CONTROL, XP_IRQ_RESO_DONE);
-		if (update_ramp(xp, n, &v->tva2, XP_PAGE_TVA2_CONTROL, XP_LAW_EXPONENTIAL))
-			ramp_arrived(xp, n, XP_PAGE_TVA2_CONTROL, XP_IRQ_TVA2_DONE);
-	}
-	if ((xp->frame_counter & 1) == 0)
-	{
-		const bool arrived = update_ramp(xp, n, &v->tva1, XP_PAGE_TVA1_CONTROL, ramp_control_law(&v->tva1));
-		if (arrived && bit(page_high(xp, n, XP_PAGE_TVA1_CONTROL), 0))
-		{
-			v->done_reported = 1;
-			ramp_arrived(xp, n, XP_PAGE_TVA1_CONTROL, XP_IRQ_VOICE_DONE);
-		}
-		else if (arrived && v->tva1.current == 0 && !v->done_reported)
-		{
-			v->done_reported = 1;
-			raise_irq(xp, n, XP_IRQ_VOICE_DONE);
-		}
-		if (bit(v->tva2.control, 14))
-		{
-			int64_t sum = ((int64_t)v->tva1.current + v->tva2.current) << 2;
-			sum = sum > 0x7ffff ? 0x7ffff : sum < -0x80000 ? -0x80000 : sum;
-			v->amplitude = (int32_t)sum & ~1;
-		}
-		else
-			v->amplitude = (int32_t)(((int64_t)(v->tva1.current >> 3) * (v->tva2.current >> 4)) >> 8) & ~1;
+	case XP_PRELOAD:
+		launch(xp, n);
+		v->phase = XP_INITIALIZE;
+		set_page(xp, n, XP_PAGE_OUTPUT, 0);
+		return;
+	case XP_INITIALIZE:
+		set_page(xp, n, XP_PAGE_INCREMENT, (uint32_t)exp_decode(xp, page(xp, n, XP_PAGE_PITCH_SEED) & 0x3ffff) & 0x3ffff);
+		set_page(xp, n, XP_PAGE_CUTOFF, (uint32_t)(exp_decode(xp, page(xp, n, XP_PAGE_TVF_SEED) & 0x3ffff) << 2) & 0xfffff);
+		service_ramp(xp, n, RAMP_PITCH);
+		set_page(xp, n, XP_PAGE_SERVICE, (page(xp, n, XP_PAGE_SERVICE) & ~0x30000u) | 0x10000);
+		v->phase = XP_STARTING;
+		set_page(xp, n, XP_PAGE_OUTPUT, 0);
+		return;
+	case XP_STARTING:
+		service_ramp(xp, n, RAMP_TVF);
+		set_page(xp, n, XP_PAGE_SERVICE, page(xp, n, XP_PAGE_SERVICE) | 0x30000);
+		v->phase = XP_RUNNING;
+		set_page(xp, n, XP_PAGE_OUTPUT, 0);
+		return;
+	default:
+		break;
 	}
 
-	v->smooth = (7 * v->smooth + (v->amplitude >> 4) + 3) >> 3;
-	v->smooth = v->smooth < 0 ? 0 : v->smooth > 0xffff ? 0xffff : v->smooth;
+	const uint32_t service = page(xp, n, XP_PAGE_SERVICE);
+	const int counter = service & 7;
+	if (counter & 1)
+	{
+		service_ramp(xp, n, RAMP_TVA1);
+		update_amplitude(xp, n);
+	}
+	else
+	{
+		switch (counter)
+		{
+		case 0:
+			service_ramp(xp, n, RAMP_TVA2);
+			break;
+		case 2:
+			service_ramp(xp, n, RAMP_RESO);
+			break;
+		case 4:
+			service_ramp(xp, n, RAMP_TVF);
+			set_page(xp, n, XP_PAGE_CUTOFF, (uint32_t)(exp_decode(xp, page(xp, n, XP_PAGE_TVF_SEED) & 0x3ffff) << 2) & 0xfffff);
+			break;
+		default:
+			service_ramp(xp, n, RAMP_PITCH);
+			set_page(xp, n, XP_PAGE_INCREMENT, (uint32_t)exp_decode(xp, page(xp, n, XP_PAGE_PITCH_SEED) & 0x3ffff) & 0x3ffff);
+			break;
+		}
+	}
+	set_page(xp, n, XP_PAGE_SERVICE, (service & ~7u) | ((counter + 1) & 7));
 
+	int32_t smooth = (7 * (int32_t)(page(xp, n, XP_PAGE_SMOOTH) & 0xffff) + (int32_t)((page(xp, n, XP_PAGE_AMPLITUDE) & 0xfffff) >> 4) + 3) >> 3;
+	smooth = max32(min32(smooth, 0xffff), 0);
+	set_page(xp, n, XP_PAGE_SMOOTH, (uint32_t)smooth);
+
+	uint32_t control = page(xp, n, XP_PAGE_CONTROL);
 	int32_t sample = 0;
-	if (v->reading)
+	if (!bit(control, 10))
 	{
-		const int phase = v->sub_phase >> 9;
-		address_step_t s = { v->address, v->backward != 0, false };
-		int64_t weighted = 0;
-		for (int i = 0; i < 3 && !s.stopped; i++)
+		uint32_t phase = (page(xp, n, XP_PAGE_PHASE) >> 4) & 0x3fff;
+		const uint32_t address = page(xp, n, XP_PAGE_ADDRESS) & 0xfffff;
+		int32_t predictor = wrap18((int32_t)page(xp, n, XP_PAGE_PREDICTOR));
+		const bool backward = bit(control, 11) ^ bit(control, 13);
+
+		address_step_t s = { address, backward };
+		int64_t sum = 4 * (int64_t)predictor;
+		for (int i = 0; i < 3; i++)
 		{
-			weighted += (int64_t)interp_weights[i][phase] * delta_at(xp, v, s.address);
-			s = advance(v, s);
+			sum += ((int64_t)interp_weights[i][phase >> 7] * delta_at(xp, n, control, s.address)) / 1024;
+			s = advance(xp, n, control, s);
 		}
-		sample = wrap20(v->predictor + (int32_t)(weighted >> 12)) >> (3 - ((page(xp, n, 0x10) >> 3) & 3));
+		sample = wrap20((int32_t)sum) / (1 << (3 - ((service >> 3) & 3)));
 
-		const uint32_t phase_sum = (uint32_t)v->sub_phase + (uint32_t)exp_decode(xp, ramp_value_at(&v->pitch, xp->frame_counter & 7, 8));
-		v->sub_phase = phase_sum & 0xffff;
-		for (uint32_t carry = phase_sum >> 16; carry && v->reading; carry--)
+		const uint32_t increment = page(xp, n, XP_PAGE_INCREMENT) & 0x3ffff;
+		const uint32_t span = address >> 6;
+		const uint32_t accumulated = phase + (increment >> 2) + (((increment & 3) > phase_dither[xp->frame_counter & 3]) ? 1 : 0);
+		phase = accumulated & 0x3fff;
+		address_step_t current = { address, backward };
+		for (uint32_t carry = accumulated >> 14; carry; carry--)
 		{
-			v->predictor = wrap18(v->predictor + delta_at(xp, v, v->address));
-			const address_step_t next = advance(v, (address_step_t){ v->address, v->backward != 0, false });
-			if (next.stopped)
-			{
-				v->reading = 0;
-				v->predictor = 0;
-				if (!v->done_reported)
-				{
-					v->done_reported = 1;
-					raise_irq(xp, n, XP_IRQ_VOICE_DONE);
-				}
-				break;
-			}
-			const bool crossed = v->backward
-				? (v->address > v->loop && next.address <= v->loop)
-				: (next.address < v->address || (v->address < v->loop && next.address >= v->loop));
-
-			v->address = next.address;
-			v->backward = next.backward;
-
-			if (crossed)
+			predictor = wrap18(predictor + delta_at(xp, n, control, current.address));
+			if (at_marker(xp, n, current))
 				marker_reached(xp, n);
+			const address_step_t next = advance(xp, n, control, current);
+			if (next.backward != current.backward)
+			{
+				control ^= 0x2000;
+				set_page(xp, n, XP_PAGE_CONTROL, control);
+			}
+			current = next;
 		}
+		if ((current.address >> 6) != span)
+		{
+			const uint32_t exponents = (current.address >> 5) & ~1u;
+			set_page(xp, n, XP_PAGE_EXPONENTS, rom_byte(xp, (int)control, exponents) | ((uint32_t)rom_byte(xp, (int)control, exponents + 1) << 8));
+		}
+		set_page(xp, n, XP_PAGE_PHASE, (phase << 4) | (current.address & 7));
+		set_page(xp, n, XP_PAGE_ADDRESS, current.address);
+		set_page(xp, n, XP_PAGE_PREDICTOR, (uint32_t)predictor & 0x3ffff);
 	}
 
-	const int32_t f = v->tvf.current << 2;
-	const int32_t q = v->reso.current << 2;
-	v->filter_low = clamp24(v->filter_low + ((int64_t)f * v->filter_band) / (1 << 19));
-	const int32_t high = clamp24(sample - ((int32_t)(((int64_t)q * v->filter_band) / (1 << 19)) + v->filter_low));
-	v->filter_band = clamp24(v->filter_band + ((int64_t)f * high) / (1 << 19));
+	const int32_t f = page(xp, n, XP_PAGE_CUTOFF) & 0xfffff;
+	const int32_t q = page(xp, n, XP_PAGE_RESO_SEED) & 0xfffff;
+	int32_t low = wrap24((int32_t)page(xp, n, XP_PAGE_FILTER_LOW));
+	int32_t band = wrap24((int32_t)page(xp, n, XP_PAGE_FILTER_BAND));
+	low = clamp24(low + ((int64_t)f * band) / (1 << 19));
+	const int32_t high = clamp24(sample - ((int32_t)(((int64_t)q * band) / (1 << 19)) + low));
+	band = clamp24(band + ((int64_t)f * high) / (1 << 19));
+	set_page(xp, n, XP_PAGE_FILTER_LOW, (uint32_t)low & 0xffffff);
+	set_page(xp, n, XP_PAGE_FILTER_BAND, (uint32_t)band & 0xffffff);
 	switch ((page(xp, n, XP_PAGE_FILTER) >> 10) & 3)
 	{
-	case 0: sample = v->filter_low; break;
-	case 1: sample = v->filter_band; break;
+	case 0: sample = low; break;
+	case 1: sample = band; break;
 	case 2: sample = high; break;
-	case 3: sample = v->filter_low - high; break;
+	case 3: sample = clamp24((int64_t)high - low); break;
 	}
 
-	sample = clamp24(((int64_t)sample * (v->smooth << 4)) >> 19);
-
-	for (int bank = 0; bank < 4; bank++)
-	{
-		const uint16_t s = send(xp, n, bank);
-		const int word = s & 63;
-		if (!((xp->bus_written >> word) & 1))
-		{
-			xp->bus_written |= (uint64_t)1 << word;
-			xp->bus[word] = 0;
-		}
-		xp->bus[word] += (int32_t)(((int64_t)sample * (s >> 6)) >> 9);
-	}
+	set_page(xp, n, XP_PAGE_OUTPUT, (uint32_t)clamp24(((int64_t)sample * (smooth << 4)) / (1 << 19)) & 0xffffff);
 }
 
 /* ---------------------------------------------------------------- the DSP */
 
 static void update_iram_ramps(xp_t *xp)
 {
-	static const int32_t dither[4] = { 0 << 15, 2 << 15, 1 << 15, 3 << 15 };
-
-	if (xp->frame_counter & 1)
+	if (!(xp->frame_counter & 1))
 		return;
-	for (int word = ramp_base(xp); word < XP_IRAM_SIZE; word++)
+
+	const int threshold = bit_reverse4((xp->frame_counter >> 1) & 15);
+	for (int word = ramp_base(xp); word < 256; word++)
 	{
-		if (!xp->iram_ramping[word])
+		const int c = cell(xp, word);
+		if (!xp->iram_ramping[c & 0x3f])
 			continue;
-		const int32_t target = xp->iram_target[word & 0x1f] & 0x3ff;
-		const int32_t cell = (xp->iram[word] & ~0x3ff) | target;
-		const int32_t goal = gain_goal(cell);
-		int32_t current = gain_current(cell);
-		if (target == 0x200)
-			xp->iram_ramping[word] = 0;
-		else if (current != goal)
+
+		const int32_t code = xp->iram[c] & 0x3ff;
+		if (code == 0x200)
 		{
-			const int32_t rate = xp->regs[(XP_IRAM3_RATE >> 1) + (word & 3)];
-			const int64_t distance = goal > current ? goal - current : current - goal;
-			int32_t step = (int32_t)((distance * rate + dither[(xp->frame_counter >> 1) & 3]) >> 17);
-			step = step < 1 ? 1 : step;
-			current = (current < goal) ? min32(current + step, goal) : max32(current - step, goal);
+			xp->iram_ramping[c & 0x3f] = 0;
+			continue;
 		}
-		xp->iram[word] = ((current << 10) | target) & 0x3ffffff;
+
+		const int32_t goal = gain_goal(xp->iram[c]);
+		int32_t current = gain_current(xp->iram[c]);
+		const int32_t diff = goal - current;
+		if (diff)
+		{
+			const int64_t product = (int64_t)(diff < 0 ? -diff : diff) * xp->regs[(XP_IRAM3_RATE >> 1) + (word & 3)];
+			int32_t step = (int32_t)(product >> 17);
+			int fraction = (int)(((product & 0x1ffff) + 0x1000) >> 13);
+			if (fraction >= 16)
+			{
+				step++;
+				fraction -= 16;
+			}
+			if (diff > 0)
+			{
+				if (threshold < fraction)
+					step++;
+				current = min32(current + step, goal);
+			}
+			else
+			{
+				if (threshold >= 16 - fraction)
+					step++;
+				if (!step)
+					step = 2;
+				current = max32(current - step, goal);
+			}
+			xp->iram[c] = ((current << 10) | code) & 0x3ffffff;
+		}
 		if (current == goal)
-			xp->iram_ramping[word] = 0;
+			xp->iram_ramping[c & 0x3f] = 0;
 	}
 }
 
 void xp_decode_program(xp_t *xp)
 {
-	static const uint8_t shifts[4] = { 0, 1, 2, 4 };
 	const uint16_t *pram = &xp->regs[XP_PRAM_BASE >> 1];
 	const uint16_t *cram = &xp->regs[XP_CRAM_BASE >> 1];
+	xp->branching = false;
 	for (int i = 0; i < XP_DSP_SLOTS; i++)
 	{
 		const uint32_t w = ((uint32_t)pram[i * 2] << 16) | pram[i * 2 + 1];
@@ -781,10 +881,13 @@ void xp_decode_program(xp_t *xp)
 		s->col = w & 0x3f;
 		s->ext = (w >> 25) & 7;
 		s->eram_op = 0;
+		s->eram_second = 0;
 		s->eram_offset = 0;
 		s->cram = c;
-		s->coefficient = mantissa << shifts[c >> 14];
+		s->coefficient = mantissa << shift_select[c >> 14];
 		s->raw = bit(c, 15) ? (int32_t)((c & 0x3fff) << 13) : mantissa;
+		if (s->col == 0x10 && i < slot_count(xp))
+			xp->branching = true;
 	}
 	for (int i = 0; i < XP_DSP_SLOTS - 1; )
 	{
@@ -795,6 +898,7 @@ void xp_decode_program(xp_t *xp)
 		{
 			xp->slots[i].eram_op = (uint8_t)op;
 			xp->slots[i].eram_offset = (uint16_t)((((w >> 16) & 0x7f) << 9) | ((next >> 16) & 0x1ff));
+			xp->slots[i + 1].eram_second = 1;
 			i += 2;
 		}
 		else
@@ -802,54 +906,390 @@ void xp_decode_program(xp_t *xp)
 	}
 }
 
-static int32_t output_word(const xp_t *xp, int word)
-{
-	return clamp24(xp->iram[word]);
-}
-
-static void exchange_serial(xp_t *xp)
-{
-	const uint16_t mode = xp->regs[XP_DSP_MODE >> 1];
-	if ((mode & 3) == 3 && xp->link.serial_out)
-		for (int channel = 0; channel < 2; channel++)
-			xp->link.serial_out(xp->link.user, channel, output_word(xp, xp->serial_out_word[channel]));
-	for (int channel = 0; channel < 2; channel++)
-		xp->dsp.serial_frame[channel] = (bit(mode, 1) && xp->link.serial_in) ? wrap24(xp->link.serial_in(xp->link.user, channel)) : 0;
-}
-
-static void dsp_frame_start(xp_t *xp)
-{
-	update_iram_ramps(xp);
-	for (int n = 0; n < XP_BUS_COUNT; n++)
-		if ((xp->bus_written >> n) & 1)
-			xp->iram[0x40 + n] = clamp24(xp->bus[n]);
-	exchange_serial(xp);
-}
-
 void xp_schedule(xp_t *xp)
 {
 	const xp_slot_t *s = xp->slots;
 	xp_sched_t *o = xp->sched;
-	uint8_t reads[XP_DSP_SLOTS], loads[XP_DSP_SLOTS];
-	int strobes = 0;
+	uint8_t reads[XP_DSP_SLOTS];
+	int strobes_a = 0, strobes_bcd = 0, position = 0;
 
 	const int base = ramp_base(xp);
 	for (int i = 0; i < XP_DSP_SLOTS; i++)
-	{
-		reads[i] = s[i].eram_op == 1 || s[i].col == 0x20;
-		loads[i] = s[i].st == 1 && s[i].word < base;
-	}
+		reads[i] = s[i].eram_op == 1 || (s[i].col == 0x20 && !s[i].eram_second);
 	for (int i = 0; i < XP_DSP_SLOTS; i++)
 	{
-		o[i].lands = reads[(i - 2) & 0xff];
-		o[i].latch_fresh = 0;
-		for (int k = 0; k < 4; k++)
-			o[i].latch_fresh |= reads[(i - 2 - k) & 0xff];
-		o[i].now_valid = loads[i];
+		o[i].lands = i >= 2 && reads[i - 2];
+		o[i].now_valid = s[i].st == 1 && s[i].word < base;
 		o[i].gain_load = s[i].st == 1 && s[i].word >= base;
-		o[i].strobe = 0xff;
+		o[i].strobe_a = 0xff;
+		o[i].strobe_bcd = 0xff;
+		o[i].position = 0xff;
 		if (s[i].ext == 1)
-			o[i].strobe = (uint8_t)(strobes++ & 1);
+		{
+			o[i].strobe_a = (uint8_t)(strobes_a++ & (XP_STROBES - 1));
+			o[i].position = (uint8_t)position++;
+		}
+		else if (s[i].ext == 2)
+		{
+			o[i].strobe_bcd = (uint8_t)strobes_bcd++;
+			o[i].position = (uint8_t)position++;
+		}
+	}
+}
+
+static int32_t wire_word(const xp_t *xp, int32_t word)
+{
+	return clamp24(word) & (bit(xp->regs[XP_SERIAL_FORMAT >> 1], 5) ? ~0x3ff : ~0x3f);
+}
+
+/* a strobe clocks the previous frame's word at its position out on its line and refreshes the receive nodes */
+static void emit_line(xp_t *xp, int position, int k)
+{
+	const int32_t word = clamp24(xp->iram[cell_of(position, xp->parity ^ 1)]);
+	const int line = k % 3;
+	const int half = (k / 3) & 1;
+	const int descriptor = line ? (xp->regs[XP_DSP_CONFIG >> 1] & 0xff) : (xp->regs[XP_SERIAL_CONFIG >> 1] >> 8);
+	const int32_t out = (descriptor & 0xc0) ? wire_word(xp, word) : 0;
+	xp->line_word[line][half] = out;
+	if ((descriptor & 0xc0) && (xp->regs[XP_DSP_MODE >> 1] & 3) == 3 && xp->link.serial_out)
+		xp->link.serial_out(xp->link.user, line * 2 + half, out);
+}
+
+static int32_t take_block_a(xp_t *xp, int strobe)
+{
+	const bool enabled = bit(xp->regs[XP_DSP_MODE >> 1], 1);
+	return (enabled && xp->link.serial_in) ? wrap24(xp->link.serial_in(xp->link.user, strobe)) : 0;
+}
+
+static int32_t take_block_b(xp_t *xp, int group)
+{
+	const bool enabled = bit(xp->regs[XP_DSP_MODE >> 1], 1);
+	return (enabled && xp->link.serial_b) ? wrap24(xp->link.serial_b(xp->link.user, group)) : 0;
+}
+
+/* --- the interpreter: the slot as the device steps it */
+
+static int32_t operand(const xp_t *xp, const xp_slot_t *s)
+{
+	switch (s->col >> 4)
+	{
+	case 0: return xp->dsp.input;
+	case 1: return clamp24(xp->dsp.acc);
+	case 2: return xp->dsp.r;
+	default: return xp->dsp.latch;
+	}
+}
+
+static int32_t factor(const xp_t *xp, int select, bool complement)
+{
+	const int32_t acc = clamp24(xp->dsp.acc);
+	int32_t f;
+	switch (select)
+	{
+	case 0: f = (acc & 0xfff) << 3; return complement ? 0x7fff - f : f;
+	case 1: f = (acc & 0x7fffff) >> 8; return complement ? 0x7fff - f : f;
+	case 2: f = acc >> 8; return complement ? ~f : f;
+	default: f = xp->dsp.gain; return complement ? ~f : f;
+	}
+}
+
+static void alu(xp_t *xp, int function, int mode, int32_t immediate)
+{
+	xp_dsp_state_t *d = &xp->dsp;
+	const int32_t p = d->product;
+	const int32_t r = d->r;
+	int64_t result;
+
+	switch (function)
+	{
+	case 0x2: result = (int64_t)d->acc + r; break;
+	case 0x3: result = (int64_t)d->acc + p; break;
+	case 0x4: result = r; break;
+	case 0x5: result = p; break;
+	case 0x6: result = -(int64_t)d->acc; break;
+	case 0x7: result = (int64_t)r - d->acc; break;
+	case 0x8: result = (int64_t)p - d->acc; break;
+	case 0x9: result = (int64_t)r + p; break;
+	case 0xa: result = min32(d->acc, r); break;
+	case 0xb: result = max32(d->acc, r); break;
+	case 0xc:
+		if (mode == 2)
+			result = (int64_t)d->acc + (p >> 13);
+		else if (mode == 3)
+			result = p >> 13;
+		else
+			return;
+		break;
+	case 0xd:
+		switch (mode)
+		{
+		case 0: result = d->acc & immediate; break;
+		case 1: result = d->acc | immediate; break;
+		case 2: result = d->acc ^ immediate; break;
+		default: return;
+		}
+		break;
+	case 0xe:
+		if (mode == 0)
+			result = min32(d->acc, immediate);
+		else if (mode == 1)
+			result = max32(d->acc, immediate);
+		else
+			return;
+		break;
+	case 0xf:
+		switch (mode)
+		{
+		case 0: result = (int64_t)d->acc + immediate; break;
+		case 1: result = (int64_t)r + immediate; break;
+		case 2: result = (int64_t)p + immediate; break;
+		default: result = (int64_t)immediate - d->acc; break;
+		}
+		break;
+	default:
+		return;
+	}
+	d->acc = wrap29(result);
+}
+
+static void parallel_op(xp_t *xp, const xp_slot_t *s)
+{
+	xp_dsp_state_t *d = &xp->dsp;
+	const uint16_t c = s->cram;
+	const int function = c & 0xf;
+	const int input_select = (c >> 4) & 3;
+	const int factor_select = (c >> 6) & 3;
+	const bool complement = bit(c, 8);
+	const bool multiply_issued = bit(c, 9);
+	const int post = (c >> 11) & 7;
+	const int shift = shift_select[c >> 14];
+	const int32_t p = d->product;
+	const int32_t r = d->r;
+	int32_t input, product;
+
+	if (!multiply_issued)
+	{
+		input = d->now_valid ? d->now : 0;
+		product = input;
+	}
+	else
+	{
+		switch (input_select)
+		{
+		case 0: input = d->input; break;
+		case 1: input = clamp24(d->acc); break;
+		case 2: input = r; break;
+		default: input = d->latch; break;
+		}
+		product = multiply_q15(input, factor(xp, factor_select, complement), shift);
+	}
+
+	int64_t result;
+	switch (function)
+	{
+	case 0x0: result = (int64_t)d->acc + p + r; break;
+	case 0xc: result = (int64_t)r + p - d->acc; break;
+	case 0xd: result = (int64_t)d->acc + p - r; break;
+	case 0xe: result = (int64_t)p - r - d->acc; break;
+	case 0xf: result = (int64_t)p - r; break;
+	default:
+		alu(xp, function, input_select, s->raw);
+		result = d->acc;
+		break;
+	}
+	d->acc = wrap29(result);
+
+	switch (post)
+	{
+	case 1: d->acc = d->acc < 0 ? -d->acc : d->acc; break;
+	case 2: d->acc = wrap24(d->acc); break;
+	case 3:
+	{
+		const uint32_t v = (uint32_t)d->acc & 0xffffff;
+		d->acc = wrap24((int32_t)((v << 1) | (((v >> 23) ^ (v >> 6) ^ (v >> 1)) & 1)));
+		break;
+	}
+	case 4: d->acc = fold24(d->acc); break;
+	case 5:
+		d->acc = wrap24(d->acc);
+		if (d->acc < 0)
+			d->acc = ~d->acc;
+		break;
+	default: break;
+	}
+	if (bit(c, 10))
+		d->acc = wrap24(d->acc);
+
+	d->input = input;
+	d->product = product;
+}
+
+/* returns the next program counter */
+static int execute(xp_t *xp, const xp_slot_t *s, int pc)
+{
+	xp_dsp_state_t *d = &xp->dsp;
+
+	if (s->col == 0x30)
+	{
+		parallel_op(xp, s);
+		return pc + 1;
+	}
+
+	const int mode = s->col >> 4;
+	const int function = s->col & 0xf;
+	const bool multiply_issued = function >= 1 && function <= 0xc;
+
+	int32_t input = 0, product = 0;
+	if (multiply_issued)
+	{
+		if (function == 0xc && mode == 0)
+			input = d->serial_in;
+		else if (function == 0xc && mode == 1)
+			input = d->serial_b_node;
+		else
+			input = operand(xp, s);
+		product = multiply(input, s->coefficient);
+	}
+
+	alu(xp, function, mode, s->raw);
+
+	int next = pc + 1;
+	if (s->col == 0x10)
+	{
+		bool taken;
+		switch ((s->cram >> 10) & 0xf)
+		{
+		case 0: taken = d->acc == 0; break;
+		case 1: taken = d->acc != 0; break;
+		case 3: case 5: case 13: case 14: taken = true; break;
+		case 6: case 8: taken = d->acc >= 0; break;
+		case 7: case 9: taken = d->acc < 0; break;
+		case 10: taken = d->acc > 0; break;
+		case 11: taken = d->acc <= 0; break;
+		default: taken = false; break;
+		}
+		if (taken)
+			next = (bit(s->cram, 9) ? pc + 1 + (int8_t)s->cram : (s->cram & 0xff)) % XP_DSP_SLOTS;
+	}
+
+	if (multiply_issued)
+	{
+		d->input = input;
+		d->product = product;
+	}
+	return next;
+}
+
+static void interpret_frame(xp_t *xp)
+{
+	xp_dsp_state_t *d = &xp->dsp;
+	int32_t landing[2] = { 0, 0 };
+	int landing_valid = 0;
+	int pc = 0, strobe_a = 0, strobe_bcd = 0, position = 0;
+
+	d->product = 0;
+	for (int cycle = 0; cycle < slot_count(xp); cycle++)
+	{
+		const xp_slot_t *s = &xp->slots[pc];
+
+		if (landing_valid & 1)
+			d->latch = landing[0];
+		landing[0] = landing[1];
+		landing_valid >>= 1;
+
+		if (s->eram_op == 1)
+		{
+			landing[1] = xp->eram[(s->eram_offset + d->cursor) & 0xffff];
+			landing_valid |= 2;
+		}
+		else if (s->col == 0x20 && !s->eram_second)
+		{
+			landing[1] = xp->eram[(d->cursor + (d->acc >> 12)) & 0xffff];
+			landing_valid |= 2;
+		}
+
+		d->now_valid = 0;
+		int32_t gain_pending = 0;
+		bool gain_arrives = false;
+		if (s->st == 1)
+		{
+			const int32_t v = xp->iram[cell(xp, s->word)];
+			if (s->word >= ramp_base(xp))
+			{
+				gain_pending = gain_current(v);
+				gain_arrives = true;
+			}
+			else
+			{
+				d->now = v;
+				d->now_valid = 1;
+			}
+		}
+
+		const int32_t acc_before = d->acc;
+		const int32_t r_before = d->r;
+		const int next = execute(xp, s, pc);
+
+		if (gain_arrives)
+			d->gain = gain_pending;
+		if (d->now_valid)
+			d->r = d->now;
+
+		if (s->st == 2)
+			xp->iram[cell(xp, s->word)] = d->latch;
+		else if (s->st == 3)
+			xp->iram[cell(xp, s->word)] = clamp24(acc_before);
+
+		if (s->eram_op == 3)
+			xp->eram[(s->eram_offset + d->cursor) & 0xffff] = clamp24(acc_before);
+		else if (s->eram_op == 2)
+			xp->eram[(s->eram_offset + d->cursor) & 0xffff] = clamp24(r_before);
+
+		if (s->ext == 1)
+		{
+			xp->block_a_out[strobe_a & (XP_STROBES - 1)] = clamp24(xp->iram[cell_of(position, xp->parity ^ 1)]);
+			d->serial_in = take_block_a(xp, strobe_a);
+			strobe_a++;
+			position++;
+		}
+		else if (s->ext == 2)
+		{
+			emit_line(xp, position, strobe_bcd);
+			if (strobe_bcd % 3 == 0)
+				d->serial_b_node = take_block_b(xp, strobe_bcd / 3);
+			strobe_bcd++;
+			position++;
+		}
+
+		pc = next % XP_DSP_SLOTS;
+	}
+}
+
+/* --- the straight-line frame: what the compiled pass cannot do at slot time, done at the frame start */
+
+static void frame_serial(xp_t *xp)
+{
+	const int n = slot_count(xp);
+	for (int i = 0; i < n; i++)
+	{
+		const xp_sched_t *o = &xp->sched[i];
+		if (o->strobe_a != 0xff)
+		{
+			xp->block_a_out[o->strobe_a] = clamp24(xp->iram[cell_of(o->position, xp->parity ^ 1)]);
+			xp->dsp.serial_return[o->strobe_a] = take_block_a(xp, o->strobe_a);
+		}
+	}
+	for (int i = 0; i < n; i++)
+	{
+		const xp_sched_t *o = &xp->sched[i];
+		if (o->strobe_bcd != 0xff && o->strobe_bcd % 3 == 0)
+			xp->dsp.serial_b_pair[(o->strobe_bcd / 3) & 1] = take_block_b(xp, o->strobe_bcd / 3);
+	}
+	for (int i = 0; i < n; i++)
+	{
+		const xp_sched_t *o = &xp->sched[i];
+		if (o->strobe_bcd != 0xff)
+			emit_line(xp, o->position, o->strobe_bcd);
 	}
 }
 
@@ -861,12 +1301,7 @@ void xp_schedule(xp_t *xp)
 #define XP_REG_ERAM SLJIT_S5
 
 #define CELL(field) SLJIT_MEM1(SLJIT_S0), (sljit_sw)offsetof(xp_t, field)
-#define IRAM_WORD(word) SLJIT_MEM1(SLJIT_S0), (sljit_sw)(offsetof(xp_t, iram) + (size_t)(word) * 4)
-
-static void e_sext(jit_builder_t *b, sljit_s32 reg)
-{
-	sljit_emit_op1(b->c, SLJIT_MOV_S32, reg, 0, reg, 0);
-}
+#define IRAM_CELL(c) SLJIT_MEM1(SLJIT_S0), (sljit_sw)(offsetof(xp_t, iram) + (size_t)(c) * 4)
 
 static void e_mov(jit_builder_t *b, sljit_s32 dst, sljit_s32 src, sljit_sw srcw)
 {
@@ -883,26 +1318,70 @@ static void e_store(jit_builder_t *b, sljit_s32 mem, sljit_sw memw, sljit_s32 sr
 	sljit_emit_op1(b->c, SLJIT_MOV32, mem, memw, src, 0);
 }
 
-static void e_add(jit_builder_t *b, sljit_s32 dst, sljit_s32 a, sljit_s32 bb, sljit_sw bw)
+/* reg = wrap29(reg) */
+static void e_wrap29(jit_builder_t *b, sljit_s32 reg)
 {
-	sljit_emit_op2(b->c, SLJIT_ADD, dst, 0, a, 0, bb, bw);
-	e_sext(b, dst);
-}
-
-/* dst = s32((a * c + 0x1000) >> 13) */
-static void e_mul13(jit_builder_t *b, sljit_s32 dst, sljit_s32 a, sljit_s32 c, sljit_sw cw)
-{
-	sljit_emit_op2(b->c, SLJIT_MUL, dst, 0, a, 0, c, cw);
-	sljit_emit_op2(b->c, SLJIT_ADD, dst, 0, dst, 0, SLJIT_IMM, 0x1000);
-	sljit_emit_op2(b->c, SLJIT_ASHR, dst, 0, dst, 0, SLJIT_IMM, 13);
-	e_sext(b, dst);
+	sljit_emit_op2(b->c, SLJIT_SHL, reg, 0, reg, 0, SLJIT_IMM, 35);
+	sljit_emit_op2(b->c, SLJIT_ASHR, reg, 0, reg, 0, SLJIT_IMM, 35);
 }
 
 static void e_wrap24(jit_builder_t *b, sljit_s32 reg)
 {
-	sljit_emit_op2(b->c, SLJIT_SHL, reg, 0, reg, 0, SLJIT_IMM, 8);
-	e_sext(b, reg);
-	sljit_emit_op2(b->c, SLJIT_ASHR, reg, 0, reg, 0, SLJIT_IMM, 8);
+	sljit_emit_op2(b->c, SLJIT_SHL, reg, 0, reg, 0, SLJIT_IMM, 40);
+	sljit_emit_op2(b->c, SLJIT_ASHR, reg, 0, reg, 0, SLJIT_IMM, 40);
+}
+
+/* reg = clamp(reg, lo, hi) */
+static void e_clamp(jit_builder_t *b, sljit_s32 reg, sljit_sw lo, sljit_sw hi)
+{
+	struct sljit_jump *below = sljit_emit_cmp(b->c, SLJIT_SIG_LESS_EQUAL, reg, 0, SLJIT_IMM, hi);
+	e_mov(b, reg, SLJIT_IMM, hi);
+	sljit_set_label(below, sljit_emit_label(b->c));
+	struct sljit_jump *above = sljit_emit_cmp(b->c, SLJIT_SIG_GREATER_EQUAL, reg, 0, SLJIT_IMM, lo);
+	e_mov(b, reg, SLJIT_IMM, lo);
+	sljit_set_label(above, sljit_emit_label(b->c));
+}
+
+static void e_clamp24(jit_builder_t *b, sljit_s32 reg) { e_clamp(b, reg, -0x800000, 0x7fffff); }
+static void e_clamp29(jit_builder_t *b, sljit_s32 reg) { e_clamp(b, reg, -0x10000000, 0x0fffffff); }
+
+/* dst = dst / 2^bits towards zero */
+static void e_divide(jit_builder_t *b, sljit_s32 dst, int bits)
+{
+	struct sljit_jump *positive = sljit_emit_cmp(b->c, SLJIT_SIG_GREATER_EQUAL, dst, 0, SLJIT_IMM, 0);
+	sljit_emit_op2(b->c, SLJIT_ADD, dst, 0, dst, 0, SLJIT_IMM, (1 << bits) - 1);
+	sljit_set_label(positive, sljit_emit_label(b->c));
+	sljit_emit_op2(b->c, SLJIT_ASHR, dst, 0, dst, 0, SLJIT_IMM, bits);
+}
+
+static void e_add(jit_builder_t *b, sljit_s32 dst, sljit_s32 a, sljit_s32 bb, sljit_sw bw)
+{
+	sljit_emit_op2(b->c, SLJIT_ADD, dst, 0, a, 0, bb, bw);
+	e_wrap29(b, dst);
+}
+
+static void e_sub(jit_builder_t *b, sljit_s32 dst, sljit_s32 a, sljit_sw aw, sljit_s32 bb, sljit_sw bw)
+{
+	sljit_emit_op2(b->c, SLJIT_SUB, dst, 0, a, aw, bb, bw);
+	e_wrap29(b, dst);
+}
+
+/* dst = clamp29(a * c / 8192), towards zero */
+static void e_mul13(jit_builder_t *b, sljit_s32 dst, sljit_s32 a, sljit_s32 c, sljit_sw cw)
+{
+	sljit_emit_op2(b->c, SLJIT_MUL, dst, 0, a, 0, c, cw);
+	e_divide(b, dst, 13);
+	e_clamp29(b, dst);
+}
+
+/* dst = clamp29((a * f) << shift / 32768), towards zero */
+static void e_mulq15(jit_builder_t *b, sljit_s32 dst, sljit_s32 a, sljit_s32 f, int shift)
+{
+	sljit_emit_op2(b->c, SLJIT_MUL, dst, 0, a, 0, f, 0);
+	if (shift)
+		sljit_emit_op2(b->c, SLJIT_SHL, dst, 0, dst, 0, SLJIT_IMM, shift);
+	e_divide(b, dst, 15);
+	e_clamp29(b, dst);
 }
 
 /* R3 = ((offset + cursor) & 0xffff) * 4, an ERAM byte offset */
@@ -914,20 +1393,9 @@ static void e_eram_index(jit_builder_t *b, uint16_t offset)
 	sljit_emit_op2(b->c, SLJIT_SHL, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 2);
 }
 
-/* dst = s32(((a * f) << shift + 0x4000) >> 15): a product against a Q15 factor */
-static void e_mulq15(jit_builder_t *b, sljit_s32 dst, sljit_s32 a, sljit_s32 f, int shift)
-{
-	sljit_emit_op2(b->c, SLJIT_MUL, dst, 0, a, 0, f, 0);
-	if (shift)
-		sljit_emit_op2(b->c, SLJIT_SHL, dst, 0, dst, 0, SLJIT_IMM, shift);
-	sljit_emit_op2(b->c, SLJIT_ADD, dst, 0, dst, 0, SLJIT_IMM, 0x4000);
-	sljit_emit_op2(b->c, SLJIT_ASHR, dst, 0, dst, 0, SLJIT_IMM, 15);
-	e_sext(b, dst);
-}
-
-/* R0 = the multiply input named by col[5:4]: the previous multiply's input, the accumulator, the
-   read latch, or what is arriving from memory; R1 holds the word read this slot when now_valid */
-static void e_operand(jit_builder_t *b, int mode, const xp_slot_t *s, const xp_sched_t *o)
+/* R0 = the multiply input named by mode: the previous multiply's input, the accumulator saturated,
+   the IRAM read latch, or the ERAM read latch */
+static void e_operand(jit_builder_t *b, int mode)
 {
 	switch (mode)
 	{
@@ -936,35 +1404,15 @@ static void e_operand(jit_builder_t *b, int mode, const xp_slot_t *s, const xp_s
 		return;
 	case 1:
 		e_mov(b, SLJIT_R0, XP_REG_ACC, 0);
+		e_clamp24(b, SLJIT_R0);
 		return;
 	case 2:
 		e_load(b, SLJIT_R0, CELL(dsp.r));
 		return;
 	default:
-		if (o->latch_fresh)
-			e_load(b, SLJIT_R0, CELL(dsp.latch));
-		else if (s->st == 1)
-		{
-			if (o->now_valid)
-				e_mov(b, SLJIT_R0, SLJIT_R1, 0);
-			else
-				e_mov(b, SLJIT_R0, SLJIT_IMM, 0);
-		}
-		else if (s->st == 2)
-			e_load(b, SLJIT_R0, CELL(dsp.latch));
-		else
-			e_load(b, SLJIT_R0, CELL(dsp.r));
+		e_load(b, SLJIT_R0, CELL(dsp.latch));
 		return;
 	}
-}
-
-/* dst = "now_valid ? now : 0" */
-static void e_now(jit_builder_t *b, const xp_sched_t *o, sljit_s32 dst)
-{
-	if (o->now_valid)
-		e_mov(b, dst, SLJIT_R1, 0);
-	else
-		e_mov(b, dst, SLJIT_IMM, 0);
 }
 
 /* dst = min or max of dst and (src, srcw) */
@@ -984,34 +1432,51 @@ static void e_abs(jit_builder_t *b)
 	sljit_set_label(positive, sljit_emit_label(b->c));
 }
 
-/* R4 = the parallel op's factor as Q15: the accumulator's low 12 bits, |acc| >> 8, acc >> 8, or the gain register */
-static void e_factor(jit_builder_t *b, int factor, bool complement)
+/* acc = fold24(acc): reflect the halves beyond half scale */
+static void e_fold(jit_builder_t *b)
 {
-	switch (factor)
+	sljit_emit_op2(b->c, SLJIT_AND, SLJIT_R3, 0, XP_REG_ACC, 0, SLJIT_IMM, 0xffffff);
+	sljit_emit_op2(b->c, SLJIT_LSHR, SLJIT_R4, 0, SLJIT_R3, 0, SLJIT_IMM, 22);
+	sljit_emit_op2(b->c, SLJIT_LSHR, SLJIT_R0, 0, SLJIT_R3, 0, SLJIT_IMM, 23);
+	sljit_emit_op2(b->c, SLJIT_XOR, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_R0, 0);
+	sljit_emit_op2(b->c, SLJIT_AND, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, 1);
+	struct sljit_jump *same = sljit_emit_cmp(b->c, SLJIT_EQUAL, SLJIT_R4, 0, SLJIT_IMM, 0);
+	sljit_emit_op2(b->c, SLJIT_XOR, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 0x7fffff);
+	sljit_set_label(same, sljit_emit_label(b->c));
+	e_mov(b, XP_REG_ACC, SLJIT_R3, 0);
+	e_wrap24(b, XP_REG_ACC);
+}
+
+/* R4 = the parallel op's factor as Q15 */
+static void e_factor(jit_builder_t *b, int factor_select, bool complement)
+{
+	if (factor_select == 3)
 	{
-	case 0:
-		sljit_emit_op2(b->c, SLJIT_AND, SLJIT_R4, 0, XP_REG_ACC, 0, SLJIT_IMM, 0xfff);
-		if (complement)
-			sljit_emit_op2(b->c, SLJIT_SUB, SLJIT_R4, 0, SLJIT_IMM, 0x1000, SLJIT_R4, 0);
-		sljit_emit_op2(b->c, SLJIT_SHL, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, 3);
-		break;
-	case 1:
-		e_mov(b, SLJIT_R4, XP_REG_ACC, 0);
-		sljit_emit_op2(b->c, SLJIT_SUB, SLJIT_R3, 0, SLJIT_IMM, 0, SLJIT_R4, 0);
-		{
-			struct sljit_jump *positive = sljit_emit_cmp(b->c, SLJIT_SIG_GREATER_EQUAL, SLJIT_R4, 0, SLJIT_IMM, 0);
-			e_mov(b, SLJIT_R4, SLJIT_R3, 0);
-			sljit_set_label(positive, sljit_emit_label(b->c));
-		}
-		sljit_emit_op2(b->c, SLJIT_ASHR, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, 8);
-		break;
-	case 2:
-		sljit_emit_op2(b->c, SLJIT_ASHR, SLJIT_R4, 0, XP_REG_ACC, 0, SLJIT_IMM, 8);
-		break;
-	default:
 		e_load(b, SLJIT_R4, CELL(dsp.gain));
 		if (complement)
-			sljit_emit_op2(b->c, SLJIT_SUB, SLJIT_R4, 0, SLJIT_IMM, 0, SLJIT_R4, 0);
+			sljit_emit_op2(b->c, SLJIT_XOR, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, -1);
+		return;
+	}
+	e_mov(b, SLJIT_R4, XP_REG_ACC, 0);
+	e_clamp24(b, SLJIT_R4);
+	switch (factor_select)
+	{
+	case 0:
+		sljit_emit_op2(b->c, SLJIT_AND, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, 0xfff);
+		sljit_emit_op2(b->c, SLJIT_SHL, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, 3);
+		if (complement)
+			sljit_emit_op2(b->c, SLJIT_SUB, SLJIT_R4, 0, SLJIT_IMM, 0x7fff, SLJIT_R4, 0);
+		break;
+	case 1:
+		sljit_emit_op2(b->c, SLJIT_AND, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, 0x7fffff);
+		sljit_emit_op2(b->c, SLJIT_LSHR, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, 8);
+		if (complement)
+			sljit_emit_op2(b->c, SLJIT_SUB, SLJIT_R4, 0, SLJIT_IMM, 0x7fff, SLJIT_R4, 0);
+		break;
+	default:
+		sljit_emit_op2(b->c, SLJIT_ASHR, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, 8);
+		if (complement)
+			sljit_emit_op2(b->c, SLJIT_XOR, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, -1);
 		break;
 	}
 }
@@ -1022,38 +1487,35 @@ static void e_alu(jit_builder_t *b, int fn, int mode, int32_t raw)
 	switch (fn)
 	{
 	case 0x2:
-		e_load(b, SLJIT_R3, CELL(dsp.mem));
+		e_load(b, SLJIT_R3, CELL(dsp.r));
 		e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_R3, 0);
 		break;
 	case 0x3:
 		e_add(b, XP_REG_ACC, XP_REG_ACC, XP_REG_PPREV, 0);
 		break;
 	case 0x4:
-		e_load(b, XP_REG_ACC, CELL(dsp.mem));
+		e_load(b, XP_REG_ACC, CELL(dsp.r));
 		break;
 	case 0x5:
 		e_mov(b, XP_REG_ACC, XP_REG_PPREV, 0);
 		break;
 	case 0x6:
-		sljit_emit_op2(b->c, SLJIT_SUB, XP_REG_ACC, 0, SLJIT_IMM, 0, XP_REG_ACC, 0);
-		e_sext(b, XP_REG_ACC);
+		e_sub(b, XP_REG_ACC, SLJIT_IMM, 0, XP_REG_ACC, 0);
 		break;
 	case 0x7:
-		e_load(b, SLJIT_R3, CELL(dsp.mem));
-		sljit_emit_op2(b->c, SLJIT_SUB, XP_REG_ACC, 0, SLJIT_R3, 0, XP_REG_ACC, 0);
-		e_sext(b, XP_REG_ACC);
+		e_load(b, SLJIT_R3, CELL(dsp.r));
+		e_sub(b, XP_REG_ACC, SLJIT_R3, 0, XP_REG_ACC, 0);
 		break;
 	case 0x8:
-		sljit_emit_op2(b->c, SLJIT_SUB, XP_REG_ACC, 0, XP_REG_PPREV, 0, XP_REG_ACC, 0);
-		e_sext(b, XP_REG_ACC);
+		e_sub(b, XP_REG_ACC, XP_REG_PPREV, 0, XP_REG_ACC, 0);
 		break;
 	case 0x9:
-		e_load(b, SLJIT_R3, CELL(dsp.mem));
+		e_load(b, SLJIT_R3, CELL(dsp.r));
 		e_add(b, XP_REG_ACC, SLJIT_R3, XP_REG_PPREV, 0);
 		break;
 	case 0xa:
 	case 0xb:
-		e_load(b, SLJIT_R3, CELL(dsp.mem));
+		e_load(b, SLJIT_R3, CELL(dsp.r));
 		e_minmax(b, XP_REG_ACC, SLJIT_R3, 0, fn == 0xb);
 		break;
 	case 0xc:
@@ -1067,7 +1529,10 @@ static void e_alu(jit_builder_t *b, int fn, int mode, int32_t raw)
 		break;
 	case 0xd:
 		if (mode < 3)
+		{
 			sljit_emit_op2(b->c, mode == 0 ? SLJIT_AND : mode == 1 ? SLJIT_OR : SLJIT_XOR, XP_REG_ACC, 0, XP_REG_ACC, 0, SLJIT_IMM, raw);
+			e_wrap29(b, XP_REG_ACC);
+		}
 		break;
 	case 0xe:
 		if (mode < 2)
@@ -1080,15 +1545,14 @@ static void e_alu(jit_builder_t *b, int fn, int mode, int32_t raw)
 			e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_IMM, raw);
 			break;
 		case 1:
-			e_load(b, SLJIT_R3, CELL(dsp.mem));
+			e_load(b, SLJIT_R3, CELL(dsp.r));
 			e_add(b, XP_REG_ACC, SLJIT_R3, SLJIT_IMM, raw);
 			break;
 		case 2:
 			e_add(b, XP_REG_ACC, XP_REG_PPREV, SLJIT_IMM, raw);
 			break;
 		default:
-			sljit_emit_op2(b->c, SLJIT_SUB, XP_REG_ACC, 0, SLJIT_IMM, raw, XP_REG_ACC, 0);
-			e_sext(b, XP_REG_ACC);
+			e_sub(b, XP_REG_ACC, SLJIT_IMM, raw, XP_REG_ACC, 0);
 			break;
 		}
 		break;
@@ -1097,47 +1561,30 @@ static void e_alu(jit_builder_t *b, int fn, int mode, int32_t raw)
 	}
 }
 
-/* col 0x30: the CRAM word is a second instruction; the product is left in R2 */
+/* col 0x30: the CRAM word is a second instruction; the product is left in R2, the input in R0 */
 static void e_parallel(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o)
 {
-	static const int shifts[4] = { 0, 1, 2, 4 };
 	const uint16_t c = s->cram;
 	const int fn = c & 0xf;
 	const int input = (c >> 4) & 3;
-	const int factor = (c >> 6) & 3;
+	const int factor_select = (c >> 6) & 3;
 	const bool complement = bit(c, 8);
 	const bool multiply = bit(c, 9);
 	const int post = (c >> 11) & 7;
-	const int shift = shifts[c >> 14];
+	const int shift = shift_select[c >> 14];
 
 	if (!multiply)
 	{
-		e_now(b, o, SLJIT_R0);
-		e_mov(b, SLJIT_R2, SLJIT_R0, 0);
-	}
-	else if (fn == 9)
-	{
-		e_operand(b, 3, s, o);
+		if (o->now_valid)
+			e_mov(b, SLJIT_R0, SLJIT_R1, 0);
+		else
+			e_mov(b, SLJIT_R0, SLJIT_IMM, 0);
 		e_mov(b, SLJIT_R2, SLJIT_R0, 0);
 	}
 	else
 	{
-		switch (input)
-		{
-		case 0:
-			e_load(b, SLJIT_R0, CELL(dsp.input));
-			break;
-		case 1:
-			e_mov(b, SLJIT_R0, XP_REG_ACC, 0);
-			break;
-		case 2:
-			e_load(b, SLJIT_R0, CELL(dsp.mem));
-			break;
-		default:
-			e_operand(b, 3, s, o);
-			break;
-		}
-		e_factor(b, factor, complement);
+		e_operand(b, input);
+		e_factor(b, factor_select, complement);
 		e_mulq15(b, SLJIT_R2, SLJIT_R0, SLJIT_R4, shift);
 	}
 	e_store(b, CELL(dsp.input), SLJIT_R0);
@@ -1145,36 +1592,36 @@ static void e_parallel(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o
 	switch (fn)
 	{
 	case 0x0:
-		e_load(b, SLJIT_R3, CELL(dsp.mem));
+		e_load(b, SLJIT_R3, CELL(dsp.r));
 		e_add(b, XP_REG_ACC, XP_REG_ACC, XP_REG_PPREV, 0);
-		e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_R3, 0);
-		break;
-	case 0x2:
-		e_load(b, SLJIT_R3, CELL(dsp.mem));
 		e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_R3, 0);
 		break;
 	case 0x1:
 		break;
-	case 0x9:
-		if (multiply)
-		{
-			e_factor(b, factor, complement);
-			e_mulq15(b, SLJIT_R3, XP_REG_ACC, SLJIT_R4, shift);
-			e_add(b, XP_REG_ACC, SLJIT_R3, XP_REG_PPREV, 0);
-		}
-		else
-		{
-			e_load(b, SLJIT_R3, CELL(dsp.mem));
-			e_add(b, XP_REG_ACC, SLJIT_R3, XP_REG_PPREV, 0);
-		}
+	case 0xc:
+		e_load(b, SLJIT_R3, CELL(dsp.r));
+		sljit_emit_op2(b->c, SLJIT_ADD, SLJIT_R3, 0, SLJIT_R3, 0, XP_REG_PPREV, 0);
+		e_sub(b, XP_REG_ACC, SLJIT_R3, 0, XP_REG_ACC, 0);
+		break;
+	case 0xd:
+		e_load(b, SLJIT_R3, CELL(dsp.r));
+		sljit_emit_op2(b->c, SLJIT_ADD, XP_REG_ACC, 0, XP_REG_ACC, 0, XP_REG_PPREV, 0);
+		e_sub(b, XP_REG_ACC, XP_REG_ACC, 0, SLJIT_R3, 0);
+		break;
+	case 0xe:
+		e_load(b, SLJIT_R3, CELL(dsp.r));
+		sljit_emit_op2(b->c, SLJIT_ADD, SLJIT_R3, 0, SLJIT_R3, 0, XP_REG_ACC, 0);
+		e_sub(b, XP_REG_ACC, XP_REG_PPREV, 0, SLJIT_R3, 0);
+		break;
+	case 0xf:
+		e_load(b, SLJIT_R3, CELL(dsp.r));
+		e_sub(b, XP_REG_ACC, XP_REG_PPREV, 0, SLJIT_R3, 0);
 		break;
 	default:
 		e_alu(b, fn, input, s->raw);
 		break;
 	}
 
-	if (bit(c, 10))
-		e_wrap24(b, XP_REG_ACC);
 	switch (post)
 	{
 	case 1:
@@ -1195,6 +1642,9 @@ static void e_parallel(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o
 		sljit_emit_op2(b->c, SLJIT_OR, XP_REG_ACC, 0, SLJIT_R3, 0, SLJIT_R4, 0);
 		e_wrap24(b, XP_REG_ACC);
 		break;
+	case 4:
+		e_fold(b);
+		break;
 	case 5:
 		e_wrap24(b, XP_REG_ACC);
 		{
@@ -1206,34 +1656,40 @@ static void e_parallel(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o
 	default:
 		break;
 	}
+	if (bit(c, 10))
+		e_wrap24(b, XP_REG_ACC);
 }
 
-/* the grid: the multiply input by col[5:4] and the function by col[3:0]; this slot's product is left in R2 */
-static void e_execute(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o)
+/* the grid: the multiply input by col[5:4] and the function by col[3:0]; a slot's product is left in R2
+   and its input in R0.  Returns 0 when the slot issued no multiply and the latches stand, 1 when both
+   commit, 2 when the parallel op has already committed its input. */
+static int e_execute(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o)
 {
 	if (s->col == 0x30)
 	{
 		e_parallel(b, s, o);
-		return;
+		return 2;
 	}
 
 	const int mode = s->col >> 4;
 	const int fn = s->col & 0xf;
+	const bool issued = fn >= 1 && fn <= 0xc;
 
-	if (fn == 0xc && mode == 0)
-		e_load(b, SLJIT_R0, CELL(dsp.serial_in));
-	else
-		e_operand(b, mode, s, o);
-	e_store(b, CELL(dsp.input), SLJIT_R0);
-	if (fn == 0xc && mode == 1)
-		e_mov(b, SLJIT_R2, SLJIT_IMM, 0);
-	else
+	if (issued)
+	{
+		if (fn == 0xc && mode == 0)
+			e_load(b, SLJIT_R0, CELL(dsp.serial_in));
+		else if (fn == 0xc && mode == 1)
+			e_load(b, SLJIT_R0, CELL(dsp.serial_b_node));
+		else
+			e_operand(b, mode);
 		e_mul13(b, SLJIT_R2, SLJIT_R0, SLJIT_IMM, s->coefficient);
-
+	}
 	e_alu(b, fn, mode, s->raw);
+	return issued ? 1 : 0;
 }
 
-static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t *o)
+static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t *o, int parity)
 {
 	e_mov(b, XP_REG_ABEF, XP_REG_ACC, 0);
 
@@ -1248,7 +1704,7 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 		e_load(b, SLJIT_R3, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0);
 		e_store(b, CELL(dsp.pend[i & 1]), SLJIT_R3);
 	}
-	if (s->col == 0x20)
+	else if (s->col == 0x20 && !s->eram_second)
 	{
 		sljit_emit_op1(b->c, SLJIT_MOV_U16, SLJIT_R3, 0, CELL(dsp.cursor));
 		sljit_emit_op2(b->c, SLJIT_ASHR, SLJIT_R4, 0, XP_REG_ACC, 0, SLJIT_IMM, 12);
@@ -1258,15 +1714,10 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 		e_load(b, SLJIT_R3, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0);
 		e_store(b, CELL(dsp.pend[i & 1]), SLJIT_R3);
 	}
-	if (o->strobe != 0xff)
-	{
-		e_load(b, SLJIT_R3, CELL(dsp.serial_frame[o->strobe]));
-		e_store(b, CELL(dsp.serial_in), SLJIT_R3);
-	}
 	if (s->st == 1)
-		e_load(b, SLJIT_R1, IRAM_WORD(s->word));
+		e_load(b, SLJIT_R1, IRAM_CELL(cell_of(s->word, parity)));
 
-	e_execute(b, s, o);
+	const int issued = e_execute(b, s, o);
 
 	if (o->gain_load)
 	{
@@ -1277,18 +1728,18 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 	if (s->st == 2)
 	{
 		e_load(b, SLJIT_R3, CELL(dsp.latch));
-		e_store(b, IRAM_WORD(s->word), SLJIT_R3);
+		e_store(b, IRAM_CELL(cell_of(s->word, parity)), SLJIT_R3);
 	}
 	else if (s->st == 3)
 	{
 		e_mov(b, SLJIT_R3, XP_REG_ABEF, 0);
-		jit_clamp24(b, SLJIT_R3, SLJIT_R4);
-		e_store(b, IRAM_WORD(s->word), SLJIT_R3);
+		e_clamp24(b, SLJIT_R3);
+		e_store(b, IRAM_CELL(cell_of(s->word, parity)), SLJIT_R3);
 	}
 	if (s->eram_op == 3)
 	{
 		e_mov(b, SLJIT_R4, XP_REG_ABEF, 0);
-		jit_clamp24(b, SLJIT_R4, SLJIT_R0);
+		e_clamp24(b, SLJIT_R4);
 		e_eram_index(b, s->eram_offset);
 		e_store(b, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0, SLJIT_R4);
 	}
@@ -1299,19 +1750,29 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 		e_store(b, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0, SLJIT_R4);
 	}
 	if (o->now_valid)
-	{
 		e_store(b, CELL(dsp.r), SLJIT_R1);
-		e_store(b, CELL(dsp.mem), SLJIT_R1);
+	if (o->strobe_a != 0xff)
+	{
+		e_load(b, SLJIT_R3, CELL(dsp.serial_return[o->strobe_a]));
+		e_store(b, CELL(dsp.serial_in), SLJIT_R3);
 	}
-	e_mov(b, XP_REG_PPREV, SLJIT_R2, 0);
+	if (o->strobe_bcd != 0xff && o->strobe_bcd % 3 == 0)
+	{
+		e_load(b, SLJIT_R3, CELL(dsp.serial_b_pair[(o->strobe_bcd / 3) & 1]));
+		e_store(b, CELL(dsp.serial_b_node), SLJIT_R3);
+	}
+	if (issued == 1)
+		e_store(b, CELL(dsp.input), SLJIT_R0);
+	if (issued)
+		e_mov(b, XP_REG_PPREV, SLJIT_R2, 0);
 }
 
-static bool compile_program(xp_t *xp)
+static bool compile_parity(xp_t *xp, int parity)
 {
 	jit_builder_t b;
-	jit_code_t *code = &xp->code[xp->live ^ 1];
+	jit_code_t *code = &xp->code[parity];
 	jit_code_free(xp->jit, code);
-	xp_schedule(xp);
+	xp->frame[parity] = NULL;
 	if (!jit_begin(&b, xp->jit, 5, 6))
 		return false;
 
@@ -1320,14 +1781,26 @@ static bool compile_program(xp_t *xp)
 	e_mov(&b, XP_REG_ABEF, XP_REG_ACC, 0);
 	sljit_emit_op1(b.c, SLJIT_MOV_P, XP_REG_ERAM, 0, CELL(eram));
 	for (int i = 0; i < slot_count(xp); i++)
-		e_slot(&b, i, &xp->slots[i], &xp->sched[i]);
+		e_slot(&b, i, &xp->slots[i], &xp->sched[i], parity);
 	e_store(&b, CELL(dsp.acc), XP_REG_ACC);
 
 	if (!jit_end(&b, xp->jit, code))
 		return false;
-	xp->live ^= 1;
-	xp->frame = (xp_frame_fn)code->entry;
+	xp->frame[parity] = (xp_frame_fn)code->entry;
 	return true;
+}
+
+static bool compile_program(xp_t *xp)
+{
+	xp_schedule(xp);
+	if (xp->branching)
+	{
+		jit_code_free(xp->jit, &xp->code[0]);
+		jit_code_free(xp->jit, &xp->code[1]);
+		xp->frame[0] = xp->frame[1] = NULL;
+		return false;
+	}
+	return compile_parity(xp, 0) && compile_parity(xp, 1);
 }
 
 #else
@@ -1335,40 +1808,77 @@ static bool compile_program(xp_t *xp)
 static bool compile_program(xp_t *xp)
 {
 	xp_schedule(xp);
-	xp->frame = NULL;
+	xp->frame[0] = xp->frame[1] = NULL;
 	return false;
 }
 
 #endif
 
-void xp_run_dsp(xp_t *xp)
+static void run_dsp(xp_t *xp)
 {
 	xp->dsp_enabled = bit(xp->regs[XP_DSP_MODE >> 1], 2);
 	if (!xp->dsp_enabled)
+	{
+		memset(xp->line_word, 0, sizeof(xp->line_word));
 		return;
+	}
 	if (xp->program_dirty)
 	{
 		xp_decode_program(xp);
 		xp->program_dirty = false;
 		compile_program(xp);
 	}
-	dsp_frame_start(xp);
-	if (xp->frame)
-		xp->frame(xp);
+	update_iram_ramps(xp);
+
+	xp_frame_fn frame = xp->interpret ? NULL : xp->frame[xp->parity];
+	if (frame)
+	{
+		frame_serial(xp);
+		xp->dsp.product = 0;
+		frame(xp);
+	}
+	else
+		interpret_frame(xp);
 	xp->dsp.cursor--;
 }
 
 void xp_run_frame(xp_t *xp)
 {
 	xp->bus_written = 0;
+	xp->irq_frame_used = false;
 	for (int n = 0; n < voice_count(xp); n++)
+	{
+		for (int bank = 0; bank < 4; bank++)
+			deposit(xp, n, bank);
 		run_voice(xp, n);
-	xp->frame_counter++;
+	}
 
-	xp_run_dsp(xp);
+	run_dsp(xp);
+	xp->parity ^= 1;
+	xp->frame_counter++;
 }
 
-int32_t xp_output(const xp_t *xp, int word)
+int32_t xp_output(const xp_t *xp, int channel)
 {
-	return output_word(xp, word & (XP_OUTPUT_WORDS - 1));
+	return xp->line_word[(channel >> 1) % XP_OUTPUT_LINES][channel & 1];
+}
+
+int32_t xp_serial_a(const xp_t *xp, int strobe)
+{
+	return xp->block_a_out[strobe & (XP_STROBES - 1)];
+}
+
+int32_t xp_iram(const xp_t *xp, int word)
+{
+	return xp->iram[cell_of(word & 0xff, xp->parity ^ 1)];
+}
+
+int32_t xp_bus_word(const xp_t *xp, int n)
+{
+	return xp->iram[cell_of(0x40 + (n & 63), xp->parity)];
+}
+
+void xp_set_bus_word(xp_t *xp, int n, int32_t value)
+{
+	xp->iram[cell_of(0x40 + (n & 63), xp->parity)] = value;
 }

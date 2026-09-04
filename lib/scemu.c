@@ -88,13 +88,15 @@ void scemu_render(scemu_t *m, int32_t *const out[2], size_t frames)
 		sc88_run_frame(b);
 		if (out[0])
 		{
-			out[0][2 * n] = b->mute ? 0 : xp_output(&b->xp, b->has_lsp ? 2 : 1);
-			out[0][2 * n + 1] = b->mute ? 0 : xp_output(&b->xp, b->has_lsp ? 3 : 4);
+			/* the SC-88's one DAC on SDOC, the frame half picking left or right; the SC-88Pro's two,
+			   SDOC carrying both left channels and SDOD both right, the half picking the DAC */
+			out[0][2 * n] = b->mute ? 0 : xp_output(&b->xp, 2);
+			out[0][2 * n + 1] = b->mute ? 0 : xp_output(&b->xp, b->has_lsp ? 4 : 3);
 		}
 		if (out[1] && b->has_lsp)
 		{
-			out[1][2 * n] = b->mute ? 0 : xp_output(&b->xp, 6);
-			out[1][2 * n + 1] = b->mute ? 0 : xp_output(&b->xp, 7);
+			out[1][2 * n] = b->mute ? 0 : xp_output(&b->xp, 3);
+			out[1][2 * n + 1] = b->mute ? 0 : xp_output(&b->xp, 5);
 		}
 	}
 }

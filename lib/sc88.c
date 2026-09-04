@@ -74,18 +74,22 @@ static void sub_midi_out(void *user, uint8_t byte)
 		b->midi_out(&byte, 1, b->midi_out_user);
 }
 
-static void xp_serial_out(void *user, int channel, int32_t word)
+/* SDOB carries the EFX send to the LSP's TRR: the XP's line carries the top 18 bits of its word,
+   which are the top 18 of the LSP's; TRS0 comes back eight bits down and inverted */
+static void xp_serial_out(void *user, int line, int32_t word)
 {
 	sc88_t *b = user;
-	lsp_serial_write(&b->lsp, channel, word << 2);
-	if (channel == 1)
+	if ((line >> 1) != 0)
+		return;
+	lsp_serial_write(&b->lsp, line & 1, word);
+	if (line & 1)
 		lsp_run_sample(&b->lsp);
 }
 
-static int32_t xp_serial_in(void *user, int channel)
+static int32_t xp_serial_in(void *user, int strobe)
 {
 	sc88_t *b = user;
-	return b->lsp_mute ? 0 : -(lsp_serial_read(&b->lsp, channel ^ 1) >> 10);
+	return b->lsp_mute ? 0 : -(lsp_serial_read(&b->lsp, strobe & 1) >> 8);
 }
 
 /* ---------------------------------------------------------------- the H8's bus */
@@ -306,7 +310,7 @@ bool sc88_init(sc88_t *b, scemu_model_t model, const scemu_roms_t *roms, const s
 		b->cpu.jit_enabled = false;
 #endif
 
-	xp_link_t link = { xp_irq, b->has_lsp ? xp_serial_out : NULL, b->has_lsp ? xp_serial_in : NULL, b };
+	xp_link_t link = { xp_irq, b->has_lsp ? xp_serial_out : NULL, b->has_lsp ? xp_serial_in : NULL, NULL, b };
 	if (!xp_init(&b->xp, &link, &b->jit, b->wave_rom, b->wave_rom_size, wave_rom_chip_size(model)))
 		return false;
 
@@ -314,7 +318,6 @@ bool sc88_init(sc88_t *b, scemu_model_t model, const scemu_roms_t *roms, const s
 	{
 		if (!lsp_init(&b->lsp, &b->jit))
 			return false;
-		xp_set_serial_words(&b->xp, 0x01, 0x05);
 	}
 
 	lcd_init(&b->lcd);
@@ -516,8 +519,7 @@ bool sc88_state_load(sc88_t *b, const void *buffer, size_t size)
 	const uint8_t *xp_wave = b->xp.wave;
 	int32_t *xp_eram = b->xp.eram;
 	jit_code_t xp_code[2] = { b->xp.code[0], b->xp.code[1] };
-	int xp_live = b->xp.live;
-	xp_frame_fn xp_frame = b->xp.frame;
+	xp_frame_fn xp_frame[2] = { b->xp.frame[0], b->xp.frame[1] };
 	int32_t *lsp_eram = b->lsp.eram;
 	jit_code_t lsp_code[2] = { b->lsp.code[0], b->lsp.code[1] };
 	int lsp_live = b->lsp.live;
@@ -542,8 +544,8 @@ bool sc88_state_load(sc88_t *b, const void *buffer, size_t size)
 	b->xp.jit = &b->jit;
 	b->xp.code[0] = xp_code[0];
 	b->xp.code[1] = xp_code[1];
-	b->xp.live = xp_live;
-	b->xp.frame = xp_frame;
+	b->xp.frame[0] = xp_frame[0];
+	b->xp.frame[1] = xp_frame[1];
 	b->xp.program_dirty = true;
 	b->lsp.eram = lsp_eram;
 	b->lsp.jit = &b->jit;
