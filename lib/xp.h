@@ -10,8 +10,8 @@
 
 #define XP_VOICES 64
 #define XP_BUS_COUNT 64
-#define XP_OUTPUT_LINES 3
-#define XP_OUTPUTS (XP_OUTPUT_LINES * 2)
+#define XP_OUTPUT_PORTS 3
+#define XP_OUTPUTS (XP_OUTPUT_PORTS * 2)
 #define XP_REGS 0x2000
 #define XP_DSP_SLOTS 288
 #define XP_DSP_BUDGET 256
@@ -53,15 +53,18 @@ enum
 
 enum { XP_IDLE, XP_PRELOAD, XP_INITIALIZE, XP_STARTING, XP_RUNNING };
 
+/* the serial ports the `ext=2` strobes clock out on; port A, the six-line bus of the `ext=1` strobes, is below */
+enum { XP_PORT_B, XP_PORT_C, XP_PORT_D };
+
 typedef struct xp_link
 {
 	void (*irq)(void *user, bool state);
-	/* a word clocked out on SDOB, SDOC or SDOD: line * 2 + half, the word with the bits the wire does not carry cleared */
-	void (*serial_out)(void *user, int line, int32_t word);
-	/* block A's receive node: the word taken at the frame's k-th `ext=1` strobe */
-	int32_t (*serial_in)(void *user, int strobe);
-	/* block B's receive node: the word taken at the k-th three-strobe group */
-	int32_t (*serial_b)(void *user, int group);
+	/* a word clocked out on port B, C or D: port * 2 + half, the word with the bits the wire does not carry cleared */
+	void (*port_out)(void *user, int port, int32_t word);
+	/* port A's input: the word taken at the frame's k-th `ext=1` strobe */
+	int32_t (*port_a_in)(void *user, int strobe);
+	/* port B's input: the word taken at the k-th three-strobe group */
+	int32_t (*port_b_in)(void *user, int group);
 	void *user;
 } xp_link_t;
 
@@ -73,12 +76,17 @@ typedef struct xp_voice
 	uint32_t start;
 } xp_voice_t;
 
+/* the multiply input a slot's col[5:4] selects, and what it selects instead when the function is 0 */
+enum { XP_INPUT_PREVIOUS, XP_INPUT_ACC, XP_INPUT_R, XP_INPUT_LATCH };
+enum { XP_SPECIAL_NOP, XP_SPECIAL_BRANCH, XP_SPECIAL_INDEXED_READ, XP_SPECIAL_PARALLEL };
+
 /* One decoded program slot, the input of the schedule pass. */
 typedef struct xp_slot
 {
 	uint8_t st;
 	uint8_t word;
-	uint8_t col;
+	uint8_t input;
+	uint8_t function;
 	uint8_t ext;
 	uint8_t eram_op;
 	uint8_t eram_second;
@@ -101,10 +109,10 @@ typedef struct xp_dsp_state
 	int32_t pend[2];
 	uint8_t now_valid;
 	uint16_t cursor;
-	int32_t serial_in;
-	int32_t serial_b_node;
-	int32_t serial_return[XP_STROBES];
-	int32_t serial_b_pair[2];
+	int32_t port_a_in;
+	int32_t port_b_in;
+	int32_t port_a_return[XP_STROBES];
+	int32_t port_b_pair[2];
 } xp_dsp_state_t;
 
 /* The schedule pass: what a straight-line frame holds at each slot, resolved from the program alone. */
@@ -153,8 +161,8 @@ typedef struct xp
 	bool branching;
 	bool interpret;
 	uint8_t parity;
-	int32_t line_word[XP_OUTPUT_LINES][2];
-	int32_t block_a_out[XP_STROBES];
+	int32_t port_word[XP_OUTPUT_PORTS][2];
+	int32_t port_a_out[XP_STROBES];
 
 	jit_alloc_t *jit;
 	jit_code_t code[2];
@@ -170,10 +178,10 @@ uint16_t xp_read(xp_t *xp, uint32_t offset);
 void xp_write(xp_t *xp, uint32_t offset, uint16_t data, uint16_t mask);
 
 void xp_run_frame(xp_t *xp);
-/* a line's word for the stream: line * 2 + half */
+/* a port's word for the stream: port * 2 + half */
 int32_t xp_output(const xp_t *xp, int channel);
-/* what block A clocked out at the last frame's k-th strobe */
-int32_t xp_serial_a(const xp_t *xp, int strobe);
+/* what port A clocked out at the last frame's k-th strobe */
+int32_t xp_port_a_out(const xp_t *xp, int strobe);
 
 /* the DSP words as the frame just run addressed them, and the mixer bank the next frame reads, for the tests */
 int32_t xp_iram(const xp_t *xp, int word);

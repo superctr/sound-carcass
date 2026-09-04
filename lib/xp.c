@@ -178,8 +178,8 @@ void xp_reset(xp_t *xp)
 	memset(xp->voices, 0, sizeof(xp->voices));
 	memset(&xp->dsp, 0, sizeof(xp->dsp));
 	xp->dsp.latch = -0x800000;
-	memset(xp->line_word, 0, sizeof(xp->line_word));
-	memset(xp->block_a_out, 0, sizeof(xp->block_a_out));
+	memset(xp->port_word, 0, sizeof(xp->port_word));
+	memset(xp->port_a_out, 0, sizeof(xp->port_a_out));
 	xp->program_dirty = true;
 	xp->dsp_enabled = false;
 	xp->parity = 0;
@@ -865,6 +865,11 @@ static void update_iram_ramps(xp_t *xp)
 	}
 }
 
+static bool special(const xp_slot_t *s, int which)
+{
+	return s->function == 0 && s->input == which;
+}
+
 void xp_decode_program(xp_t *xp)
 {
 	const uint16_t *pram = &xp->regs[XP_PRAM_BASE >> 1];
@@ -878,7 +883,8 @@ void xp_decode_program(xp_t *xp)
 		xp_slot_t *s = &xp->slots[i];
 		s->st = (w >> 14) & 3;
 		s->word = (w >> 6) & 0xff;
-		s->col = w & 0x3f;
+		s->input = (w >> 4) & 3;
+		s->function = w & 0xf;
 		s->ext = (w >> 25) & 7;
 		s->eram_op = 0;
 		s->eram_second = 0;
@@ -886,7 +892,7 @@ void xp_decode_program(xp_t *xp)
 		s->cram = c;
 		s->coefficient = mantissa << shift_select[c >> 14];
 		s->raw = bit(c, 15) ? (int32_t)((c & 0x3fff) << 13) : mantissa;
-		if (s->col == 0x10 && i < slot_count(xp))
+		if (special(s, XP_SPECIAL_BRANCH) && i < slot_count(xp))
 			xp->branching = true;
 	}
 	for (int i = 0; i < XP_DSP_SLOTS - 1; )
@@ -915,7 +921,7 @@ void xp_schedule(xp_t *xp)
 
 	const int base = ramp_base(xp);
 	for (int i = 0; i < XP_DSP_SLOTS; i++)
-		reads[i] = s[i].eram_op == 1 || (s[i].col == 0x20 && !s[i].eram_second);
+		reads[i] = s[i].eram_op == 1 || (special(&s[i], XP_SPECIAL_INDEXED_READ) && !s[i].eram_second);
 	for (int i = 0; i < XP_DSP_SLOTS; i++)
 	{
 		o[i].lands = i >= 2 && reads[i - 2];
@@ -942,40 +948,40 @@ static int32_t wire_word(const xp_t *xp, int32_t word)
 	return clamp24(word) & (bit(xp->regs[XP_SERIAL_FORMAT >> 1], 5) ? ~0x3ff : ~0x3f);
 }
 
-/* a strobe clocks the previous frame's word at its position out on its line and refreshes the receive nodes */
-static void emit_line(xp_t *xp, int position, int k)
+/* an `ext=2` strobe clocks the previous frame's word at its position out on its port */
+static void emit_port(xp_t *xp, int position, int k)
 {
 	const int32_t word = clamp24(xp->iram[cell_of(position, xp->parity ^ 1)]);
-	const int line = k % 3;
+	const int port = k % 3;
 	const int half = (k / 3) & 1;
-	const int descriptor = line ? (xp->regs[XP_DSP_CONFIG >> 1] & 0xff) : (xp->regs[XP_SERIAL_CONFIG >> 1] >> 8);
+	const int descriptor = port == XP_PORT_B ? (xp->regs[XP_SERIAL_CONFIG >> 1] >> 8) : (xp->regs[XP_DSP_CONFIG >> 1] & 0xff);
 	const int32_t out = (descriptor & 0xc0) ? wire_word(xp, word) : 0;
-	xp->line_word[line][half] = out;
-	if ((descriptor & 0xc0) && (xp->regs[XP_DSP_MODE >> 1] & 3) == 3 && xp->link.serial_out)
-		xp->link.serial_out(xp->link.user, line * 2 + half, out);
+	xp->port_word[port][half] = out;
+	if ((descriptor & 0xc0) && (xp->regs[XP_DSP_MODE >> 1] & 3) == 3 && xp->link.port_out)
+		xp->link.port_out(xp->link.user, port * 2 + half, out);
 }
 
-static int32_t take_block_a(xp_t *xp, int strobe)
+static int32_t take_port_a(xp_t *xp, int strobe)
 {
 	const bool enabled = bit(xp->regs[XP_DSP_MODE >> 1], 1);
-	return (enabled && xp->link.serial_in) ? wrap24(xp->link.serial_in(xp->link.user, strobe)) : 0;
+	return (enabled && xp->link.port_a_in) ? wrap24(xp->link.port_a_in(xp->link.user, strobe)) : 0;
 }
 
-static int32_t take_block_b(xp_t *xp, int group)
+static int32_t take_port_b(xp_t *xp, int group)
 {
 	const bool enabled = bit(xp->regs[XP_DSP_MODE >> 1], 1);
-	return (enabled && xp->link.serial_b) ? wrap24(xp->link.serial_b(xp->link.user, group)) : 0;
+	return (enabled && xp->link.port_b_in) ? wrap24(xp->link.port_b_in(xp->link.user, group)) : 0;
 }
 
 /* --- the interpreter: the slot as the device steps it */
 
 static int32_t operand(const xp_t *xp, const xp_slot_t *s)
 {
-	switch (s->col >> 4)
+	switch (s->input)
 	{
-	case 0: return xp->dsp.input;
-	case 1: return clamp24(xp->dsp.acc);
-	case 2: return xp->dsp.r;
+	case XP_INPUT_PREVIOUS: return xp->dsp.input;
+	case XP_INPUT_ACC: return clamp24(xp->dsp.acc);
+	case XP_INPUT_R: return xp->dsp.r;
 	default: return xp->dsp.latch;
 	}
 }
@@ -1129,23 +1135,23 @@ static int execute(xp_t *xp, const xp_slot_t *s, int pc)
 {
 	xp_dsp_state_t *d = &xp->dsp;
 
-	if (s->col == 0x30)
+	if (special(s, XP_SPECIAL_PARALLEL))
 	{
 		parallel_op(xp, s);
 		return pc + 1;
 	}
 
-	const int mode = s->col >> 4;
-	const int function = s->col & 0xf;
+	const int mode = s->input;
+	const int function = s->function;
 	const bool multiply_issued = function >= 1 && function <= 0xc;
 
 	int32_t input = 0, product = 0;
 	if (multiply_issued)
 	{
 		if (function == 0xc && mode == 0)
-			input = d->serial_in;
+			input = d->port_a_in;
 		else if (function == 0xc && mode == 1)
-			input = d->serial_b_node;
+			input = d->port_b_in;
 		else
 			input = operand(xp, s);
 		product = multiply(input, s->coefficient);
@@ -1154,7 +1160,7 @@ static int execute(xp_t *xp, const xp_slot_t *s, int pc)
 	alu(xp, function, mode, s->raw);
 
 	int next = pc + 1;
-	if (s->col == 0x10)
+	if (special(s, XP_SPECIAL_BRANCH))
 	{
 		bool taken;
 		switch ((s->cram >> 10) & 0xf)
@@ -1202,7 +1208,7 @@ static void interpret_frame(xp_t *xp)
 			landing[1] = xp->eram[(s->eram_offset + d->cursor) & 0xffff];
 			landing_valid |= 2;
 		}
-		else if (s->col == 0x20 && !s->eram_second)
+		else if (special(s, XP_SPECIAL_INDEXED_READ) && !s->eram_second)
 		{
 			landing[1] = xp->eram[(d->cursor + (d->acc >> 12)) & 0xffff];
 			landing_valid |= 2;
@@ -1247,16 +1253,16 @@ static void interpret_frame(xp_t *xp)
 
 		if (s->ext == 1)
 		{
-			xp->block_a_out[strobe_a & (XP_STROBES - 1)] = clamp24(xp->iram[cell_of(position, xp->parity ^ 1)]);
-			d->serial_in = take_block_a(xp, strobe_a);
+			xp->port_a_out[strobe_a & (XP_STROBES - 1)] = clamp24(xp->iram[cell_of(position, xp->parity ^ 1)]);
+			d->port_a_in = take_port_a(xp, strobe_a);
 			strobe_a++;
 			position++;
 		}
 		else if (s->ext == 2)
 		{
-			emit_line(xp, position, strobe_bcd);
+			emit_port(xp, position, strobe_bcd);
 			if (strobe_bcd % 3 == 0)
-				d->serial_b_node = take_block_b(xp, strobe_bcd / 3);
+				d->port_b_in = take_port_b(xp, strobe_bcd / 3);
 			strobe_bcd++;
 			position++;
 		}
@@ -1267,7 +1273,7 @@ static void interpret_frame(xp_t *xp)
 
 /* --- the straight-line frame: what the compiled pass cannot do at slot time, done at the frame start */
 
-static void frame_serial(xp_t *xp)
+static void frame_ports(xp_t *xp)
 {
 	const int n = slot_count(xp);
 	for (int i = 0; i < n; i++)
@@ -1275,21 +1281,21 @@ static void frame_serial(xp_t *xp)
 		const xp_sched_t *o = &xp->sched[i];
 		if (o->strobe_a != 0xff)
 		{
-			xp->block_a_out[o->strobe_a] = clamp24(xp->iram[cell_of(o->position, xp->parity ^ 1)]);
-			xp->dsp.serial_return[o->strobe_a] = take_block_a(xp, o->strobe_a);
+			xp->port_a_out[o->strobe_a] = clamp24(xp->iram[cell_of(o->position, xp->parity ^ 1)]);
+			xp->dsp.port_a_return[o->strobe_a] = take_port_a(xp, o->strobe_a);
 		}
 	}
 	for (int i = 0; i < n; i++)
 	{
 		const xp_sched_t *o = &xp->sched[i];
 		if (o->strobe_bcd != 0xff && o->strobe_bcd % 3 == 0)
-			xp->dsp.serial_b_pair[(o->strobe_bcd / 3) & 1] = take_block_b(xp, o->strobe_bcd / 3);
+			xp->dsp.port_b_pair[(o->strobe_bcd / 3) & 1] = take_port_b(xp, o->strobe_bcd / 3);
 	}
 	for (int i = 0; i < n; i++)
 	{
 		const xp_sched_t *o = &xp->sched[i];
 		if (o->strobe_bcd != 0xff)
-			emit_line(xp, o->position, o->strobe_bcd);
+			emit_port(xp, o->position, o->strobe_bcd);
 	}
 }
 
@@ -1665,22 +1671,22 @@ static void e_parallel(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o
    commit, 2 when the parallel op has already committed its input. */
 static int e_execute(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o)
 {
-	if (s->col == 0x30)
+	if (special(s, XP_SPECIAL_PARALLEL))
 	{
 		e_parallel(b, s, o);
 		return 2;
 	}
 
-	const int mode = s->col >> 4;
-	const int fn = s->col & 0xf;
+	const int mode = s->input;
+	const int fn = s->function;
 	const bool issued = fn >= 1 && fn <= 0xc;
 
 	if (issued)
 	{
 		if (fn == 0xc && mode == 0)
-			e_load(b, SLJIT_R0, CELL(dsp.serial_in));
+			e_load(b, SLJIT_R0, CELL(dsp.port_a_in));
 		else if (fn == 0xc && mode == 1)
-			e_load(b, SLJIT_R0, CELL(dsp.serial_b_node));
+			e_load(b, SLJIT_R0, CELL(dsp.port_b_in));
 		else
 			e_operand(b, mode);
 		e_mul13(b, SLJIT_R2, SLJIT_R0, SLJIT_IMM, s->coefficient);
@@ -1704,7 +1710,7 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 		e_load(b, SLJIT_R3, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0);
 		e_store(b, CELL(dsp.pend[i & 1]), SLJIT_R3);
 	}
-	else if (s->col == 0x20 && !s->eram_second)
+	else if (special(s, XP_SPECIAL_INDEXED_READ) && !s->eram_second)
 	{
 		sljit_emit_op1(b->c, SLJIT_MOV_U16, SLJIT_R3, 0, CELL(dsp.cursor));
 		sljit_emit_op2(b->c, SLJIT_ASHR, SLJIT_R4, 0, XP_REG_ACC, 0, SLJIT_IMM, 12);
@@ -1753,13 +1759,13 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 		e_store(b, CELL(dsp.r), SLJIT_R1);
 	if (o->strobe_a != 0xff)
 	{
-		e_load(b, SLJIT_R3, CELL(dsp.serial_return[o->strobe_a]));
-		e_store(b, CELL(dsp.serial_in), SLJIT_R3);
+		e_load(b, SLJIT_R3, CELL(dsp.port_a_return[o->strobe_a]));
+		e_store(b, CELL(dsp.port_a_in), SLJIT_R3);
 	}
 	if (o->strobe_bcd != 0xff && o->strobe_bcd % 3 == 0)
 	{
-		e_load(b, SLJIT_R3, CELL(dsp.serial_b_pair[(o->strobe_bcd / 3) & 1]));
-		e_store(b, CELL(dsp.serial_b_node), SLJIT_R3);
+		e_load(b, SLJIT_R3, CELL(dsp.port_b_pair[(o->strobe_bcd / 3) & 1]));
+		e_store(b, CELL(dsp.port_b_in), SLJIT_R3);
 	}
 	if (issued == 1)
 		e_store(b, CELL(dsp.input), SLJIT_R0);
@@ -1819,7 +1825,7 @@ static void run_dsp(xp_t *xp)
 	xp->dsp_enabled = bit(xp->regs[XP_DSP_MODE >> 1], 2);
 	if (!xp->dsp_enabled)
 	{
-		memset(xp->line_word, 0, sizeof(xp->line_word));
+		memset(xp->port_word, 0, sizeof(xp->port_word));
 		return;
 	}
 	if (xp->program_dirty)
@@ -1833,7 +1839,7 @@ static void run_dsp(xp_t *xp)
 	xp_frame_fn frame = xp->interpret ? NULL : xp->frame[xp->parity];
 	if (frame)
 	{
-		frame_serial(xp);
+		frame_ports(xp);
 		xp->dsp.product = 0;
 		frame(xp);
 	}
@@ -1860,12 +1866,12 @@ void xp_run_frame(xp_t *xp)
 
 int32_t xp_output(const xp_t *xp, int channel)
 {
-	return xp->line_word[(channel >> 1) % XP_OUTPUT_LINES][channel & 1];
+	return xp->port_word[(channel >> 1) % XP_OUTPUT_PORTS][channel & 1];
 }
 
-int32_t xp_serial_a(const xp_t *xp, int strobe)
+int32_t xp_port_a_out(const xp_t *xp, int strobe)
 {
-	return xp->block_a_out[strobe & (XP_STROBES - 1)];
+	return xp->port_a_out[strobe & (XP_STROBES - 1)];
 }
 
 int32_t xp_iram(const xp_t *xp, int word)

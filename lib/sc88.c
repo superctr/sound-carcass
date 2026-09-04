@@ -74,19 +74,19 @@ static void sub_midi_out(void *user, uint8_t byte)
 		b->midi_out(&byte, 1, b->midi_out_user);
 }
 
-/* SDOB carries the EFX send to the LSP's TRR: the XP's line carries the top 18 bits of its word,
+/* Port B's SDOB carries the EFX send to the LSP's TRR: the XP's port carries the top 18 bits of its word,
    which are the top 18 of the LSP's; TRS0 comes back eight bits down and inverted */
-static void xp_serial_out(void *user, int line, int32_t word)
+static void xp_port_out(void *user, int port, int32_t word)
 {
 	sc88_t *b = user;
-	if ((line >> 1) != 0)
+	if ((port >> 1) != XP_PORT_B)
 		return;
-	lsp_serial_write(&b->lsp, line & 1, word);
-	if (line & 1)
+	lsp_serial_write(&b->lsp, port & 1, word);
+	if (port & 1)
 		lsp_run_sample(&b->lsp);
 }
 
-static int32_t xp_serial_in(void *user, int strobe)
+static int32_t xp_port_a_in(void *user, int strobe)
 {
 	sc88_t *b = user;
 	return b->lsp_mute ? 0 : -(lsp_serial_read(&b->lsp, strobe & 1) >> 8);
@@ -310,7 +310,7 @@ bool sc88_init(sc88_t *b, scemu_model_t model, const scemu_roms_t *roms, const s
 		b->cpu.jit_enabled = false;
 #endif
 
-	xp_link_t link = { xp_irq, b->has_lsp ? xp_serial_out : NULL, b->has_lsp ? xp_serial_in : NULL, NULL, b };
+	xp_link_t link = { xp_irq, b->has_lsp ? xp_port_out : NULL, b->has_lsp ? xp_port_a_in : NULL, NULL, b };
 	if (!xp_init(&b->xp, &link, &b->jit, b->wave_rom, b->wave_rom_size, wave_rom_chip_size(model)))
 		return false;
 
