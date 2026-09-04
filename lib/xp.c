@@ -241,6 +241,9 @@ void xp_reset(xp_t *xp)
 
 static void raise_irq(xp_t *xp, int voice, int reason)
 {
+	if (!((xp->regs[XP_IRQ_STATUS >> 1] >> reason) & 1))
+		return;
+
 	if (xp->irq_count == XP_VOICES)
 		return;
 	xp->irq_queue[(xp->irq_head + xp->irq_count) % XP_VOICES] = (uint16_t)((voice << 8) | reason);
