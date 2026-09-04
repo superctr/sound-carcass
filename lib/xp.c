@@ -1066,6 +1066,10 @@ static void e_parallel(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o
 	switch (fn)
 	{
 	case 0x0:
+		e_load(b, SLJIT_R3, CELL(dsp.mem));
+		e_add(b, XP_REG_ACC, XP_REG_ACC, XP_REG_PPREV, 0);
+		e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_R3, 0);
+		break;
 	case 0x2:
 		e_load(b, SLJIT_R3, CELL(dsp.mem));
 		e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_R3, 0);
