@@ -37,7 +37,12 @@ enum
 	XP_SERIAL_FORMAT = 0x3932, XP_VOICE_SELECT = 0x3934, XP_SEND_BASE = 0x3a00, XP_ROM_WINDOW = 0x3c00
 };
 
-enum { XP_IRQ_VOICE_DONE = 4, XP_IRQ_LOOP_REACHED = 5 };
+enum
+{
+	XP_IRQ_RESO_DONE = 0, XP_IRQ_TVF_DONE = 1, XP_IRQ_PITCH_DONE = 2, XP_IRQ_TVA2_DONE = 3,
+	XP_IRQ_VOICE_DONE = 4, XP_IRQ_LOOP_REACHED = 5, XP_IRQ_LOOP_ALTERNATE = 6,
+	XP_IRQ_FETCH_OVERLOAD = 7, XP_IRQ_MUTE_CHANGED = 8, XP_IRQ_REASONS = 16
+};
 
 typedef enum xp_law { XP_LAW_LINEAR, XP_LAW_EXPONENTIAL, XP_LAW_S_CURVE } xp_law_t;
 
@@ -75,7 +80,6 @@ typedef struct xp_voice
 	uint8_t reverse;
 	uint8_t backward;
 	uint8_t reading;
-	uint8_t loop_reported;
 	uint8_t done_reported;
 	uint16_t sub_phase;
 	int32_t predictor;
@@ -143,9 +147,9 @@ typedef struct xp
 	uint64_t run_pending;
 	uint32_t read_latch;
 	uint32_t frame_counter;
-	uint16_t irq_queue[XP_VOICES];
-	uint8_t irq_head;
-	uint8_t irq_count;
+	uint64_t irq_pending[XP_IRQ_REASONS];
+	uint16_t irq_event;
+	bool irq_active;
 	bool int_state;
 	int32_t exp_table[257];
 

@@ -209,11 +209,10 @@ void xp_release(xp_t *xp)
 
 static void update_int(xp_t *xp)
 {
-	const bool state = xp->irq_count != 0;
-	if (state != xp->int_state)
+	if (xp->irq_active != xp->int_state)
 	{
-		xp->int_state = state;
-		xp->link.irq(xp->link.user, state);
+		xp->int_state = xp->irq_active;
+		xp->link.irq(xp->link.user, xp->int_state);
 	}
 }
 
@@ -234,9 +233,22 @@ void xp_reset(xp_t *xp)
 	xp->run_pending = 0;
 	xp->read_latch = 0;
 	xp->frame_counter = 0;
-	xp->irq_head = 0;
-	xp->irq_count = 0;
+	memset(xp->irq_pending, 0, sizeof(xp->irq_pending));
+	xp->irq_event = 0;
+	xp->irq_active = false;
 	update_int(xp);
+}
+
+static void next_irq(xp_t *xp)
+{
+	for (int reason = 0; !xp->irq_active && reason < XP_IRQ_REASONS; reason++)
+		for (int voice = 0; voice < XP_VOICES; voice++)
+			if ((xp->irq_pending[reason] >> voice) & 1)
+			{
+				xp->irq_event = (uint16_t)((voice << 8) | reason);
+				xp->irq_active = true;
+				break;
+			}
 }
 
 static void raise_irq(xp_t *xp, int voice, int reason)
@@ -244,19 +256,69 @@ static void raise_irq(xp_t *xp, int voice, int reason)
 	if (!((xp->regs[XP_IRQ_STATUS >> 1] >> reason) & 1))
 		return;
 
-	if (xp->irq_count == XP_VOICES)
-		return;
-	xp->irq_queue[(xp->irq_head + xp->irq_count) % XP_VOICES] = (uint16_t)((voice << 8) | reason);
-	xp->irq_count++;
+	xp->irq_pending[reason] |= (uint64_t)1 << (voice & 63);
+	next_irq(xp);
 	update_int(xp);
 }
 
 /* ---------------------------------------------------------------- host interface */
 
+static int page_word(int voice, int index)
+{
+	return ((index & 0xff) << 7) | ((voice & 63) << 1);
+}
+
 static uint32_t page(const xp_t *xp, int voice, int index)
 {
-	const int word = ((index & 0xff) << 7) | ((voice & 63) << 1);
+	const int word = page_word(voice, index);
 	return ((uint32_t)xp->regs[word] << 16) | xp->regs[word | 1];
+}
+
+static uint16_t page_high(const xp_t *xp, int voice, int index)
+{
+	return xp->regs[page_word(voice, index)];
+}
+
+static bool update_ramp(xp_t *xp, int n, xp_ramp_t *r, int index, xp_law_t law)
+{
+	if (bit(page_high(xp, n, index), 1))
+	{
+		r->previous = r->current;
+		return false;
+	}
+
+	return ramp_update(r, law);
+}
+
+static void ramp_arrived(xp_t *xp, int n, int index, int reason)
+{
+	if (!bit(page_high(xp, n, index), 0))
+		return;
+
+	xp->regs[page_word(n, index)] |= 2;
+	raise_irq(xp, n, reason);
+}
+
+static void marker_reached(xp_t *xp, int n)
+{
+	const uint32_t control = page(xp, n, XP_PAGE_CONTROL);
+	if (bit(control, 16))
+		return;
+
+	xp->regs[page_word(n, XP_PAGE_CONTROL)] |= bit(control, 17) ? 1 : 2;
+	if (bit(control, 15))
+		raise_irq(xp, n, bit(control, 14) ? XP_IRQ_LOOP_ALTERNATE : XP_IRQ_LOOP_REACHED);
+}
+
+static void update_mute(xp_t *xp, int n)
+{
+	const uint32_t control = page(xp, n, XP_PAGE_CONTROL);
+	if (bit(control, 19) == bit(control, 18))
+		return;
+
+	xp->regs[page_word(n, XP_PAGE_CONTROL)] ^= 4;
+	if (bit(control, 15))
+		raise_irq(xp, n, XP_IRQ_MUTE_CHANGED);
 }
 
 static uint16_t send(const xp_t *xp, int voice, int bank)
@@ -331,13 +393,14 @@ uint16_t xp_read(xp_t *xp, uint32_t offset)
 			data = (uint16_t)(xp->read_latch >> 16);
 			break;
 		case XP_IRQ_STATUS:
-			data = xp->irq_count ? xp->irq_queue[xp->irq_head] : 0;
+			data = xp->irq_active ? xp->irq_event : 0;
 			break;
 		case XP_IRQ_ACK:
-			if (xp->irq_count)
+			if (xp->irq_active)
 			{
-				xp->irq_head = (xp->irq_head + 1) % XP_VOICES;
-				xp->irq_count--;
+				xp->irq_pending[xp->irq_event & 0xf] &= ~((uint64_t)1 << ((xp->irq_event >> 8) & 63));
+				xp->irq_active = false;
+				next_irq(xp);
 			}
 			update_int(xp);
 			data = 0;
@@ -506,7 +569,6 @@ static void start_reader(xp_t *xp, int n)
 	v->address = v->reverse ? v->end : v->start;
 	v->sub_phase = 0;
 	v->reading = 1;
-	v->loop_reported = 0;
 	v->done_reported = 0;
 	v->filter_low = 0;
 	v->filter_band = 0;
@@ -554,22 +616,36 @@ static void run_voice(xp_t *xp, int n)
 	if (v->start_pending)
 		start_reader(xp, n);
 
+	update_mute(xp, n);
+
 	if ((xp->frame_counter & 7) == 0)
 	{
-		if (ramp_update(&v->pitch, XP_LAW_LINEAR) && v->pitch.current == 0)
+		if (update_ramp(xp, n, &v->pitch, XP_PAGE_PITCH_CONTROL, XP_LAW_LINEAR))
 		{
-			v->reading = 0;
-			v->predictor = 0;
-			v->done_reported = 1;
+			ramp_arrived(xp, n, XP_PAGE_PITCH_CONTROL, XP_IRQ_PITCH_DONE);
+			if (v->pitch.current == 0)
+			{
+				v->reading = 0;
+				v->predictor = 0;
+				v->done_reported = 1;
+			}
 		}
-		ramp_update(&v->tvf, XP_LAW_LINEAR);
-		ramp_update(&v->reso, XP_LAW_EXPONENTIAL);
-		ramp_update(&v->tva2, XP_LAW_EXPONENTIAL);
+		if (update_ramp(xp, n, &v->tvf, XP_PAGE_TVF_CONTROL, XP_LAW_LINEAR))
+			ramp_arrived(xp, n, XP_PAGE_TVF_CONTROL, XP_IRQ_TVF_DONE);
+		if (update_ramp(xp, n, &v->reso, XP_PAGE_RESO_CONTROL, XP_LAW_EXPONENTIAL))
+			ramp_arrived(xp, n, XP_PAGE_RESO_CONTROL, XP_IRQ_RESO_DONE);
+		if (update_ramp(xp, n, &v->tva2, XP_PAGE_TVA2_CONTROL, XP_LAW_EXPONENTIAL))
+			ramp_arrived(xp, n, XP_PAGE_TVA2_CONTROL, XP_IRQ_TVA2_DONE);
 	}
 	if ((xp->frame_counter & 1) == 0)
 	{
-		const bool arrived = ramp_update(&v->tva1, ramp_control_law(&v->tva1));
-		if (arrived && v->tva1.current == 0 && !v->done_reported)
+		const bool arrived = update_ramp(xp, n, &v->tva1, XP_PAGE_TVA1_CONTROL, ramp_control_law(&v->tva1));
+		if (arrived && bit(page_high(xp, n, XP_PAGE_TVA1_CONTROL), 0))
+		{
+			v->done_reported = 1;
+			ramp_arrived(xp, n, XP_PAGE_TVA1_CONTROL, XP_IRQ_VOICE_DONE);
+		}
+		else if (arrived && v->tva1.current == 0 && !v->done_reported)
 		{
 			v->done_reported = 1;
 			raise_irq(xp, n, XP_IRQ_VOICE_DONE);
@@ -617,14 +693,15 @@ static void run_voice(xp_t *xp, int n)
 				}
 				break;
 			}
+			const bool crossed = v->backward
+				? (v->address > v->loop && next.address <= v->loop)
+				: (next.address < v->address || (v->address < v->loop && next.address >= v->loop));
+
 			v->address = next.address;
 			v->backward = next.backward;
-			if (!v->loop_reported && (v->backward ? v->address <= v->loop : v->address >= v->loop))
-			{
-				v->loop_reported = 1;
-				if (bit(page(xp, n, XP_PAGE_CONTROL), 15))
-					raise_irq(xp, n, XP_IRQ_LOOP_REACHED);
-			}
+
+			if (crossed)
+				marker_reached(xp, n);
 		}
 	}
 
