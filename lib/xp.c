@@ -858,7 +858,6 @@ void xp_schedule(xp_t *xp)
 #define XP_REG_ACC SLJIT_S1
 #define XP_REG_PPREV SLJIT_S2
 #define XP_REG_ABEF SLJIT_S3
-#define XP_REG_ABP SLJIT_S4
 #define XP_REG_ERAM SLJIT_S5
 
 #define CELL(field) SLJIT_MEM1(SLJIT_S0), (sljit_sw)offsetof(xp_t, field)
@@ -985,13 +984,13 @@ static void e_abs(jit_builder_t *b)
 	sljit_set_label(positive, sljit_emit_label(b->c));
 }
 
-/* R4 = the parallel op's factor as Q15: the latched fraction, |acc| >> 8, acc >> 8, or the gain register */
+/* R4 = the parallel op's factor as Q15: the accumulator's low 12 bits, |acc| >> 8, acc >> 8, or the gain register */
 static void e_factor(jit_builder_t *b, int factor, bool complement)
 {
 	switch (factor)
 	{
 	case 0:
-		sljit_emit_op1(b->c, SLJIT_MOV_U16, SLJIT_R4, 0, CELL(dsp.fraction));
+		sljit_emit_op2(b->c, SLJIT_AND, SLJIT_R4, 0, XP_REG_ACC, 0, SLJIT_IMM, 0xfff);
 		if (complement)
 			sljit_emit_op2(b->c, SLJIT_SUB, SLJIT_R4, 0, SLJIT_IMM, 0x1000, SLJIT_R4, 0);
 		sljit_emit_op2(b->c, SLJIT_SHL, SLJIT_R4, 0, SLJIT_R4, 0, SLJIT_IMM, 3);
@@ -1129,7 +1128,7 @@ static void e_parallel(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o
 			e_load(b, SLJIT_R0, CELL(dsp.input));
 			break;
 		case 1:
-			e_mov(b, SLJIT_R0, (fn == 5 && s->st != 3) ? XP_REG_ABP : XP_REG_ACC, 0);
+			e_mov(b, SLJIT_R0, XP_REG_ACC, 0);
 			break;
 		case 2:
 			e_load(b, SLJIT_R0, CELL(dsp.mem));
@@ -1236,7 +1235,6 @@ static void e_execute(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o)
 
 static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t *o)
 {
-	e_mov(b, XP_REG_ABP, XP_REG_ABEF, 0);
 	e_mov(b, XP_REG_ABEF, XP_REG_ACC, 0);
 
 	if (o->lands)
@@ -1259,8 +1257,6 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 		sljit_emit_op2(b->c, SLJIT_SHL, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 2);
 		e_load(b, SLJIT_R3, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0);
 		e_store(b, CELL(dsp.pend[i & 1]), SLJIT_R3);
-		sljit_emit_op2(b->c, SLJIT_AND, SLJIT_R4, 0, XP_REG_ACC, 0, SLJIT_IMM, 0xfff);
-		sljit_emit_op1(b->c, SLJIT_MOV_U16, CELL(dsp.fraction), SLJIT_R4, 0);
 	}
 	if (o->strobe != 0xff)
 	{

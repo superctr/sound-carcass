@@ -113,7 +113,6 @@ typedef struct xp_dsp_state
 	int32_t latch;
 	int32_t pend[2];
 	int32_t gain;
-	uint16_t fraction;
 	uint16_t cursor;
 	int32_t serial_frame[2];
 	int32_t serial_in;
