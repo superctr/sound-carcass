@@ -202,9 +202,9 @@ static bool offer_irq(xp_t *xp, int voice, int reason)
 
 /* ---------------------------------------------------------------- host interface */
 
-static inline int page_word(int voice, int index)
+static inline size_t page_word(int voice, int index)
 {
-	return ((index & 0xff) << 7) | ((voice & 63) << 1);
+	return ((size_t)(index & 0xff) << 7) + ((size_t)(voice & 63) << 1);
 }
 
 #if defined __BYTE_ORDER__ && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
@@ -223,13 +223,13 @@ static inline void set_page(xp_t *xp, int voice, int index, uint32_t value)
 #else
 static inline uint32_t page(const xp_t *xp, int voice, int index)
 {
-	const int word = page_word(voice, index);
+	const size_t word = page_word(voice, index);
 	return ((uint32_t)xp->regs[word] << 16) | xp->regs[word | 1];
 }
 
 static inline void set_page(xp_t *xp, int voice, int index, uint32_t value)
 {
-	const int word = page_word(voice, index);
+	const size_t word = page_word(voice, index);
 	xp->regs[word] = (uint16_t)(value >> 16);
 	xp->regs[word | 1] = (uint16_t)value;
 }
@@ -717,7 +717,7 @@ static void launch(xp_t *xp, int n)
 	set_page(xp, n, XP_PAGE_EXPONENTS, rom_byte(xp, (int)control, span) | ((uint32_t)rom_byte(xp, (int)control, span + 1) << 8));
 }
 
-static address_step_t advance(const reader_bounds_t *b, address_step_t s)
+static inline address_step_t advance(const reader_bounds_t *b, address_step_t s)
 {
 	const uint32_t loop = b->loop;
 	const uint32_t end = b->end;
@@ -744,7 +744,7 @@ static address_step_t advance(const reader_bounds_t *b, address_step_t s)
 	return (address_step_t){ s.address - 1, true };
 }
 
-static bool at_marker(const reader_bounds_t *b, address_step_t s)
+static inline bool at_marker(const reader_bounds_t *b, address_step_t s)
 {
 	return s.backward ? (s.address <= b->loop) : (s.address >= b->loop);
 }
@@ -774,8 +774,11 @@ static void update_mute(xp_t *xp, int n)
 static void deposit(xp_t *xp, int n, int bank, int32_t output)
 {
 	const uint16_t s = send(xp, n, bank);
+	const int level = s >> 6;
+	if (!level)
+		return;
 	const int c = cell_of(0x40 + (s & 63), xp->parity ^ 1);
-	xp->iram[c] = clamp24(xp->iram[c] + ((int64_t)output * (s >> 6)) / 512);
+	xp->iram[c] = clamp24(xp->iram[c] + ((int64_t)output * level) / 512);
 }
 
 static void clear_named_words(xp_t *xp)
@@ -791,12 +794,7 @@ static void clear_named_words(xp_t *xp)
 			xp->program_dirty = true;
 	}
 	for (uint64_t named = xp->named_words; named; named &= named - 1)
-	{
-		int word = 0;
-		while (!((named >> word) & 1))
-			word++;
-		xp->iram[cell_of(0x40 + word, xp->parity ^ 1)] = 0;
-	}
+		xp->iram[cell_of(0x40 + __builtin_ctzll(named), xp->parity ^ 1)] = 0;
 }
 
 static void run_voice(xp_t *xp, int n)
@@ -1004,12 +1002,26 @@ static bool voice_settled(const xp_t *xp, int n)
 #define XP_PAGES (XP_CRAM_BASE >> 8)
 #define XP_STILL_FRAMES 8
 
+static const uint8_t moving_pages[4] = { XP_PAGE_SMOOTH, XP_PAGE_FILTER_BAND, XP_PAGE_FILTER_LOW, XP_PAGE_OUTPUT };
+
 static void run_voice_watched(xp_t *xp, int n)
 {
-	if (xp->still[n] >= XP_STILL_FRAMES)
+	if (xp->still[n] > XP_STILL_FRAMES)
 	{
 		const uint32_t service = page(xp, n, XP_PAGE_SERVICE);
 		set_page(xp, n, XP_PAGE_SERVICE, (service & ~7u) | ((service + 1) & 7));
+		return;
+	}
+	if (xp->still[n] == 0)
+	{
+		uint32_t moving[4];
+		for (int i = 0; i < 4; i++)
+			moving[i] = page(xp, n, moving_pages[i]);
+		run_voice(xp, n);
+		for (int i = 0; i < 4; i++)
+			if (moving[i] != page(xp, n, moving_pages[i]))
+				return;
+		xp->still[n] = 1;
 		return;
 	}
 	if (!voice_settled(xp, n))
