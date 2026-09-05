@@ -160,7 +160,7 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 		"panel_sc88pro_base_p4.png", "panel_sc88pro_atlas_p4.png",
 		{ { 366, 446 }, { 61, 103, 146, 189 }, 23, 4, 3, 539, 101, 17, 7, 16, 6 },
 		{
-			{ 24, 35, 160, 41 },  /* switch-power */
+			{ 8, 35, 176, 41 },  /* switch-power */
 			{ 193, 42, 85, 85 },  /* knob-volume */
 			{ 53, 137, 105, 104 },  /* jack-midi-in-b */
 			{ 210, 178, 49, 50 },  /* jack-phones */
@@ -311,7 +311,7 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 		"panel_sc88pro_base_p8.png", "panel_sc88pro_atlas_p8.png",
 		{ { 733, 891 }, { 122, 207, 292, 378 }, 47, 8, 7, 1078, 202, 35, 15, 32, 12 },
 		{
-			{ 47, 71, 320, 80 },  /* switch-power */
+			{ 17, 71, 350, 80 },  /* switch-power */
 			{ 385, 83, 171, 171 },  /* knob-volume */
 			{ 107, 273, 209, 210 },  /* jack-midi-in-b */
 			{ 420, 357, 99, 99 },  /* jack-phones */
@@ -464,7 +464,7 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 		"panel_sc88_base_p4.png", "panel_sc88_atlas_p4.png",
 		{ { 366, 446 }, { 61, 103, 146, 189 }, 23, 4, 3, 539, 101, 17, 7, 16, 6 },
 		{
-			{ 24, 35, 160, 41 },  /* switch-power */
+			{ 8, 35, 176, 41 },  /* switch-power */
 			{ 193, 42, 85, 85 },  /* knob-volume */
 			{ 53, 137, 105, 104 },  /* jack-midi-in-b */
 			{ 210, 178, 49, 50 },  /* jack-phones */
@@ -615,7 +615,7 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 		"panel_sc88_base_p8.png", "panel_sc88_atlas_p8.png",
 		{ { 733, 891 }, { 122, 207, 292, 378 }, 47, 8, 7, 1078, 202, 35, 15, 32, 12 },
 		{
-			{ 47, 71, 320, 80 },  /* switch-power */
+			{ 17, 71, 350, 80 },  /* switch-power */
 			{ 385, 83, 171, 171 },  /* knob-volume */
 			{ 107, 273, 209, 210 },  /* jack-midi-in-b */
 			{ 420, 357, 99, 99 },  /* jack-phones */
@@ -768,7 +768,7 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 		"panel_sc88vl_base_p4.png", "panel_sc88vl_atlas_p4.png",
 		{ { 366, 446 }, { 61, 103, 146, 189 }, 23, 4, 3, 539, 101, 17, 7, 16, 6 },
 		{
-			{ 22, 39, 137, 40 },  /* switch-power */
+			{ 8, 39, 151, 40 },  /* switch-power */
 			{ 177, 44, 86, 85 },  /* knob-volume */
 			{ 38, 137, 104, 105 },  /* jack-midi-in-b */
 			{ 192, 188, 50, 50 },  /* jack-phones */
@@ -919,7 +919,7 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 		"panel_sc88vl_base_p8.png", "panel_sc88vl_atlas_p8.png",
 		{ { 733, 891 }, { 122, 207, 292, 378 }, 47, 8, 7, 1078, 202, 35, 15, 32, 12 },
 		{
-			{ 45, 77, 273, 81 },  /* switch-power */
+			{ 17, 77, 301, 81 },  /* switch-power */
 			{ 355, 88, 171, 171 },  /* knob-volume */
 			{ 75, 274, 209, 209 },  /* jack-midi-in-b */
 			{ 384, 377, 99, 99 },  /* jack-phones */
@@ -1072,7 +1072,7 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 		"panel_sc55mk2_base_p4.png", "panel_sc55mk2_atlas_p4.png",
 		{ { 366, 446 }, { 61, 103, 146, 189 }, 23, 4, 3, 539, 101, 17, 7, 16, 6 },
 		{
-			{ 21, 38, 152, 41 },  /* switch-power */
+			{ 8, 38, 165, 41 },  /* switch-power */
 			{ 204, 40, 86, 85 },  /* knob-volume */
 			{ 66, 125, 105, 104 },  /* jack-midi-in-b */
 			{ 226, 187, 49, 49 },  /* jack-phones */
@@ -1223,7 +1223,7 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 		"panel_sc55mk2_base_p8.png", "panel_sc55mk2_atlas_p8.png",
 		{ { 733, 891 }, { 122, 207, 292, 378 }, 47, 8, 7, 1078, 202, 35, 15, 32, 12 },
 		{
-			{ 41, 76, 306, 82 },  /* switch-power */
+			{ 17, 76, 330, 82 },  /* switch-power */
 			{ 409, 80, 170, 171 },  /* knob-volume */
 			{ 133, 250, 209, 209 },  /* jack-midi-in-b */
 			{ 451, 374, 99, 99 },  /* jack-phones */
