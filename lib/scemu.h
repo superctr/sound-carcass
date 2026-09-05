@@ -198,6 +198,11 @@ uint32_t scemu_midi_rate(const scemu_t *m);
 void scemu_set_map(scemu_t *m, scemu_map_t map);
 scemu_map_t scemu_map(const scemu_t *m);
 
+/* The MIDI that selects one map on all sixteen parts of a port once (bank
+ * select LSB and a program change per part), for a host sending it itself;
+ * returns the byte count, 0 if the buffer is too small or the map is NATIVE. */
+size_t scemu_map_selection(scemu_map_t map, uint8_t *out, size_t size);
+
 /* The width of the rail the DSP program's output words saturate at, in bits:
  * 24 is the chip's, and a busy song clips on it as the unit does; up to 29,
  * the accumulator's own width, gives the words up to 30 dB of headroom above

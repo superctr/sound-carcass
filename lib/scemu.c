@@ -151,6 +151,20 @@ scemu_map_t scemu_map(const scemu_t *m)
 	return (scemu_map_t)m->map.map;
 }
 
+size_t scemu_map_selection(scemu_map_t map, uint8_t *out, size_t size)
+{
+	uint8_t bytes[MIDI_MAP_MAX_OUT];
+	midi_map_t f;
+	if (map == SCEMU_MAP_NATIVE)
+		return 0;
+	midi_map_reset(&f, (uint8_t)map);
+	const size_t n = midi_map_preset(&f, 0, bytes);
+	if (n > size)
+		return 0;
+	memcpy(out, bytes, n);
+	return n;
+}
+
 void scemu_set_midi_out(scemu_t *m, scemu_midi_out_fn fn, void *user)
 {
 	m->machine.midi_out = fn;
