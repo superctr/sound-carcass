@@ -57,6 +57,27 @@ if(NOT MSVC)
 endif()
 
 # ---------------------------------------------------------------------------
+# the players' settings file, its reader lexed by re2c
+
+find_program(RE2C re2c)
+if(RE2C)
+	add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/play/config.c
+		COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/play
+		COMMAND ${RE2C} -W --no-generation-date
+		        -o ${CMAKE_CURRENT_BINARY_DIR}/play/config.c
+		        ${CMAKE_CURRENT_SOURCE_DIR}/play/config.re
+		DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/play/config.re
+		COMMENT "re2c play/config.re")
+	add_library(scemu_config STATIC ${CMAKE_CURRENT_BINARY_DIR}/play/config.c)
+	target_include_directories(scemu_config PUBLIC play)
+	if(NOT MSVC)
+		target_compile_options(scemu_config PRIVATE -Wall -Wextra)
+	endif()
+else()
+	message(STATUS "the settings file skipped: needs re2c")
+endif()
+
+# ---------------------------------------------------------------------------
 # tools
 
 if(SCEMU_BUILD_TOOLS)
