@@ -113,6 +113,11 @@ typedef struct xp_dsp_state
 	int32_t port_b_in;
 	int32_t port_a_return[XP_STROBES];
 	int32_t port_b_pair[2];
+	int32_t cycle;
+	int32_t land_valid;
+	int32_t strobe_a;
+	int32_t strobe_bcd;
+	int32_t position;
 } xp_dsp_state_t;
 
 /* The schedule pass: what a straight-line frame holds at each slot, resolved from the program alone. */
@@ -160,7 +165,6 @@ typedef struct xp
 	bool dsp_enabled;
 	bool program_dirty;
 	bool branching;
-	bool interpret;
 	uint8_t parity;
 	int32_t port_word[XP_OUTPUT_PORTS][2];
 	int32_t port_a_out[XP_STROBES];
