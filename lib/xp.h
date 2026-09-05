@@ -138,6 +138,7 @@ typedef struct xp
 
 	uint16_t regs[XP_REGS];
 	xp_voice_t voices[XP_VOICES];
+	uint8_t still[XP_VOICES];
 	uint64_t bus_written;
 	uint64_t run_mask;
 	uint64_t run_pending;

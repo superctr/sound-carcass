@@ -176,6 +176,7 @@ void xp_reset(xp_t *xp)
 	memset(xp->iram, 0, sizeof(xp->iram));
 	memset(xp->iram_ramping, 0, sizeof(xp->iram_ramping));
 	memset(xp->voices, 0, sizeof(xp->voices));
+	memset(xp->still, 0, sizeof(xp->still));
 	memset(&xp->dsp, 0, sizeof(xp->dsp));
 	xp->dsp.latch = -0x800000;
 	memset(xp->port_word, 0, sizeof(xp->port_word));
@@ -216,6 +217,20 @@ static inline int page_word(int voice, int index)
 	return ((index & 0xff) << 7) | ((voice & 63) << 1);
 }
 
+#if defined __BYTE_ORDER__ && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+static inline uint32_t page(const xp_t *xp, int voice, int index)
+{
+	uint32_t halves;
+	memcpy(&halves, &xp->regs[page_word(voice, index)], sizeof halves);
+	return (halves << 16) | (halves >> 16);
+}
+
+static inline void set_page(xp_t *xp, int voice, int index, uint32_t value)
+{
+	const uint32_t halves = (value << 16) | (value >> 16);
+	memcpy(&xp->regs[page_word(voice, index)], &halves, sizeof halves);
+}
+#else
 static inline uint32_t page(const xp_t *xp, int voice, int index)
 {
 	const int word = page_word(voice, index);
@@ -228,6 +243,7 @@ static inline void set_page(xp_t *xp, int voice, int index, uint32_t value)
 	xp->regs[word] = (uint16_t)(value >> 16);
 	xp->regs[word | 1] = (uint16_t)value;
 }
+#endif
 
 static inline uint16_t send(const xp_t *xp, int voice, int bank)
 {
@@ -375,6 +391,7 @@ void xp_write(xp_t *xp, uint32_t offset, uint16_t data, uint16_t mask)
 		{
 			xp->regs[(address >> 1) & ~1] = xp->write_latch;
 			xp->regs[address >> 1] = data;
+			xp->still[(address >> 2) & 63] = 0;
 		}
 	}
 	else if (address < XP_IRAM_BASE)
@@ -427,7 +444,10 @@ static void write_run_mask(xp_t *xp, int word, uint16_t data)
 	xp->run_pending = (xp->run_pending & ~field) | (written & ~xp->run_mask);
 	for (int n = word * 16; n < word * 16 + 16; n++)
 		if ((cleared >> n) & 1)
+		{
 			xp->voices[n].phase = XP_IDLE;
+			xp->still[n] = 0;
+		}
 }
 
 static void commit_run_mask(xp_t *xp)
@@ -439,7 +459,10 @@ static void commit_run_mask(xp_t *xp)
 	xp->run_pending = 0;
 	for (int n = 0; n < XP_VOICES; n++)
 		if ((launched >> n) & 1)
+		{
 			xp->voices[n].phase = XP_PRELOAD;
+			xp->still[n] = 0;
+		}
 }
 
 /* ---------------------------------------------------------------- ramps */
@@ -568,21 +591,54 @@ typedef struct address_step
 	bool backward;
 } address_step_t;
 
-static int32_t delta_at(const xp_t *xp, int n, uint32_t control, uint32_t address)
+typedef struct reader_bounds
 {
-	const uint8_t byte = rom_byte(xp, (int)control, address);
-	const xp_voice_t *v = &xp->voices[n];
-	if (bit(v->format, 1))
+	uint32_t loop, end, start;
+	bool looping, alternate, reverse;
+} reader_bounds_t;
+
+static reader_bounds_t reader_bounds(const xp_t *xp, int n, uint32_t control)
+{
+	reader_bounds_t b;
+	b.loop = page(xp, n, XP_PAGE_LOOP) & 0xfffff;
+	b.end = page(xp, n, XP_PAGE_END) & 0xfffff;
+	b.start = xp->voices[n].start;
+	b.looping = b.loop < b.end;
+	b.alternate = bit(control, 12);
+	b.reverse = bit(control, 11);
+	return b;
+}
+
+static const uint8_t *region_base(const xp_t *xp, int region)
+{
+	const uint32_t address = (uint32_t)(region & 0x7f) << 20;
+	const uint32_t chip = address >> 24;
+	const uint32_t offset = address & 0xffffff;
+	if (offset + 0x100000 > xp->wave_chip_size)
+		return NULL;
+	const size_t n = (size_t)chip * xp->wave_chip_size + offset;
+	return n + 0x100000 <= xp->wave_size ? xp->wave + n : NULL;
+}
+
+static inline uint8_t region_byte(const xp_t *xp, int region, const uint8_t *base, uint32_t offset)
+{
+	return base ? base[offset & 0xfffff] : rom_byte(xp, region, offset);
+}
+
+static int32_t delta_at(const xp_t *xp, int region, const uint8_t *base, int format, uint32_t address)
+{
+	const uint8_t byte = region_byte(xp, region, base, address);
+	if (bit(format, 1))
 	{
 		const int shift = (byte >> 4) & 7;
 		const int mantissa = byte & 0x0f;
 		const int32_t magnitude = (shift ? (mantissa + 16) << (shift - 1) : mantissa) << 6;
 		return bit(byte, 7) ? -magnitude : magnitude;
 	}
-	if (bit(v->format, 0))
+	if (bit(format, 0))
 		return (int8_t)byte;
 
-	const uint8_t shifts = rom_byte(xp, (int)control, address >> 5);
+	const uint8_t shifts = region_byte(xp, region, base, address >> 5);
 	return (int32_t)(int8_t)byte << (bit(address, 4) ? (shifts >> 4) : (shifts & 0x0f));
 }
 
@@ -602,13 +658,13 @@ static void launch(xp_t *xp, int n)
 	set_page(xp, n, XP_PAGE_EXPONENTS, rom_byte(xp, (int)control, span) | ((uint32_t)rom_byte(xp, (int)control, span + 1) << 8));
 }
 
-static address_step_t advance(const xp_t *xp, int n, uint32_t control, address_step_t s)
+static address_step_t advance(const reader_bounds_t *b, address_step_t s)
 {
-	const uint32_t loop = page(xp, n, XP_PAGE_LOOP) & 0xfffff;
-	const uint32_t end = page(xp, n, XP_PAGE_END) & 0xfffff;
-	const bool looping = loop < end;
-	const bool alternate = bit(control, 12);
-	const bool reverse = bit(control, 11);
+	const uint32_t loop = b->loop;
+	const uint32_t end = b->end;
+	const bool looping = b->looping;
+	const bool alternate = b->alternate;
+	const bool reverse = b->reverse;
 
 	if (!s.backward)
 	{
@@ -619,7 +675,7 @@ static address_step_t advance(const xp_t *xp, int n, uint32_t control, address_s
 		return (address_step_t){ s.address + 1, false };
 	}
 
-	const uint32_t bound = (alternate && looping) ? loop : (reverse && !looping) ? xp->voices[n].start : loop;
+	const uint32_t bound = (alternate && looping) ? loop : (reverse && !looping) ? b->start : loop;
 	if (s.address <= bound)
 	{
 		if (alternate && looping)
@@ -629,10 +685,9 @@ static address_step_t advance(const xp_t *xp, int n, uint32_t control, address_s
 	return (address_step_t){ s.address - 1, true };
 }
 
-static bool at_marker(const xp_t *xp, int n, address_step_t s)
+static bool at_marker(const reader_bounds_t *b, address_step_t s)
 {
-	const uint32_t loop = page(xp, n, XP_PAGE_LOOP) & 0xfffff;
-	return s.backward ? (s.address <= loop) : (s.address >= loop);
+	return s.backward ? (s.address <= b->loop) : (s.address >= b->loop);
 }
 
 static void marker_reached(xp_t *xp, int n)
@@ -657,7 +712,7 @@ static void update_mute(xp_t *xp, int n)
 
 /* ---------------------------------------------------------------- the voice */
 
-static void deposit(xp_t *xp, int n, int bank)
+static void deposit(xp_t *xp, int n, int bank, int32_t output)
 {
 	const uint16_t s = send(xp, n, bank);
 	const int word = s & 63;
@@ -668,8 +723,8 @@ static void deposit(xp_t *xp, int n, int bank)
 		xp->bus_written |= (uint64_t)1 << word;
 		xp->iram[c] = 0;
 	}
-	const int32_t output = running(xp, n) ? wrap24((int32_t)page(xp, n, XP_PAGE_OUTPUT)) : 0;
-	xp->iram[c] = clamp24(xp->iram[c] + ((int64_t)output * (s >> 6)) / 512);
+	if (output)
+		xp->iram[c] = clamp24(xp->iram[c] + ((int64_t)output * (s >> 6)) / 512);
 }
 
 static void run_voice(xp_t *xp, int n)
@@ -752,13 +807,17 @@ static void run_voice(xp_t *xp, int n)
 		const uint32_t address = page(xp, n, XP_PAGE_ADDRESS) & 0xfffff;
 		int32_t predictor = wrap18((int32_t)page(xp, n, XP_PAGE_PREDICTOR));
 		const bool backward = bit(control, 11) ^ bit(control, 13);
+		const reader_bounds_t bounds = reader_bounds(xp, n, control);
+		const int region = (int)control;
+		const uint8_t *base = region_base(xp, region);
+		const int format = v->format;
 
 		address_step_t s = { address, backward };
 		int64_t sum = 4 * (int64_t)predictor;
 		for (int i = 0; i < 3; i++)
 		{
-			sum += ((int64_t)interp_weights[i][phase >> 7] * delta_at(xp, n, control, s.address)) / 1024;
-			s = advance(xp, n, control, s);
+			sum += ((int64_t)interp_weights[i][phase >> 7] * delta_at(xp, region, base, format, s.address)) / 1024;
+			s = advance(&bounds, s);
 		}
 		sample = wrap20((int32_t)sum) / (1 << (3 - ((service >> 3) & 3)));
 
@@ -769,10 +828,10 @@ static void run_voice(xp_t *xp, int n)
 		address_step_t current = { address, backward };
 		for (uint32_t carry = accumulated >> 14; carry; carry--)
 		{
-			predictor = wrap18(predictor + delta_at(xp, n, control, current.address));
-			if (at_marker(xp, n, current))
+			predictor = wrap18(predictor + delta_at(xp, region, base, format, current.address));
+			if (at_marker(&bounds, current))
 				marker_reached(xp, n);
-			const address_step_t next = advance(xp, n, control, current);
+			const address_step_t next = advance(&bounds, current);
 			if (next.backward != current.backward)
 			{
 				control ^= 0x2000;
@@ -808,6 +867,73 @@ static void run_voice(xp_t *xp, int n)
 	}
 
 	set_page(xp, n, XP_PAGE_OUTPUT, (uint32_t)clamp24(((int64_t)sample * (smooth << 4)) / (1 << 19)) & 0xffffff);
+}
+
+/* --- a voice whose frame is the identity but for its service counter is stepped by that counter alone */
+
+static bool ramp_settled(const xp_t *xp, int n, int k)
+{
+	const ramp_pages_t *rp = &RAMPS[k];
+	const uint32_t control = page(xp, n, rp->control);
+	if (bit(control, 17))
+		return true;
+	if (bit(control, 16))
+		return false;
+	const bool s_curve = s_curve_law(k, control);
+	if (s_curve && ((control >> 14) & 3) == 2)
+		return false;
+	const uint32_t tpage = page(xp, n, rp->target);
+	if (!bit(tpage, 0))
+		return false;
+	const bool reso = k == RAMP_RESO;
+	const uint32_t mask = reso ? 0xfffff : 0x3ffff;
+	const uint32_t cpage = page(xp, n, rp->current);
+	if (cpage & ~mask)
+		return false;
+	const int32_t target = s_curve ? 0 : reso ? (int32_t)(tpage & 0x3fffe) << 2 : (int32_t)(tpage & 0x3fffe);
+	return (int32_t)cpage == target && !(reso && (cpage & 1));
+}
+
+static bool voice_settled(const xp_t *xp, int n)
+{
+	if (xp->voices[n].phase != XP_RUNNING)
+		return false;
+	const uint32_t control = page(xp, n, XP_PAGE_CONTROL);
+	if (!bit(control, 10) && (page(xp, n, XP_PAGE_INCREMENT) & 0x3ffff))
+		return false;
+	if (bit(control, 19) != bit(control, 18))
+		return false;
+	for (int k = 0; k < 5; k++)
+		if (!ramp_settled(xp, n, k))
+			return false;
+	return true;
+}
+
+#define XP_PAGES (XP_CRAM_BASE >> 8)
+#define XP_STILL_FRAMES 8
+
+static void run_voice_watched(xp_t *xp, int n)
+{
+	if (xp->still[n] >= XP_STILL_FRAMES)
+	{
+		const uint32_t service = page(xp, n, XP_PAGE_SERVICE);
+		set_page(xp, n, XP_PAGE_SERVICE, (service & ~7u) | ((service + 1) & 7));
+		return;
+	}
+	if (!voice_settled(xp, n))
+	{
+		xp->still[n] = 0;
+		run_voice(xp, n);
+		return;
+	}
+	uint32_t before[XP_PAGES];
+	for (int i = 0; i < XP_PAGES; i++)
+		before[i] = page(xp, n, i);
+	run_voice(xp, n);
+	bool same = true;
+	for (int i = 0; i < XP_PAGES && same; i++)
+		same = ((before[i] ^ page(xp, n, i)) & (i == XP_PAGE_SERVICE ? ~7u : ~0u)) == 0;
+	xp->still[n] = same ? xp->still[n] + 1 : 0;
 }
 
 /* ---------------------------------------------------------------- the DSP */
@@ -1854,9 +1980,13 @@ void xp_run_frame(xp_t *xp)
 	xp->irq_frame_used = false;
 	for (int n = 0; n < voice_count(xp); n++)
 	{
+		const int32_t output = running(xp, n) ? wrap24((int32_t)page(xp, n, XP_PAGE_OUTPUT)) : 0;
 		for (int bank = 0; bank < 4; bank++)
-			deposit(xp, n, bank);
-		run_voice(xp, n);
+			deposit(xp, n, bank, output);
+		if (running(xp, n))
+			run_voice_watched(xp, n);
+		else
+			run_voice(xp, n);
 	}
 
 	run_dsp(xp);
