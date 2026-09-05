@@ -66,6 +66,7 @@ typedef struct sc88
 	lsp_t lsp;
 	bool has_lsp;
 	bool has_panel;
+	int dac_right;
 	gate_array_t ga;
 	lcd_t lcd;
 	sub_hle_t sub;

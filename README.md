@@ -37,7 +37,7 @@ battery-backed settings memory, can be saved and restored.
 
 ## Tools
 
-`scemu-cli <sc88|sc88pro> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--state boot.state] [--rail BITS]
+`scemu-cli <sc88|sc88vl|sc88pro> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--state boot.state] [--rail BITS]
 ...` boots the machine (or loads a saved state, saving one after the boot when the file is not there) and
 renders a song to a WAV file; `--rail 29` widens the DSP's output rail for the busy songs that clip on the
 unit's 24 bits.

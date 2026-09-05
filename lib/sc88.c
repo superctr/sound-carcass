@@ -281,6 +281,7 @@ bool sc88_init(sc88_t *b, scemu_model_t model, const scemu_roms_t *roms, const s
 	b->map = sc88 ? MAP_SC88 : MAP_PRO;
 	b->has_lsp = !sc88;
 	b->has_panel = (model != SCEMU_MODEL_VEGSPRO);
+	b->dac_right = model == SCEMU_MODEL_SC88 ? 3 : 4;
 
 	uint64_t id = 0xcbf29ce484222325ull;
 	id = hash_add(id, roms->program_rom, roms->program_rom_size);
