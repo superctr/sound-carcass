@@ -38,7 +38,7 @@ static const int16_t interp_weights[3][128] = {
 };
 
 static const uint32_t hold_masks[4] = { 0, 7, 31, 127 };
-static const uint8_t phase_dither[4] = { 0, 2, 1, 3 };
+static const uint8_t phase_dither[4] = { 3, 0, 2, 1 };
 static const uint8_t shift_select[4] = { 0, 1, 2, 4 };
 
 enum { RAMP_PITCH, RAMP_TVF, RAMP_RESO, RAMP_TVA2, RAMP_TVA1 };
@@ -117,9 +117,8 @@ static int32_t exp_decode(const xp_t *xp, int32_t value)
 		return 0;
 	const int index = (value >> 6) & 0xff;
 	const int fraction = value & 0x3f;
-	int32_t v = xp->exp_table[index] * (64 - fraction) + xp->exp_table[index + 1] * fraction;
-	v = (v + (v < 0 ? 63 : 0)) >> 6;
-	return v >> (15 - ((value >> 14) & 15));
+	const int32_t v = (((64 - fraction) * xp->exp_table[index]) >> 2) + ((fraction * xp->exp_table[index + 1]) >> 2);
+	return (v >> 1) >> (15 - ((value >> 14) & 15));
 }
 
 bool xp_init(xp_t *xp, const xp_link_t *link, jit_alloc_t *jit, const uint8_t *wave, size_t wave_size, uint32_t chip_size)
@@ -134,7 +133,7 @@ bool xp_init(xp_t *xp, const xp_link_t *link, jit_alloc_t *jit, const uint8_t *w
 	if (!xp->eram)
 		return false;
 	for (int i = 0; i <= 256; i++)
-		xp->exp_table[i] = (int32_t)floor(exp2(17.0 + i / 256.0));
+		xp->exp_table[i] = (int32_t)floor(exp2(14.0 + i / 256.0) + 0.5);
 	return true;
 }
 
@@ -384,6 +383,8 @@ void xp_write(xp_t *xp, uint32_t offset, uint16_t data, uint16_t mask)
 			xp->regs[(address >> 1) & ~1] = xp->write_latch;
 			xp->regs[address >> 1] = data;
 			xp->still[(address >> 2) & 63] = 0;
+			if ((address >> 8) == XP_PAGE_TVA1_CONTROL)
+				xp->voices[(address >> 2) & 63].fade_entry = 1;
 		}
 	}
 	else if (address < XP_IRAM_BASE)
@@ -494,10 +495,15 @@ static bool linear_law(int index, uint32_t control)
 {
 	switch (index)
 	{
-	case RAMP_PITCH: case RAMP_TVF: return true;
-	case RAMP_TVA1: return ((control >> 14) & 3) == 1;
+	case RAMP_PITCH: case RAMP_TVF: case RAMP_TVA1: return ((control >> 14) & 3) == 1;
 	default: return false;
 	}
+}
+
+static int32_t linear_step(int32_t target, int32_t current, int rate)
+{
+	const int32_t diff = target - current;
+	return 2 * (((diff >> 3) * rate) >> 10) + (diff > 0 ? 1 : 0);
 }
 
 static bool s_curve_law(int index, uint32_t control)
@@ -505,13 +511,14 @@ static bool s_curve_law(int index, uint32_t control)
 	return index == RAMP_TVA1 && ((control >> 14) & 3) >= 2;
 }
 
-static void service_ramp(xp_t *xp, int n, int k)
+static void service_ramp(xp_t *xp, int n, int k, bool launching)
 {
 	const ramp_pages_t *rp = &RAMPS[k];
 	uint32_t control = page(xp, n, rp->control);
 	if (bit(control, 17))
 		return;
 
+	const int curve = (control >> 14) & 3;
 	const bool linear = linear_law(k, control);
 	const bool s_curve = s_curve_law(k, control);
 	const int rate = control & 0xfff;
@@ -521,37 +528,62 @@ static void service_ramp(xp_t *xp, int n, int k)
 	int32_t current = (int32_t)(page(xp, n, rp->current) & (reso ? 0xfffff : 0x3ffff));
 	int32_t step = rp->step ? wrap20((int32_t)page(xp, n, rp->step)) : 0;
 
-	if (!bit(tpage, 0))
+	const bool fresh = k == RAMP_TVA1 && xp->voices[n].fade_entry;
+	if (k == RAMP_TVA1)
+		xp->voices[n].fade_entry = 0;
+
+	if (launching)
+	{
+		if (linear)
+			step = linear_step(target, current, rate);
+	}
+	else if (s_curve)
+	{
+		if (curve == 2 && (!bit(tpage, 0) || fresh))
+		{
+			set_page(xp, n, rp->target, ((uint32_t)current >> 1) | 1);
+			set_page(xp, n, rp->step, 0);
+			return;
+		}
+	}
+	else if (!bit(tpage, 0))
 	{
 		set_page(xp, n, rp->target, tpage | 1);
 		if (linear)
 		{
-			const int32_t diff = target - current;
-			step = 2 * (((diff >> 3) * rate) >> 10) + (diff > 0 ? 1 : 0);
-			set_page(xp, n, rp->step, (uint32_t)step & 0xfffff);
+			set_page(xp, n, rp->step, (uint32_t)linear_step(target, current, rate) & 0xfffff);
+			return;
 		}
 	}
 
 	const uint32_t tick = (k == RAMP_TVA1) ? (xp->frame_counter >> 1) : (xp->frame_counter >> 3);
 	if (tick & hold_masks[(control >> 12) & 3])
 		return;
-	const int32_t parity = tick & 1;
+	int32_t parity;
+	switch (k)
+	{
+	case RAMP_TVA1: parity = (int32_t)((page(xp, n, XP_PAGE_SERVICE) >> 1) & 1); break;
+	case RAMP_TVA2: parity = (int32_t)((xp->frame_counter >> 3) & 1); break;
+	case RAMP_RESO: parity = 0; break;
+	default: parity = (int32_t)(((xp->frame_counter >> 3) & 1) ^ 1); break;
+	}
 
 	if (s_curve)
 	{
-		if (current > 0)
+		const int32_t previous = current;
+		const int32_t next = current + ((step + parity) >> 1);
+		current = (next < 0 || next > 0x3ffff) ? 0 : next;
+		const int32_t threshold = (int32_t)(tpage & 0x3fffe);
+		set_page(xp, n, rp->step, (uint32_t)(step + (previous > threshold ? -rate : rate)) & 0xfffff);
+		set_page(xp, n, rp->current, (uint32_t)current);
+		if (previous && !current)
 		{
-			int32_t speed = -step;
-			const int64_t stopping = rate ? ((int64_t)speed * (speed + rate)) / (2 * rate) : 0;
-			if (speed < 0 || stopping < current)
-				speed += rate;
-			else
-				speed -= rate;
-			speed = max32(speed, 1);
-			current = max32(current - speed, 0);
-			step = -speed;
-			set_page(xp, n, rp->step, (uint32_t)step & 0xfffff);
+			control |= 0x4000;
+			if (bit(control, 16) && offer_irq(xp, n, rp->reason))
+				control |= 0x20000;
+			set_page(xp, n, rp->control, control);
 		}
+		return;
 	}
 	else if (linear)
 	{
@@ -561,30 +593,19 @@ static void service_ramp(xp_t *xp, int n, int k)
 			current = (target > current) ? min32(moved, target) : max32(moved, target);
 		}
 	}
-	else if (reso)
-	{
-		const int32_t quarter = (target - current) >> 2;
-		int32_t s = ((quarter >> 3) * rate) >> 10;
-		if (!s)
-			s = quarter > 0 ? parity : quarter < 0 ? -1 : 0;
-		current = (current + (s << 2)) & ~1;
-		current = (quarter > 0) ? min32(current, target) : max32(current, target);
-	}
 	else
 	{
 		const int32_t diff = target - current;
-		int32_t s = ((diff >> 3) * rate) >> 10;
-		if (!s)
-			s = diff > 0 ? parity : diff < 0 ? -1 : 0;
-		current = max32(min32(current + s, 0x3ffff), 0);
-		current = (diff > 0) ? min32(current, target) : max32(current, target);
+		const int quantum = reso ? 4 : 1;
+		int32_t s = ((((diff / quantum) >> 3) * rate) >> 10) * quantum;
+		if ((diff > 0 && current + s < target) || (!rate && diff))
+			s += reso ? 2 : parity;
+		current = max32(current + s, 0) & (reso ? 0xffffe : 0x3ffff);
 	}
 	set_page(xp, n, rp->current, (uint32_t)current);
 
 	if (current == target)
 	{
-		if (s_curve && ((control >> 14) & 3) == 2)
-			control |= 0x4000;
 		if (bit(control, 16) && offer_irq(xp, n, rp->reason))
 			control |= 0x20000;
 		set_page(xp, n, rp->control, control);
@@ -648,21 +669,35 @@ static inline uint8_t region_byte(const xp_t *xp, int region, const uint8_t *bas
 	return base ? base[offset & 0xfffff] : rom_byte(xp, region, offset);
 }
 
-static int32_t delta_at(const xp_t *xp, int region, const uint8_t *base, int format, uint32_t address)
+typedef struct wave_cell
+{
+	int32_t mantissa;
+	int exponent;
+} wave_cell_t;
+
+static wave_cell_t cell_at(const xp_t *xp, int region, const uint8_t *base, int format, uint32_t address)
 {
 	const uint8_t byte = region_byte(xp, region, base, address);
 	if (bit(format, 1))
 	{
 		const int shift = (byte >> 4) & 7;
-		const int mantissa = byte & 0x0f;
-		const int32_t magnitude = (shift ? (mantissa + 16) << (shift - 1) : mantissa) << 6;
-		return bit(byte, 7) ? -magnitude : magnitude;
+		const int mantissa = shift ? (byte & 0x0f) + 16 : (byte & 0x0f);
+		return (wave_cell_t){ bit(byte, 7) ? -mantissa : mantissa, shift ? shift + 5 : 6 };
 	}
 	if (bit(format, 0))
-		return (int8_t)byte;
+		return (wave_cell_t){ (int8_t)byte, 0 };
 
 	const uint8_t shifts = region_byte(xp, region, base, address >> 5);
-	return (int32_t)(int8_t)byte << (bit(address, 4) ? (shifts >> 4) : (shifts & 0x0f));
+	const int exponent = bit(address, 4) ? (shifts >> 4) : (shifts & 0x0f);
+	return (wave_cell_t){ exponent > 10 ? 0 : (int8_t)byte, exponent };
+}
+
+static inline int32_t delta_of(wave_cell_t c) { return c.mantissa << c.exponent; }
+
+static inline int32_t tap(int32_t weight, wave_cell_t c)
+{
+	const int32_t p = (weight * c.mantissa) & ~3;
+	return c.exponent <= 10 ? p >> (10 - c.exponent) : p << (c.exponent - 10);
 }
 
 static void launch(xp_t *xp, int n)
@@ -768,9 +803,20 @@ static void run_voice(xp_t *xp, int n)
 	if (!running(xp, n))
 	{
 		const int32_t smooth = page(xp, n, XP_PAGE_SMOOTH) & 0xffff;
-		set_page(xp, n, XP_PAGE_SMOOTH, (uint32_t)max32((smooth * 7) >> 3, 1));
+		if (smooth)
+			set_page(xp, n, XP_PAGE_SMOOTH, (uint32_t)max32((smooth * 7) >> 3, 1));
+		set_page(xp, n, XP_PAGE_FILTER_BAND, 0);
+		set_page(xp, n, XP_PAGE_FILTER_LOW, 0);
 		set_page(xp, n, XP_PAGE_OUTPUT, 0);
 		return;
+	}
+
+	int32_t smooth = page(xp, n, XP_PAGE_SMOOTH) & 0xffff;
+	if (v->phase == XP_STARTING || v->phase == XP_RUNNING)
+	{
+		smooth = (7 * smooth + (int32_t)((page(xp, n, XP_PAGE_AMPLITUDE) & 0xfffff) >> 4) + 3) >> 3;
+		smooth = max32(min32(smooth, 0xffff), 0);
+		set_page(xp, n, XP_PAGE_SMOOTH, (uint32_t)smooth);
 	}
 
 	update_mute(xp, n);
@@ -780,64 +826,34 @@ static void run_voice(xp_t *xp, int n)
 	case XP_PRELOAD:
 		launch(xp, n);
 		v->phase = XP_INITIALIZE;
-		set_page(xp, n, XP_PAGE_OUTPUT, 0);
 		return;
 	case XP_INITIALIZE:
 		set_page(xp, n, XP_PAGE_INCREMENT, (uint32_t)exp_decode(xp, page(xp, n, XP_PAGE_PITCH_SEED) & 0x3ffff) & 0x3ffff);
 		set_page(xp, n, XP_PAGE_CUTOFF, (uint32_t)(exp_decode(xp, page(xp, n, XP_PAGE_TVF_SEED) & 0x3ffff) << 2) & 0xfffff);
-		service_ramp(xp, n, RAMP_PITCH);
-		set_page(xp, n, XP_PAGE_SERVICE, (page(xp, n, XP_PAGE_SERVICE) & ~0x30000u) | 0x10000);
+		service_ramp(xp, n, RAMP_PITCH, true);
+		set_page(xp, n, XP_PAGE_SERVICE, (page(xp, n, XP_PAGE_SERVICE) & 0x1f) | 0x10000);
 		v->phase = XP_STARTING;
-		set_page(xp, n, XP_PAGE_OUTPUT, 0);
 		return;
 	case XP_STARTING:
-		service_ramp(xp, n, RAMP_TVF);
-		set_page(xp, n, XP_PAGE_SERVICE, page(xp, n, XP_PAGE_SERVICE) | 0x30000);
+		service_ramp(xp, n, RAMP_TVF, true);
+		set_page(xp, n, XP_PAGE_SERVICE, (page(xp, n, XP_PAGE_SERVICE) & 0x1f) | 0x30000);
 		v->phase = XP_RUNNING;
-		set_page(xp, n, XP_PAGE_OUTPUT, 0);
 		return;
 	default:
 		break;
 	}
 
 	const uint32_t service = page(xp, n, XP_PAGE_SERVICE);
-	const int counter = service & 7;
-	if (counter & 1)
-	{
-		service_ramp(xp, n, RAMP_TVA1);
-		update_amplitude(xp, n);
-	}
-	else
-	{
-		switch (counter)
-		{
-		case 0:
-			service_ramp(xp, n, RAMP_TVA2);
-			break;
-		case 2:
-			service_ramp(xp, n, RAMP_RESO);
-			break;
-		case 4:
-			service_ramp(xp, n, RAMP_TVF);
-			set_page(xp, n, XP_PAGE_CUTOFF, (uint32_t)(exp_decode(xp, page(xp, n, XP_PAGE_TVF_SEED) & 0x3ffff) << 2) & 0xfffff);
-			break;
-		default:
-			service_ramp(xp, n, RAMP_PITCH);
-			set_page(xp, n, XP_PAGE_INCREMENT, (uint32_t)exp_decode(xp, page(xp, n, XP_PAGE_PITCH_SEED) & 0x3ffff) & 0x3ffff);
-			break;
-		}
-	}
-	set_page(xp, n, XP_PAGE_SERVICE, (service & ~7u) | ((counter + 1) & 7));
-
-	int32_t smooth = (7 * (int32_t)(page(xp, n, XP_PAGE_SMOOTH) & 0xffff) + (int32_t)((page(xp, n, XP_PAGE_AMPLITUDE) & 0xfffff) >> 4) + 3) >> 3;
-	smooth = max32(min32(smooth, 0xffff), 0);
-	set_page(xp, n, XP_PAGE_SMOOTH, (uint32_t)smooth);
+	const int counter = (int)(service + 1) & 7;
+	set_page(xp, n, XP_PAGE_SERVICE, (service & ~7u) | (uint32_t)counter);
 
 	uint32_t control = page(xp, n, XP_PAGE_CONTROL);
+	const bool halted = bit(control, 10);
 	int32_t sample = 0;
-	if (!bit(control, 10))
+	if (!halted)
 	{
-		uint32_t phase = (page(xp, n, XP_PAGE_PHASE) >> 4) & 0x3fff;
+		const uint32_t packed = page(xp, n, XP_PAGE_PHASE);
+		uint32_t phase = (packed >> 4) & 0x3fff;
 		const uint32_t address = page(xp, n, XP_PAGE_ADDRESS) & 0xfffff;
 		int32_t predictor = wrap18((int32_t)page(xp, n, XP_PAGE_PREDICTOR));
 		const bool backward = bit(control, 11) ^ bit(control, 13);
@@ -847,13 +863,13 @@ static void run_voice(xp_t *xp, int n)
 		const int format = v->format;
 
 		address_step_t s = { address, backward };
-		int64_t sum = 4 * (int64_t)predictor;
+		int32_t sum = 4 * predictor;
 		for (int i = 0; i < 3; i++)
 		{
-			sum += ((int64_t)interp_weights[i][phase >> 7] * delta_at(xp, region, base, format, s.address)) / 1024;
+			sum += tap(interp_weights[i][phase >> 7], cell_at(xp, region, base, format, s.address));
 			s = advance(&bounds, s);
 		}
-		sample = wrap20((int32_t)sum) / (1 << (3 - ((service >> 3) & 3)));
+		sample = wrap20(sum) >> (3 - ((service >> 3) & 3));
 
 		const uint32_t increment = page(xp, n, XP_PAGE_INCREMENT) & 0x3ffff;
 		const uint32_t span = address >> 6;
@@ -862,7 +878,7 @@ static void run_voice(xp_t *xp, int n)
 		address_step_t current = { address, backward };
 		for (uint32_t carry = accumulated >> 14; carry; carry--)
 		{
-			predictor = wrap18(predictor + delta_at(xp, region, base, format, current.address));
+			predictor = wrap18(predictor + delta_of(cell_at(xp, region, base, format, current.address)));
 			if (at_marker(&bounds, current))
 				marker_reached(xp, n);
 			const address_step_t next = advance(&bounds, current);
@@ -878,10 +894,49 @@ static void run_voice(xp_t *xp, int n)
 			const uint32_t exponents = (current.address >> 5) & ~1u;
 			set_page(xp, n, XP_PAGE_EXPONENTS, rom_byte(xp, (int)control, exponents) | ((uint32_t)rom_byte(xp, (int)control, exponents + 1) << 8));
 		}
-		set_page(xp, n, XP_PAGE_PHASE, (phase << 4) | (current.address & 7));
+		set_page(xp, n, XP_PAGE_PHASE, (phase << 4) | ((packed + (accumulated >> 14)) & 15));
 		set_page(xp, n, XP_PAGE_ADDRESS, current.address);
 		set_page(xp, n, XP_PAGE_PREDICTOR, (uint32_t)predictor & 0x3ffff);
 	}
+
+	if (counter == 6)
+	{
+		set_page(xp, n, XP_PAGE_INCREMENT, (uint32_t)exp_decode(xp, page(xp, n, XP_PAGE_PITCH_SEED) & 0x3ffff) & 0x3ffff);
+		set_page(xp, n, XP_PAGE_CUTOFF, (uint32_t)(exp_decode(xp, page(xp, n, XP_PAGE_TVF_SEED) & 0x3ffff) << 2) & 0xfffff);
+	}
+
+	if (counter & 1)
+	{
+		update_amplitude(xp, n);
+		service_ramp(xp, n, RAMP_TVA1, false);
+	}
+	else
+	{
+		switch (counter)
+		{
+		case 0:
+			service_ramp(xp, n, RAMP_TVA2, false);
+			break;
+		case 2:
+			service_ramp(xp, n, RAMP_RESO, false);
+			break;
+		case 4:
+		{
+			const uint32_t tpage = page(xp, n, XP_PAGE_TVF_TARGET);
+			const uint32_t cutoff = page(xp, n, XP_PAGE_TVF_SEED) & 0x3ffff;
+			if (!bit(tpage, 0) || cutoff != (tpage & 0x3fffe))
+				set_page(xp, n, XP_PAGE_CUTOFF, (uint32_t)(exp_decode(xp, (int32_t)cutoff) << 2) & 0xfffff);
+			service_ramp(xp, n, RAMP_TVF, false);
+			break;
+		}
+		default:
+			service_ramp(xp, n, RAMP_PITCH, false);
+			break;
+		}
+	}
+
+	if (halted)
+		return;
 
 	const int32_t f = page(xp, n, XP_PAGE_CUTOFF) & 0xfffff;
 	const int32_t q = page(xp, n, XP_PAGE_RESO_SEED) & 0xfffff;
