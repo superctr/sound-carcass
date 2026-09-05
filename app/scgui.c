@@ -20,6 +20,7 @@
 #include "roms.h"
 #include "config.h"
 #include "combos.h"
+#include "git_version.h"
 
 #define MIDI_PORTS_MAX 64
 #define AUDIO_DEVICES_MAX 64
@@ -854,6 +855,7 @@ static void about_show(app_t *app)
 	         info.label, info.version[0] ? info.version : "unknown", info.origin, info.rate);
 	GtkWidget *d = gtk_about_dialog_new();
 	gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(d), "SoundCarcass");
+	gtk_about_dialog_set_version(GTK_ABOUT_DIALOG(d), GIT_VERSION);
 	gtk_about_dialog_set_comments(GTK_ABOUT_DIALOG(d), text);
 	gtk_about_dialog_set_license_type(GTK_ABOUT_DIALOG(d), GTK_LICENSE_BSD_3);
 	gtk_window_set_transient_for(GTK_WINDOW(d), GTK_WINDOW(app->window));
@@ -861,61 +863,96 @@ static void about_show(app_t *app)
 	gtk_window_present(GTK_WINDOW(d));
 }
 
-static void on_menu_playlist(GtkButton *b, gpointer user)
+static void on_menu_open(GSimpleAction *a, GVariant *parameter, gpointer user)
 {
 	app_t *app = user;
-	gtk_popover_popdown(GTK_POPOVER(app->logo_popover));
-	playlist_show(app);
+	const char *what = g_action_get_name(G_ACTION(a));
+	if (!strcmp(what, "playlist"))
+		playlist_show(app);
+	else if (!strcmp(what, "audio"))
+		settings_show(app, SETTINGS_TAB_AUDIO);
+	else if (!strcmp(what, "system"))
+		settings_show(app, SETTINGS_TAB_SYSTEM);
+	else
+		about_show(app);
 }
 
-static void on_menu_audio(GtkButton *b, gpointer user)
+static void on_menu_send_reset(GSimpleAction *a, GVariant *parameter, gpointer user)
 {
 	app_t *app = user;
-	gtk_popover_popdown(GTK_POPOVER(app->logo_popover));
-	settings_show(app, SETTINGS_TAB_AUDIO);
+	size_t size;
+	const uint8_t *msg = machine_reset_message((machine_reset_t)g_variant_get_int32(parameter), &size);
+	if (msg)
+		machine_send(app->mc, msg, size);
 }
 
-static void on_menu_system(GtkButton *b, gpointer user)
+static void on_menu_send_map(GSimpleAction *a, GVariant *parameter, gpointer user)
 {
 	app_t *app = user;
-	gtk_popover_popdown(GTK_POPOVER(app->logo_popover));
-	settings_show(app, SETTINGS_TAB_SYSTEM);
+	uint8_t bytes[128];
+	size_t n = scemu_map_selection((scemu_map_t)g_variant_get_int32(parameter), bytes, sizeof(bytes));
+	if (n)
+		machine_send(app->mc, bytes, n);
 }
 
-static void on_menu_about(GtkButton *b, gpointer user)
+static void menu_append(GMenu *menu, const char *label, const char *action, int parameter)
 {
-	app_t *app = user;
-	gtk_popover_popdown(GTK_POPOVER(app->logo_popover));
-	about_show(app);
-}
-
-static GtkWidget *menu_item(const char *text, GCallback cb, app_t *app)
-{
-	GtkWidget *label = gtk_label_new(text);
-	gtk_label_set_xalign(GTK_LABEL(label), 0);
-	GtkWidget *item = gtk_button_new();
-	gtk_button_set_child(GTK_BUTTON(item), label);
-	gtk_button_set_has_frame(GTK_BUTTON(item), FALSE);
-	g_signal_connect(item, "clicked", cb, app);
-	return item;
+	GMenuItem *item = g_menu_item_new(label, NULL);
+	g_menu_item_set_action_and_target_value(item, action, parameter < 0 ? NULL : g_variant_new_int32(parameter));
+	g_menu_append_item(menu, item);
+	g_object_unref(item);
 }
 
 static void logo_menu(app_t *app, double x, double y)
 {
 	if (!app->logo_popover)
 	{
-		app->logo_popover = gtk_popover_new();
+		static const GActionEntry entries[] =
+		{
+			{ "playlist", on_menu_open, NULL, NULL, NULL, { 0 } },
+			{ "audio", on_menu_open, NULL, NULL, NULL, { 0 } },
+			{ "system", on_menu_open, NULL, NULL, NULL, { 0 } },
+			{ "about", on_menu_open, NULL, NULL, NULL, { 0 } },
+			{ "send-reset", on_menu_send_reset, "i", NULL, NULL, { 0 } },
+			{ "send-map", on_menu_send_map, "i", NULL, NULL, { 0 } },
+		};
+		GSimpleActionGroup *group = g_simple_action_group_new();
+		g_action_map_add_action_entries(G_ACTION_MAP(group), entries, G_N_ELEMENTS(entries), app);
+		gtk_widget_insert_action_group(app->area, "logo", G_ACTION_GROUP(group));
+		g_object_unref(group);
+
+		GMenu *send = g_menu_new();
+		for (int r = MACHINE_RESET_GM; r < MACHINE_RESET_COUNT; r++)
+			menu_append(send, machine_reset_names[r], "logo.send-reset", r);
+		GMenu *maps = g_menu_new();
+		static const char *const map_names[] = { NULL, "SC-55 map", "SC-88 map", "SC-88Pro map" };
+		for (int m = SCEMU_MAP_SC55; m <= SCEMU_MAP_SC88PRO; m++)
+		{
+			char label[64];
+			snprintf(label, sizeof(label), "Set all parts to the %s", map_names[m]);
+			menu_append(maps, label, "logo.send-map", m);
+		}
+		g_menu_append_section(send, NULL, G_MENU_MODEL(maps));
+		g_object_unref(maps);
+
+		GMenu *menu = g_menu_new();
+		GMenu *windows = g_menu_new();
+		menu_append(windows, "Playlist and MIDI", "logo.playlist", -1);
+		menu_append(windows, "Audio", "logo.audio", -1);
+		menu_append(windows, "System", "logo.system", -1);
+		g_menu_append_submenu(windows, "Send", G_MENU_MODEL(send));
+		g_menu_append_section(menu, NULL, G_MENU_MODEL(windows));
+		GMenu *about = g_menu_new();
+		menu_append(about, "About SoundCarcass", "logo.about", -1);
+		g_menu_append_section(menu, NULL, G_MENU_MODEL(about));
+		g_object_unref(send);
+		g_object_unref(windows);
+		g_object_unref(about);
+
+		app->logo_popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+		g_object_unref(menu);
 		gtk_widget_set_parent(app->logo_popover, app->area);
-		GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-		gtk_box_append(GTK_BOX(box), menu_item("Playlist and MIDI", G_CALLBACK(on_menu_playlist), app));
-		gtk_box_append(GTK_BOX(box), menu_item("Audio", G_CALLBACK(on_menu_audio), app));
-		gtk_box_append(GTK_BOX(box), menu_item("System", G_CALLBACK(on_menu_system), app));
-		GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
-		gtk_widget_set_margin_top(sep, 4);
-		gtk_widget_set_margin_bottom(sep, 4);
-		gtk_box_append(GTK_BOX(box), sep);
-		gtk_box_append(GTK_BOX(box), menu_item("About SoundCarcass", G_CALLBACK(on_menu_about), app));
-		gtk_popover_set_child(GTK_POPOVER(app->logo_popover), box);
+		gtk_popover_set_has_arrow(GTK_POPOVER(app->logo_popover), FALSE);
 	}
 	GdkRectangle at = { (int)x, (int)y, 1, 1 };
 	gtk_popover_set_pointing_to(GTK_POPOVER(app->logo_popover), &at);

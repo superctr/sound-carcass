@@ -102,6 +102,10 @@ typedef enum machine_reset
 extern const char *const machine_reset_names[MACHINE_RESET_COUNT];
 
 void machine_set_reset(machine_t *mc, machine_reset_t reset);
+/* the message a reset kind stands for; NULL and 0 for MACHINE_RESET_NONE */
+const uint8_t *machine_reset_message(machine_reset_t reset, size_t *size);
+/* MIDI to both of the machine's inputs now, and to the song outputs with it */
+void machine_send(machine_t *mc, const uint8_t *bytes, size_t count);
 void machine_set_map(machine_t *mc, scemu_map_t map);   /* takes effect at once */
 
 /* Host MIDI devices (midi_io.h): tie one of the machine's inputs (MIDI IN

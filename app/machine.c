@@ -26,7 +26,7 @@
 typedef enum command_kind
 {
 	CMD_PLAY, CMD_PAUSE, CMD_STOP, CMD_BUTTON, CMD_POWER, CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT,
-	CMD_RESET, CMD_MAP, CMD_RAIL, CMD_MODEL, CMD_QUIT
+	CMD_RESET, CMD_MAP, CMD_RAIL, CMD_MODEL, CMD_SEND, CMD_QUIT
 } command_kind_t;
 
 typedef struct command
@@ -260,6 +260,33 @@ static void unload_song(machine_t *mc)
 	mc->next_event = 0;
 }
 
+const uint8_t *machine_reset_message(machine_reset_t reset, size_t *size)
+{
+	static const uint8_t gm_on[] = { 0xf0, 0x7e, 0x7f, 0x09, 0x01, 0xf7 };
+	static const uint8_t gm2_on[] = { 0xf0, 0x7e, 0x7f, 0x09, 0x03, 0xf7 };
+	static const uint8_t gs_reset[] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7f, 0x00, 0x41, 0xf7 };
+	static const uint8_t mode_single[] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x00, 0x00, 0x7f, 0x00, 0x01, 0xf7 };
+	static const uint8_t mode_double[] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x00, 0x00, 0x7f, 0x01, 0x00, 0xf7 };
+	switch (reset)
+	{
+	case MACHINE_RESET_GM: *size = sizeof(gm_on); return gm_on;
+	case MACHINE_RESET_GS: *size = sizeof(gs_reset); return gs_reset;
+	case MACHINE_RESET_GM2: *size = sizeof(gm2_on); return gm2_on;
+	case MACHINE_RESET_SC88_SINGLE: *size = sizeof(mode_single); return mode_single;
+	case MACHINE_RESET_SC88_DOUBLE: *size = sizeof(mode_double); return mode_double;
+	default: *size = 0; return NULL;
+	}
+}
+
+static void send_both(machine_t *mc, const uint8_t *msg, size_t size)
+{
+	for (int port = 0; port < 2; port++)
+	{
+		scemu_midi_write(mc->m, port, msg, size, 0);
+		midi_io_write(mc->midi, port ? MIDI_IO_SONG_B : MIDI_IO_SONG_A, msg, size);
+	}
+}
+
 static void load_song(machine_t *mc, const char *path)
 {
 	unload_song(mc);
@@ -269,30 +296,12 @@ static void load_song(machine_t *mc, const char *path)
 		return;
 	}
 	mc->have_smf = true;
-	static const uint8_t gm_on[] = { 0xf0, 0x7e, 0x7f, 0x09, 0x01, 0xf7 };
-	static const uint8_t gm2_on[] = { 0xf0, 0x7e, 0x7f, 0x09, 0x03, 0xf7 };
-	static const uint8_t gs_reset[] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7f, 0x00, 0x41, 0xf7 };
-	static const uint8_t mode_single[] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x00, 0x00, 0x7f, 0x00, 0x01, 0xf7 };
-	static const uint8_t mode_double[] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x00, 0x00, 0x7f, 0x01, 0x00, 0xf7 };
-	const uint8_t *msg = NULL;
-	size_t msg_size = 0;
-	switch (mc->reset)
-	{
-	case MACHINE_RESET_GM: msg = gm_on; msg_size = sizeof(gm_on); break;
-	case MACHINE_RESET_GS: msg = gs_reset; msg_size = sizeof(gs_reset); break;
-	case MACHINE_RESET_GM2: msg = gm2_on; msg_size = sizeof(gm2_on); break;
-	case MACHINE_RESET_SC88_SINGLE: msg = mode_single; msg_size = sizeof(mode_single); break;
-	case MACHINE_RESET_SC88_DOUBLE: msg = mode_double; msg_size = sizeof(mode_double); break;
-	default: break;
-	}
+	size_t msg_size;
+	const uint8_t *msg = machine_reset_message(mc->reset, &msg_size);
 	mc->lead = 0;
 	if (msg)
 	{
-		for (int port = 0; port < 2; port++)
-		{
-			scemu_midi_write(mc->m, port, msg, msg_size, 0);
-			midi_io_write(mc->midi, port ? MIDI_IO_SONG_B : MIDI_IO_SONG_A, msg, msg_size);
-		}
+		send_both(mc, msg, msg_size);
 		mc->lead = mc->rate / 4;
 	}
 	mc->end_frame = (uint64_t)mc->smf.last_frame + mc->lead + (uint64_t)(mc->opt.tail * mc->rate);
@@ -486,6 +495,10 @@ static void handle(machine_t *mc, const command_t *c)
 		break;
 	case CMD_RESET:
 		mc->reset = (machine_reset_t)c->a;
+		break;
+	case CMD_SEND:
+		if (mc->power)
+			send_both(mc, (const uint8_t *)c->path, (size_t)c->a);
 		break;
 	case CMD_MAP:
 		mc->opt.map = (scemu_map_t)c->a;
@@ -823,6 +836,16 @@ const char *const machine_reset_names[MACHINE_RESET_COUNT] = {
 void machine_set_reset(machine_t *mc, machine_reset_t reset)
 {
 	command_t c = { CMD_RESET, reset, 0, 0, 0, NULL };
+	post(mc, c);
+}
+
+void machine_send(machine_t *mc, const uint8_t *bytes, size_t count)
+{
+	char *copy = malloc(count ? count : 1);
+	if (!copy)
+		return;
+	memcpy(copy, bytes, count);
+	command_t c = { CMD_SEND, (int)count, 0, 0, 0, copy };
 	post(mc, c);
 }
 

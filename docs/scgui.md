@@ -38,7 +38,11 @@ machine.  Files on the command line become the playlist and the first one plays.
   real (not from the cache), with any queued keys held, so the power-on combinations work.
 - **The MIDI IN B jack** opens the playlist, **the PHONES jack** the Settings window.
 - **The logotype** at the bottom left opens a menu where the pointer is: the playlist, the Settings
-  window on its Audio or its System tab, and About.
+  window on its Audio or its System tab, a **Send** submenu, and About.  Send puts a message on both of
+  the machine's inputs at once (and on the song outputs, for a unit playing along): GM System On, GS
+  Reset, GM2 System On, the SC-88 mode sets, or a bank select and program change that puts every part
+  on the SC-55, SC-88 or SC-88Pro map -- the one-off form of the map override, and the way to reach
+  those on a machine with no panel of its own.
 
 - **Combinations from the manual**: a middle-click (or Ctrl and the right button) on a key opens a
   menu of every multi-key operation the owner's manual and the service notes list for that key, each

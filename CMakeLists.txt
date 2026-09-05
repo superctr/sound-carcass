@@ -139,7 +139,14 @@ endif()
 if(SCEMU_BUILD_TOOLS AND TARGET scemu_gui AND TARGET scemu_config AND GTK4_FOUND)
 	add_executable(scgui app/scgui.c app/machine.c app/midi_io.c app/combos.c
 		play/roms.c play/smf.c play/sjis.c play/audio.c play/session.c)
-	target_include_directories(scgui PRIVATE play)
+	add_custom_target(git_version
+		COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
+		        -DOUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/app/git_version.h
+		        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GitVersion.cmake
+		BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/app/git_version.h
+		COMMENT "the build's git version")
+	add_dependencies(scgui git_version)
+	target_include_directories(scgui PRIVATE play ${CMAKE_CURRENT_BINARY_DIR}/app)
 	target_link_libraries(scgui PRIVATE scemu_gui scemu scemu_config ZLIB::ZLIB PkgConfig::GTK4 portaudio portmidi pthread)
 	if(NOT MSVC)
 		target_compile_options(scgui PRIVATE -Wall -Wextra -Wno-unused-parameter)
