@@ -1056,6 +1056,10 @@ static void panel_switch(app_t *app, panel_model_t model)
 	free(app->frame);
 	app->frame = calloc((size_t)w * h, sizeof(uint32_t));
 	panel_set_knob(p, app->knob);
+	/* the glass and the lamps come with the snapshot, whose generation has
+	 * already passed; give the new panel the last one */
+	panel_set_lcd(p, &app->state.lcd);
+	panel_set_leds(p, app->state.leds);
 	gtk_widget_set_size_request(app->area, w / app->scale, h / app->scale);
 	gtk_widget_queue_draw(app->area);
 }
