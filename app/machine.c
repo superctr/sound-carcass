@@ -348,6 +348,9 @@ static void midi_out(const uint8_t *bytes, size_t count, void *user);
  * the firmware to act on it */
 static void quiet(machine_t *mc)
 {
+	/* a stopped stream (a paused song) would never drain the ring */
+	if (mc->audio)
+		audio_pause(mc->audio, false);
 	for (int port = 0; port < 2; port++)
 		for (int ch = 0; ch < 16; ch++)
 		{
