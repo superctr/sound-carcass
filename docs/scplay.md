@@ -17,7 +17,7 @@ and starts instantly on later runs.
 | option | effect |
 |---|---|
 | `--model sc88 \| sc88vl \| sc88pro` | which machine (default `sc88pro`) |
-| `--rom PATH` | a zip or a directory holding the ROM images, searched before the usual places |
+| `--rom PATH` | a zip or a directory holding the ROM images, whatever they are named, searched before the usual places |
 | `--wav FILE` | also write what is played, 16-bit stereo at the machine's own 32 kHz |
 | `--no-audio` | render as fast as the host allows and open no sound card; for `--wav` |
 | `--audio-device NAME` | play on the output device whose name holds `NAME` (any case) instead of the host's default; `--audio-device list` prints them and exits |
@@ -33,23 +33,16 @@ and starts instantly on later runs.
 
 ## ROM images
 
-You need your own dumps; the file names are the ones in [roms.md](roms.md).  Without `--rom`, scplay
-looks for each model's set in, in order:
+You need your own dumps.  Which images each machine takes is [roms.md](roms.md); they are recognised by
+their contents, so their names, and the names of the zips holding them, do not matter.  scplay looks in
+the path given to `--rom`, then in its own directory, then in `~/.mame/roms`, reading every zip and
+every loose file there and one level of subdirectories.  A MAME ROM collection is found as it stands.
 
-1. `<model>.zip` beside the executable, then a directory `<model>/` beside it;
-2. `~/.mame/roms/<model>.zip`, then `~/.mame/roms/<model>/`;
-3. the executable's own directory and `~/.mame/roms` as loose files.
+The first place holding an image wins, so `--rom` overrides the others and can also supply just the one
+image they lack.  Where several versions of a control ROM are found, the newest is taken.
 
-`<model>` is `sc88`, `sc88vl` or `sc88pro`, so a MAME ROM collection is found as it stands.  Zips are
-read directly (stored and deflated entries).  Where a zip holds several control ROM versions, the 1.04
-image named in `roms.md` is the one taken.
-
-`--rom` adds its zip or directory at the front of that list; the usual places still fill in anything it
-does not hold.
-
-**The SC-88VL** shares the SC-88's wave ROMs — its own mask ROMs have never been dumped — so its four
-wave images are looked for in the `sc88` set as well as in `sc88vl`.  In practice `sc88vl.zip` holds
-only the control ROM and `sc88.zip` supplies the rest, and both must be present.
+**The SC-88VL** shares the SC-88's wave ROMs — its own mask ROMs have never been dumped.  In practice
+`sc88vl.zip` holds only the control ROM and the SC-88's images supply the rest, so both must be there.
 
 If no set is found for the default model but another model's set is, scplay uses that one and says so.
 Naming a model with `--model` turns that off: the named model's set must be there.

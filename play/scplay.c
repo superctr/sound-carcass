@@ -188,7 +188,7 @@ static void usage(FILE *fp)
 	        "usage: scplay [options] song.mid\n"
 	        "\n"
 	        "  --model sc88|sc88pro|sc88vl   machine to emulate (default sc88pro)\n"
-	        "  --rom PATH                    a zip or a directory holding the ROM images\n"
+	        "  --rom PATH                    a zip or a directory holding the ROM images (any names)\n"
 	        "  --wav FILE                    also write what is played, 16-bit stereo 32 kHz\n"
 	        "  --no-audio                    render as fast as the host allows, no sound card\n"
 	        "  --audio-device NAME           play on the output device whose name holds NAME\n"
@@ -357,8 +357,8 @@ int main(int argc, char **argv)
 	{
 		fprintf(stderr, "scplay: %s\n", err);
 		if (strncmp(err, "unknown model", 13) != 0)
-			fprintf(stderr, "scplay: put sc88pro.zip (or sc88.zip, sc88vl.zip) beside the program"
-			                " or in ~/.mame/roms, or give --rom\n");
+			fprintf(stderr, "scplay: put the dumps, zipped or loose and under any names, beside"
+			                " the program or in ~/.mame/roms, or give --rom\n");
 		return 1;
 	}
 	if (!opt.model && roms.model != SCEMU_MODEL_SC88PRO)
