@@ -1,7 +1,8 @@
 # scgui
 
-The Sound Canvas on the desktop: the SC-88Pro's front panel in a window, playing Standard MIDI Files
-from a playlist, with the panel's buttons under the mouse.
+The Sound Canvas on the desktop: the machine's front panel in a window (the SC-88's, the SC-88VL's or
+the SC-88Pro's, following the System choice; the VE-GS Pro, which has no panel, wears the Pro's), playing
+Standard MIDI Files from a playlist, with the panel's buttons under the mouse.
 
     scgui [options] [file.mid ...]
 
@@ -34,7 +35,8 @@ machine.  Files on the command line become the playlist and the first one plays.
   is how the unit steps a value quickly.
 - **The volume knob** turns with the scroll wheel over it; it is the program's output gain, the
   machine itself has no volume control in software.  The knob's push switch (PREVIEW) is a button.
-- **The power switch** switches the emulated unit off and on.  Switching on boots the firmware for
+- **The power switch** switches the emulated unit off and on; on the SC-88VL the STANDBY lamp beside
+  it is lit while the unit is off.  Switching on boots the firmware for
   real (not from the cache), with any queued keys held, so the power-on combinations work.
 - **The MIDI IN B jack** opens the playlist, **the PHONES jack** the Settings window.
 - **The logotype** at the bottom left opens a menu where the pointer is: the playlist, the Settings

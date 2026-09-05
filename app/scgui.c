@@ -976,6 +976,24 @@ static void draw(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoin
 	cairo_surface_destroy(surface);
 }
 
+/* the panel of another model: the same size, the keys held come up with the old one */
+static void panel_switch(app_t *app, panel_model_t model)
+{
+	if (model == panel_model(app->panel))
+		return;
+	panel_t *p = panel_create(model, app->pitch * app->scale);
+	if (!p)
+		return;
+	panel_destroy(app->panel);
+	app->panel = p;
+	int w = panel_width(p), h = panel_height(p);
+	free(app->frame);
+	app->frame = calloc((size_t)w * h, sizeof(uint32_t));
+	panel_set_knob(p, app->knob);
+	gtk_widget_set_size_request(app->area, w / app->scale, h / app->scale);
+	gtk_widget_queue_draw(app->area);
+}
+
 static void set_title(app_t *app)
 {
 	char title[512];
@@ -1027,7 +1045,9 @@ static gboolean on_tick(gpointer user)
 		app->shown_model = model;
 		set_title(app);
 		system_readout(app);
+		panel_switch(app, panel_model_for(model));
 	}
+	panel_set_standby(app->panel, !app->power);
 	if (panel_dirty(app->panel))
 		gtk_widget_queue_draw(app->area);
 	return G_SOURCE_CONTINUE;
@@ -1545,11 +1565,12 @@ int main(int argc, char **argv)
 	app.window = gtk_window_new();
 	app.scale = gtk_widget_get_scale_factor(app.window);
 	app.pitch = opt.pitch;
-	app.panel = panel_create(app.pitch * app.scale);
+	panel_model_t pm = panel_model_for(machine_model(app.mc));
+	app.panel = panel_create(pm, app.pitch * app.scale);
 	if (!app.panel)
 	{
 		app.scale = 1;
-		app.panel = panel_create(app.pitch);
+		app.panel = panel_create(pm, app.pitch);
 	}
 	if (!app.panel)
 	{

@@ -9,29 +9,34 @@
 #include "png.h"
 #include "lcd_font.h"
 
-extern const unsigned char panel_base_p4_png[];
-extern const size_t panel_base_p4_png_size;
-extern const unsigned char panel_atlas_p4_png[];
-extern const size_t panel_atlas_p4_png_size;
-extern const unsigned char panel_base_p8_png[];
-extern const size_t panel_base_p8_png_size;
-extern const unsigned char panel_atlas_p8_png[];
-extern const size_t panel_atlas_p8_png_size;
+/* the baked artwork, embedded by the build: per model, a base image and a sprite atlas per size */
+#define ART_DECLARE(m, p) \
+	extern const unsigned char panel_##m##_base_p##p##_png[]; \
+	extern const size_t panel_##m##_base_p##p##_png_size; \
+	extern const unsigned char panel_##m##_atlas_p##p##_png[]; \
+	extern const size_t panel_##m##_atlas_p##p##_png_size;
+#define ART_MODEL(m) ART_DECLARE(m, 4) ART_DECLARE(m, 8)
+ART_MODEL(sc88pro) ART_MODEL(sc88) ART_MODEL(sc88vl) ART_MODEL(sc55mk2)
 
+#define ART_ROW(m, p) { p, panel_##m##_base_p##p##_png, panel_##m##_atlas_p##p##_png, \
+                        &panel_##m##_base_p##p##_png_size, &panel_##m##_atlas_p##p##_png_size }
 static const struct
 {
 	int pitch;
 	const unsigned char *base, *atlas;
 	const size_t *base_size, *atlas_size;
-} artwork[] = {
-	{ 4, panel_base_p4_png, panel_atlas_p4_png, &panel_base_p4_png_size, &panel_atlas_p4_png_size },
-	{ 8, panel_base_p8_png, panel_atlas_p8_png, &panel_base_p8_png_size, &panel_atlas_p8_png_size },
+} artwork[PANEL_MODEL_COUNT][2] = {
+	[PANEL_MODEL_SC88PRO] = { ART_ROW(sc88pro, 4), ART_ROW(sc88pro, 8) },
+	[PANEL_MODEL_SC88] = { ART_ROW(sc88, 4), ART_ROW(sc88, 8) },
+	[PANEL_MODEL_SC88VL] = { ART_ROW(sc88vl, 4), ART_ROW(sc88vl, 8) },
+	[PANEL_MODEL_SC55MK2] = { ART_ROW(sc55mk2, 4), ART_ROW(sc55mk2, 8) },
 };
 
 #define SEG_COLOR 0xff201000u
 
 struct panel
 {
+	panel_model_t model;
 	const panel_size_t *size;
 	png_image_t base;
 	png_image_t atlas;      /* premultiplied */
@@ -39,6 +44,7 @@ struct panel
 	uint32_t leds;
 	float knob;
 	uint64_t pressed;
+	bool standby;
 	bool dirty;
 };
 
@@ -51,24 +57,37 @@ static uint32_t premultiply(uint32_t c)
 	return (a << 24) | (r << 16) | (g << 8) | b;
 }
 
-panel_t *panel_create(int pitch)
+panel_model_t panel_model_for(scemu_model_t model)
 {
+	switch (model)
+	{
+	case SCEMU_MODEL_SC88: return PANEL_MODEL_SC88;
+	case SCEMU_MODEL_SC88VL: return PANEL_MODEL_SC88VL;
+	default: return PANEL_MODEL_SC88PRO;
+	}
+}
+
+panel_t *panel_create(panel_model_t model, int pitch)
+{
+	if (model < 0 || model >= PANEL_MODEL_COUNT)
+		return NULL;
 	const panel_size_t *size = NULL;
 	for (int n = 0; n < PANEL_SIZE_COUNT; n++)
-		if (panel_sizes[n].pitch == pitch)
-			size = &panel_sizes[n];
+		if (panel_sizes[model][n].pitch == pitch)
+			size = &panel_sizes[model][n];
 	size_t art = 0;
-	while (art < sizeof(artwork) / sizeof(artwork[0]) && artwork[art].pitch != pitch)
+	while (art < 2 && artwork[model][art].pitch != pitch)
 		art++;
-	if (!size || art == sizeof(artwork) / sizeof(artwork[0]))
+	if (!size || art == 2)
 		return NULL;
 
 	panel_t *p = calloc(1, sizeof(*p));
 	if (!p)
 		return NULL;
+	p->model = model;
 	p->size = size;
-	if (!png_decode(artwork[art].base, *artwork[art].base_size, &p->base)
-	    || !png_decode(artwork[art].atlas, *artwork[art].atlas_size, &p->atlas)
+	if (!png_decode(artwork[model][art].base, *artwork[model][art].base_size, &p->base)
+	    || !png_decode(artwork[model][art].atlas, *artwork[model][art].atlas_size, &p->atlas)
 	    || p->base.width != size->width || p->base.height != size->height)
 	{
 		panel_destroy(p);
@@ -91,6 +110,7 @@ void panel_destroy(panel_t *p)
 	free(p);
 }
 
+panel_model_t panel_model(const panel_t *p) { return p->model; }
 int panel_width(const panel_t *p) { return p->size->width; }
 int panel_height(const panel_t *p) { return p->size->height; }
 int panel_pitch(const panel_t *p) { return p->size->pitch; }
@@ -123,6 +143,15 @@ void panel_set_knob(panel_t *p, float turn)
 	if (p->knob != turn)
 	{
 		p->knob = turn;
+		p->dirty = true;
+	}
+}
+
+void panel_set_standby(panel_t *p, bool standby)
+{
+	if (p->standby != standby)
+	{
+		p->standby = standby;
 		p->dirty = true;
 	}
 }
@@ -171,6 +200,7 @@ static uint32_t dim(uint32_t c)
 
 static void blit(panel_t *p, uint32_t *pixels, size_t stride, const panel_sprite_t *s, bool dimmed)
 {
+	/* a sprite the model lacks is empty */
 	for (int j = 0; j < s->atlas.h; j++)
 	{
 		const uint32_t *src = p->atlas.pixels + (size_t)(s->atlas.y + j) * p->atlas.width + s->atlas.x;
@@ -271,6 +301,8 @@ void panel_render(panel_t *p, uint32_t *pixels, size_t stride)
 			blit_sprite(p, pixels, stride, led_sprite[n]);
 	if ((p->leds & both) == both)
 		blit_sprite(p, pixels, stride, PANEL_SPRITE_LED_USER_INST_EFX);
+	if (p->standby)
+		blit_sprite(p, pixels, stride, PANEL_SPRITE_LED_STANDBY);
 	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
 		if ((p->pressed & ((uint64_t)1 << e)) && panel_element_sprite[e] >= 0)
 			blit(p, pixels, stride, &p->size->sprite[panel_element_sprite[e]], true);
