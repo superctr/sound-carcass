@@ -39,6 +39,8 @@ machine.  Files on the command line become the playlist and the first one plays.
   it is lit while the unit is off.  Switching on boots the firmware for
   real (not from the cache), with any queued keys held, so the power-on combinations work.
 - **The MIDI IN B jack** opens the playlist, **the PHONES jack** the Settings window.
+- **The model name** beside the logotype opens a menu of the systems whose ROMs are there, to switch
+  between them, and a Reset that power-cycles the machine.
 - **The logotype** at the bottom left opens a menu where the pointer is: the playlist, the Settings
   window on its Audio or its System tab, a **Send** submenu, and About.  Send puts a message on both of
   the machine's inputs at once (and on the song outputs, for a unit playing along): GM System On, GS

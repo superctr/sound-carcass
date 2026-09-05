@@ -37,7 +37,8 @@ typedef struct app
 	GtkWidget *window, *area, *playlist_window, *list;
 	GtkWidget *settings_window, *notebook, *audio_label, *audio_drop, *block_drop;
 	GtkWidget *system_label, *model_check[3], *rail_check;
-	GtkWidget *logo_popover;
+	GtkWidget *logo_popover, *system_popover;
+	GSimpleAction *system_model_action;   /* the system menu's radio state */
 	scgui_config_t cfg;
 	char config_file[1024];
 	guint config_timer;
@@ -210,6 +211,7 @@ static void config_touch(app_t *app)
 static void play_index(app_t *app, int index);
 static void queued_press(app_t *app);
 static void held_release(app_t *app);
+static void set_title(app_t *app);
 static gboolean macro_done(gpointer user);
 
 static const char *song_label(const char *path, char *buf, size_t size)
@@ -959,6 +961,70 @@ static void logo_menu(app_t *app, double x, double y)
 	gtk_popover_popup(GTK_POPOVER(app->logo_popover));
 }
 
+/* the menu on the model name: the systems whose ROMs are there, and a reset */
+static void on_menu_system(GSimpleAction *action, GVariant *parameter, gpointer user)
+{
+	app_t *app = user;
+	scemu_model_t model = (scemu_model_t)g_variant_get_int32(parameter);
+	g_simple_action_set_state(action, parameter);
+	if (model == machine_model(app->mc))
+		return;
+	machine_set_model(app->mc, model);
+	snprintf(app->cfg.model, sizeof(app->cfg.model), "%s", scplay_model_name(model));
+	config_touch(app);
+}
+
+static void on_menu_reset(GSimpleAction *action, GVariant *parameter, gpointer user)
+{
+	app_t *app = user;
+	if (app->power)
+		machine_power(app->mc, false);
+	app->power = true;
+	machine_power(app->mc, true);
+	set_title(app);
+}
+
+static void system_menu(app_t *app, double x, double y)
+{
+	if (!app->system_popover)
+	{
+		GSimpleActionGroup *group = g_simple_action_group_new();
+		GSimpleAction *model = g_simple_action_new_stateful("model", G_VARIANT_TYPE_INT32,
+		                                                    g_variant_new_int32((int)machine_model(app->mc)));
+		g_signal_connect(model, "activate", G_CALLBACK(on_menu_system), app);
+		g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(model));
+		GSimpleAction *reset = g_simple_action_new("reset", NULL);
+		g_signal_connect(reset, "activate", G_CALLBACK(on_menu_reset), app);
+		g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(reset));
+		gtk_widget_insert_action_group(app->area, "system", G_ACTION_GROUP(group));
+		app->system_model_action = model;
+		g_object_unref(reset);
+		g_object_unref(group);
+
+		GMenu *menu = g_menu_new();
+		GMenu *models = g_menu_new();
+		unsigned have = machine_models_available(app->mc);
+		for (int n = 0; n < SYSTEM_MODELS; n++)
+			if (have & (1u << system_models[n]))
+				menu_append(models, scplay_model_label(system_models[n]), "system.model", (int)system_models[n]);
+		g_menu_append_section(menu, NULL, G_MENU_MODEL(models));
+		GMenu *actions = g_menu_new();
+		menu_append(actions, "Reset", "system.reset", -1);
+		g_menu_append_section(menu, NULL, G_MENU_MODEL(actions));
+		g_object_unref(models);
+		g_object_unref(actions);
+
+		app->system_popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+		g_object_unref(menu);
+		gtk_widget_set_parent(app->system_popover, app->area);
+		gtk_popover_set_has_arrow(GTK_POPOVER(app->system_popover), FALSE);
+	}
+	g_simple_action_set_state(app->system_model_action, g_variant_new_int32((int)machine_model(app->mc)));
+	GdkRectangle at = { (int)x, (int)y, 1, 1 };
+	gtk_popover_set_pointing_to(GTK_POPOVER(app->system_popover), &at);
+	gtk_popover_popup(GTK_POPOVER(app->system_popover));
+}
+
 /* ---------------------------------------------------------------- the panel */
 
 static void draw(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user)
@@ -1103,6 +1169,9 @@ static void element_action(app_t *app, int e)
 		break;
 	case PANEL_LOGO:
 		logo_menu(app, app->pointer_x, app->pointer_y);
+		break;
+	case PANEL_LOGO_MODEL:
+		system_menu(app, app->pointer_x, app->pointer_y);
 		break;
 	default:
 		break;
@@ -1623,6 +1692,11 @@ int main(int argc, char **argv)
 		gtk_widget_unparent(app.combo_popover);
 	if (app.logo_popover)
 		gtk_widget_unparent(app.logo_popover);
+	if (app.system_popover)
+	{
+		gtk_widget_unparent(app.system_popover);
+		g_object_unref(app.system_model_action);
+	}
 	gtk_window_destroy(GTK_WINDOW(app.window));
 	free(app.frame);
 	panel_destroy(app.panel);
