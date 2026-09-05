@@ -144,7 +144,8 @@ typedef struct xp
 	uint16_t regs[XP_REGS];
 	xp_voice_t voices[XP_VOICES];
 	uint8_t still[XP_VOICES];
-	uint64_t bus_written;
+	uint64_t named_words;
+	bool sends_dirty;
 	uint64_t run_mask;
 	uint64_t run_pending;
 	uint32_t read_latch;
@@ -165,6 +166,10 @@ typedef struct xp
 	bool dsp_enabled;
 	bool program_dirty;
 	bool branching;
+	uint8_t live[XP_DSP_SLOTS];
+	uint16_t strobe_slots[XP_DSP_SLOTS];
+	int strobe_count;
+	uint32_t compiles;
 	uint8_t parity;
 	int32_t port_word[XP_OUTPUT_PORTS][2];
 	int32_t port_a_out[XP_STROBES];

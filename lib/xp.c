@@ -171,7 +171,10 @@ void xp_reset(xp_t *xp)
 	xp->program_dirty = true;
 	xp->dsp_enabled = false;
 	xp->parity = 0;
-	xp->bus_written = 0;
+	xp->named_words = 0;
+	xp->sends_dirty = true;
+	memset(xp->live, 0, sizeof(xp->live));
+	xp->strobe_count = 0;
 	xp->run_mask = 0;
 	xp->run_pending = 0;
 	xp->read_latch = 0;
@@ -323,6 +326,7 @@ static uint32_t translate(const xp_t *xp, uint32_t address)
 
 static void write_run_mask(xp_t *xp, int word, uint16_t data);
 static void commit_run_mask(xp_t *xp);
+static void decode_cram(xp_slot_t *s, uint16_t c);
 
 uint16_t xp_read(xp_t *xp, uint32_t offset)
 {
@@ -384,7 +388,15 @@ void xp_write(xp_t *xp, uint32_t offset, uint16_t data, uint16_t mask)
 	else if (address < XP_IRAM_BASE)
 	{
 		xp->regs[address >> 1] = data;
-		xp->program_dirty = true;
+		const int i = (int)((address - XP_CRAM_BASE) >> 1);
+		if (xp->live[i] && !xp->program_dirty && xp->slots[i].function != 0)
+			decode_cram(&xp->slots[i], data);
+		else
+		{
+			if (xp->frame[0])
+				xp->live[i] = 1;
+			xp->program_dirty = true;
+		}
 	}
 	else if (address < XP_IRAM3_TARGET_BASE)
 	{
@@ -415,10 +427,16 @@ void xp_write(xp_t *xp, uint32_t offset, uint16_t data, uint16_t mask)
 		if (address < XP_ROM_SELECT)
 			write_run_mask(xp, (int)((address - XP_RUN_MASK) >> 1), data);
 		else if (address == XP_HIGHEST_VOICE || address == XP_DSP_CONFIG)
+		{
 			xp->program_dirty = true;
+			xp->sends_dirty = true;
+		}
 	}
 	else if (address < XP_ROM_WINDOW)
+	{
 		xp->regs[address >> 1] = data;
+		xp->sends_dirty = true;
+	}
 }
 
 static void write_run_mask(xp_t *xp, int word, uint16_t data)
@@ -702,16 +720,27 @@ static void update_mute(xp_t *xp, int n)
 static void deposit(xp_t *xp, int n, int bank, int32_t output)
 {
 	const uint16_t s = send(xp, n, bank);
-	const int word = s & 63;
-	const int c = cell_of(0x40 + word, xp->parity ^ 1);
+	const int c = cell_of(0x40 + (s & 63), xp->parity ^ 1);
+	xp->iram[c] = clamp24(xp->iram[c] + ((int64_t)output * (s >> 6)) / 512);
+}
 
-	if (!((xp->bus_written >> word) & 1))
+static void clear_named_words(xp_t *xp)
+{
+	if (xp->sends_dirty)
 	{
-		xp->bus_written |= (uint64_t)1 << word;
-		xp->iram[c] = 0;
+		xp->named_words = 0;
+		for (int n = 0; n < voice_count(xp); n++)
+			for (int bank = 0; bank < 4; bank++)
+				xp->named_words |= (uint64_t)1 << (send(xp, n, bank) & 63);
+		xp->sends_dirty = false;
 	}
-	if (output)
-		xp->iram[c] = clamp24(xp->iram[c] + ((int64_t)output * (s >> 6)) / 512);
+	for (uint64_t named = xp->named_words; named; named &= named - 1)
+	{
+		int word = 0;
+		while (!((named >> word) & 1))
+			word++;
+		xp->iram[cell_of(0x40 + word, xp->parity ^ 1)] = 0;
+	}
 }
 
 static void run_voice(xp_t *xp, int n)
@@ -983,6 +1012,14 @@ static bool special(const xp_slot_t *s, int which)
 	return s->function == 0 && s->input == which;
 }
 
+static void decode_cram(xp_slot_t *s, uint16_t c)
+{
+	const int32_t mantissa = (int32_t)(int16_t)(c << 2) >> 2;
+	s->cram = c;
+	s->coefficient = mantissa << shift_select[c >> 14];
+	s->raw = bit(c, 15) ? (int32_t)((c & 0x3fff) << 13) : mantissa;
+}
+
 void xp_decode_program(xp_t *xp)
 {
 	const uint16_t *pram = &xp->regs[XP_PRAM_BASE >> 1];
@@ -992,7 +1029,6 @@ void xp_decode_program(xp_t *xp)
 	{
 		const uint32_t w = ((uint32_t)pram[i * 2] << 16) | pram[i * 2 + 1];
 		const uint16_t c = cram[i];
-		const int32_t mantissa = (int32_t)(int16_t)(c << 2) >> 2;
 		xp_slot_t *s = &xp->slots[i];
 		s->st = (w >> 14) & 3;
 		s->word = (w >> 6) & 0xff;
@@ -1002,9 +1038,7 @@ void xp_decode_program(xp_t *xp)
 		s->eram_op = 0;
 		s->eram_second = 0;
 		s->eram_offset = 0;
-		s->cram = c;
-		s->coefficient = mantissa << shift_select[c >> 14];
-		s->raw = bit(c, 15) ? (int32_t)((c & 0x3fff) << 13) : mantissa;
+		decode_cram(s, c);
 		if (special(s, XP_SPECIAL_BRANCH) && i < slot_count(xp))
 			xp->branching = true;
 	}
@@ -1033,10 +1067,13 @@ void xp_schedule(xp_t *xp)
 	int strobes_a = 0, strobes_bcd = 0, position = 0;
 
 	const int base = ramp_base(xp);
+	xp->strobe_count = 0;
 	for (int i = 0; i < XP_DSP_SLOTS; i++)
 		reads[i] = s[i].eram_op == 1 || (special(&s[i], XP_SPECIAL_INDEXED_READ) && !s[i].eram_second);
 	for (int i = 0; i < XP_DSP_SLOTS; i++)
 	{
+		if ((s[i].ext == 1 || s[i].ext == 2) && i < slot_count(xp))
+			xp->strobe_slots[xp->strobe_count++] = (uint16_t)i;
 		o[i].lands = i >= 2 && reads[i - 2];
 		o[i].now_valid = s[i].st == 1 && s[i].word < base;
 		o[i].gain_load = s[i].st == 1 && s[i].word >= base;
@@ -1090,25 +1127,25 @@ static int32_t take_port_b(xp_t *xp, int group)
 
 static void frame_ports(xp_t *xp)
 {
-	const int n = slot_count(xp);
-	for (int i = 0; i < n; i++)
+	const int n = xp->strobe_count;
+	for (int k = 0; k < n; k++)
 	{
-		const xp_sched_t *o = &xp->sched[i];
+		const xp_sched_t *o = &xp->sched[xp->strobe_slots[k]];
 		if (o->strobe_a != 0xff)
 		{
 			xp->port_a_out[o->strobe_a] = clamp24(xp->iram[cell_of(o->position, xp->parity ^ 1)]);
 			xp->dsp.port_a_return[o->strobe_a] = take_port_a(xp, o->strobe_a);
 		}
 	}
-	for (int i = 0; i < n; i++)
+	for (int k = 0; k < n; k++)
 	{
-		const xp_sched_t *o = &xp->sched[i];
+		const xp_sched_t *o = &xp->sched[xp->strobe_slots[k]];
 		if (o->strobe_bcd != 0xff && o->strobe_bcd % 3 == 0)
 			xp->dsp.port_b_pair[(o->strobe_bcd / 3) & 1] = take_port_b(xp, o->strobe_bcd / 3);
 	}
-	for (int i = 0; i < n; i++)
+	for (int k = 0; k < n; k++)
 	{
-		const xp_sched_t *o = &xp->sched[i];
+		const xp_sched_t *o = &xp->sched[xp->strobe_slots[k]];
 		if (o->strobe_bcd != 0xff)
 			emit_port(xp, o->position, o->strobe_bcd);
 	}
@@ -1143,6 +1180,7 @@ static void clock_strobe_bcd(xp_t *xp)
 #define XP_REG_ERAM SLJIT_S5
 
 #define CELL(field) SLJIT_MEM1(SLJIT_S0), (sljit_sw)offsetof(xp_t, field)
+#define SLOT_CELL(i, field) SLJIT_MEM1(SLJIT_S0), (sljit_sw)(offsetof(xp_t, slots) + (size_t)(i) * sizeof(xp_slot_t) + offsetof(xp_slot_t, field))
 #define IRAM_CELL(c) SLJIT_MEM1(SLJIT_S0), (sljit_sw)(offsetof(xp_t, iram) + (size_t)(c) * 4)
 
 static void e_mov(jit_builder_t *b, sljit_s32 dst, sljit_s32 src, sljit_sw srcw)
@@ -1324,7 +1362,7 @@ static void e_factor(jit_builder_t *b, int factor_select, bool complement)
 }
 
 /* the ALU functions both encodings share: p is XP_REG_PPREV, r the read latch */
-static void e_alu(jit_builder_t *b, int fn, int mode, int32_t raw)
+static void e_alu(jit_builder_t *b, int fn, int mode, sljit_s32 raw, sljit_sw raww)
 {
 	switch (fn)
 	{
@@ -1372,29 +1410,29 @@ static void e_alu(jit_builder_t *b, int fn, int mode, int32_t raw)
 	case 0xd:
 		if (mode < 3)
 		{
-			sljit_emit_op2(b->c, mode == 0 ? SLJIT_AND : mode == 1 ? SLJIT_OR : SLJIT_XOR, XP_REG_ACC, 0, XP_REG_ACC, 0, SLJIT_IMM, raw);
+			sljit_emit_op2(b->c, mode == 0 ? SLJIT_AND : mode == 1 ? SLJIT_OR : SLJIT_XOR, XP_REG_ACC, 0, XP_REG_ACC, 0, raw, raww);
 			e_wrap29(b, XP_REG_ACC);
 		}
 		break;
 	case 0xe:
 		if (mode < 2)
-			e_minmax(b, XP_REG_ACC, SLJIT_IMM, raw, mode == 1);
+			e_minmax(b, XP_REG_ACC, raw, raww, mode == 1);
 		break;
 	case 0xf:
 		switch (mode)
 		{
 		case 0:
-			e_add(b, XP_REG_ACC, XP_REG_ACC, SLJIT_IMM, raw);
+			e_add(b, XP_REG_ACC, XP_REG_ACC, raw, raww);
 			break;
 		case 1:
 			e_load(b, SLJIT_R3, CELL(dsp.r));
-			e_add(b, XP_REG_ACC, SLJIT_R3, SLJIT_IMM, raw);
+			e_add(b, XP_REG_ACC, SLJIT_R3, raw, raww);
 			break;
 		case 2:
-			e_add(b, XP_REG_ACC, XP_REG_PPREV, SLJIT_IMM, raw);
+			e_add(b, XP_REG_ACC, XP_REG_PPREV, raw, raww);
 			break;
 		default:
-			e_sub(b, XP_REG_ACC, SLJIT_IMM, raw, XP_REG_ACC, 0);
+			e_sub(b, XP_REG_ACC, raw, raww, XP_REG_ACC, 0);
 			break;
 		}
 		break;
@@ -1460,7 +1498,7 @@ static void e_parallel(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o
 		e_sub(b, XP_REG_ACC, XP_REG_PPREV, 0, SLJIT_R3, 0);
 		break;
 	default:
-		e_alu(b, fn, input, s->raw);
+		e_alu(b, fn, input, SLJIT_IMM, s->raw);
 		break;
 	}
 
@@ -1505,7 +1543,7 @@ static void e_parallel(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o
 /* the grid: the multiply input by col[5:4] and the function by col[3:0]; a slot's product is left in R2
    and its input in R0.  Returns 0 when the slot issued no multiply and the latches stand, 1 when both
    commit, 2 when the parallel op has already committed its input. */
-static int e_execute(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o)
+static int e_execute(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t *o, bool live)
 {
 	if (special(s, XP_SPECIAL_PARALLEL))
 	{
@@ -1525,13 +1563,25 @@ static int e_execute(jit_builder_t *b, const xp_slot_t *s, const xp_sched_t *o)
 			e_load(b, SLJIT_R0, CELL(dsp.port_b_in));
 		else
 			e_operand(b, mode);
-		e_mul13(b, SLJIT_R2, SLJIT_R0, SLJIT_IMM, s->coefficient);
+		if (live)
+		{
+			e_load(b, SLJIT_R3, SLOT_CELL(i, coefficient));
+			e_mul13(b, SLJIT_R2, SLJIT_R0, SLJIT_R3, 0);
+		}
+		else
+			e_mul13(b, SLJIT_R2, SLJIT_R0, SLJIT_IMM, s->coefficient);
 	}
-	e_alu(b, fn, mode, s->raw);
+	if (live)
+	{
+		e_load(b, SLJIT_R4, SLOT_CELL(i, raw));
+		e_alu(b, fn, mode, SLJIT_R4, 0);
+	}
+	else
+		e_alu(b, fn, mode, SLJIT_IMM, s->raw);
 	return issued ? 1 : 0;
 }
 
-static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t *o, int parity, bool by_pc)
+static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t *o, int parity, bool by_pc, bool live)
 {
 	e_mov(b, XP_REG_ABEF, XP_REG_ACC, 0);
 
@@ -1582,7 +1632,7 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 	if (s->st == 1)
 		e_load(b, SLJIT_R1, IRAM_CELL(cell_of(s->word, parity)));
 
-	const int issued = e_execute(b, s, o);
+	const int issued = e_execute(b, i, s, o, live && s->function != 0);
 
 	if (o->gain_load)
 	{
@@ -1694,7 +1744,7 @@ static bool compile_by_pc(xp_t *xp, int parity)
 	{
 		const xp_slot_t *s = &xp->slots[pc];
 		labels[pc] = sljit_emit_label(b.c);
-		e_slot(&b, pc, s, &xp->sched[pc], parity, true);
+		e_slot(&b, pc, s, &xp->sched[pc], parity, true, xp->live[pc]);
 
 		e_load(&b, SLJIT_R3, CELL(dsp.cycle));
 		sljit_emit_op2(b.c, SLJIT_ADD, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 1);
@@ -1734,7 +1784,7 @@ static bool compile_parity(xp_t *xp, int parity)
 
 	e_prologue(&b);
 	for (int i = 0; i < slot_count(xp); i++)
-		e_slot(&b, i, &xp->slots[i], &xp->sched[i], parity, false);
+		e_slot(&b, i, &xp->slots[i], &xp->sched[i], parity, false, xp->live[i]);
 	e_store(&b, CELL(dsp.acc), XP_REG_ACC);
 
 	if (!jit_end(&b, xp->jit, code))
@@ -1746,6 +1796,7 @@ static bool compile_parity(xp_t *xp, int parity)
 static bool compile_program(xp_t *xp)
 {
 	xp_schedule(xp);
+	xp->compiles++;
 	if (xp->branching)
 		return compile_by_pc(xp, 0) && compile_by_pc(xp, 1);
 	return compile_parity(xp, 0) && compile_parity(xp, 1);
@@ -1756,6 +1807,7 @@ static bool compile_program(xp_t *xp)
 static bool compile_program(xp_t *xp)
 {
 	xp_schedule(xp);
+	xp->compiles++;
 	xp->frame[0] = xp->frame[1] = NULL;
 	return false;
 }
@@ -1793,17 +1845,20 @@ static void run_dsp(xp_t *xp)
 
 void xp_run_frame(xp_t *xp)
 {
-	xp->bus_written = 0;
 	xp->irq_frame_used = false;
+	clear_named_words(xp);
 	for (int n = 0; n < voice_count(xp); n++)
 	{
-		const int32_t output = running(xp, n) ? wrap24((int32_t)page(xp, n, XP_PAGE_OUTPUT)) : 0;
-		for (int bank = 0; bank < 4; bank++)
-			deposit(xp, n, bank, output);
-		if (running(xp, n))
-			run_voice_watched(xp, n);
-		else
+		if (!running(xp, n))
+		{
 			run_voice(xp, n);
+			continue;
+		}
+		const int32_t output = wrap24((int32_t)page(xp, n, XP_PAGE_OUTPUT));
+		if (output)
+			for (int bank = 0; bank < 4; bank++)
+				deposit(xp, n, bank, output);
+		run_voice_watched(xp, n);
 	}
 
 	run_dsp(xp);
