@@ -118,8 +118,9 @@ The **wide output rail** is a box on the same tab.  The unit's DSP saturates the
 converters at 24 bits, and a busy song runs into that ceiling and clips there, as it does on the real
 thing.  Ticking the box gives those words 29 bits -- the width of the DSP's own accumulator, 30 dB
 above the ceiling -- and changes nothing below it, so the sound stays the unit's and only what would
-have been chopped off is kept.  The wide rail plays that much quieter; the volume knob brings the
-level back.
+have been chopped off is kept.  The level does not move: the volume knob has the same scale on
+either rail, and what the wide rail keeps is only lost again where the knob leaves it above full
+scale at the sound card, so turn the knob down for a song that used to clip.
 
 ## The settings file
 

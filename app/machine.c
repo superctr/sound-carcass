@@ -520,11 +520,12 @@ static void handle(machine_t *mc, const command_t *c)
 	}
 }
 
-static void to_s16(const int32_t *in, int16_t *out, size_t samples, float gain, int rail)
+static void to_s16(const int32_t *in, int16_t *out, size_t samples, float gain)
 {
+	const float scale = gain * (1.0f / 256);
 	for (size_t n = 0; n < samples; n++)
 	{
-		float v = (float)(in[n] >> (rail - 16)) * gain;
+		float v = (float)in[n] * scale;
 		out[n] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
 	}
 }
@@ -535,7 +536,7 @@ static void render_block(machine_t *mc, size_t n)
 	int16_t pcm[BLOCK_MAX * 2];
 	int32_t *const out[2] = { raw, NULL };
 	scemu_render(mc->m, out, n);
-	to_s16(raw, pcm, n * 2, mc->gain, mc->rail);
+	to_s16(raw, pcm, n * 2, mc->gain);
 	if (mc->audio)
 	{
 		audio_push(mc->audio, pcm, n);
