@@ -131,6 +131,8 @@ typedef struct xp_sched
 	uint8_t strobe_a;     /* the ordinal of an `ext=1` strobe, else 0xff */
 	uint8_t strobe_bcd;   /* the ordinal of an `ext=2` strobe, else 0xff */
 	uint8_t position;     /* the word position a strobe clocks out */
+	uint8_t eram_rail;    /* an ERAM write saturates at these bits instead of 24; 0 = 24 */
+	uint8_t latch_clamp;  /* an ERAM read is saturated to 24 bits as it lands */
 } xp_sched_t;
 
 struct xp;
