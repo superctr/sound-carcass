@@ -37,12 +37,15 @@ battery-backed settings memory, can be saved and restored.
 
 ## Tools
 
-`scemu-cli <sc88|sc88pro> <romdir> <out.wav> [seconds]` boots the machine and renders to a WAV file.
+`scemu-cli <sc88|sc88pro> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--state boot.state] [--rail BITS]
+...` boots the machine (or loads a saved state, saving one after the boot when the file is not there) and
+renders a song to a WAV file; `--rail 29` widens the DSP's output rail for the busy songs that clip on the
+unit's 24 bits.
 
 `scplay song.mid` plays a Standard MIDI File to the speakers with the front panel drawn in the terminal:
 the LCD's text fields, the sixteen level bars animating from the CGRAM patterns the firmware writes, the
-LEDs and a clock, with the panel buttons on the keyboard.  It finds its ROM images by itself — a zip or a
-directory named after the model, beside the program or in `~/.mame/roms` — boots the firmware once and
+LEDs and a clock, with the panel buttons on the keyboard.  It finds its ROM images by itself — recognised by
+content, in any zip or directory beside the program or in `~/.mame/roms` (`docs/roms.md`) — boots the firmware once and
 caches the booted machine, so later runs start instantly from factory settings (`--keep-settings` keeps
 the machine's settings memory across sessions instead).  `--no-audio --wav out.wav` renders a file
 about ten times faster than real time instead, and `--map sc55` (or `sc88`, `sc88pro`) plays every part

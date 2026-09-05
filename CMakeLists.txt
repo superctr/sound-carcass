@@ -35,6 +35,7 @@ add_library(scemu STATIC
 	lib/xp.c
 	lib/lsp.c
 	lib/sc88.c
+	lib/state.c
 	lib/gate_array.c
 	lib/sub_hle.c
 	lib/lcd.c

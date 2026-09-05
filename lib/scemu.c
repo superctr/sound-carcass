@@ -205,11 +205,23 @@ size_t scemu_state_save(const scemu_t *m, void *buffer, size_t size)
 bool scemu_state_load(scemu_t *m, const void *buffer, size_t size)
 {
 	uint32_t baud = m->machine.midi_baud;
+	int rail = m->machine.xp.rail_bits;
 	if (!sc88_state_load(&m->machine, buffer, size))
 		return false;
 	m->machine.midi_baud = baud;
+	xp_set_rail(&m->machine.xp, rail);
 	scemu_set_map(m, (scemu_map_t)m->map.map);
 	return true;
+}
+
+bool scemu_state_info(const void *buffer, size_t size, scemu_model_t *model, uint64_t *rom_id, uint64_t *frame)
+{
+	return sc88_state_info(buffer, size, model, rom_id, frame);
+}
+
+uint64_t scemu_rom_id(const scemu_t *m)
+{
+	return m->machine.rom_id;
 }
 
 size_t scemu_nvram_size(const scemu_t *m)
