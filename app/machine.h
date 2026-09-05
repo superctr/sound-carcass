@@ -41,16 +41,31 @@ typedef struct machine_state
 	uint32_t underruns;
 	char audio[192];          /* the output device, its host API and rate; "none" without one */
 	double latency;           /* seconds from the machine to the jack */
+	char error[256];          /* what went wrong last, empty when nothing did */
 	uint64_t generation;      /* counts up on every change of the above */
 } machine_state_t;
+
+/* The machine that is running and where its ROMs came from. */
+typedef struct machine_rom_info
+{
+	scemu_model_t model;
+	const char *label;        /* "SC-88Pro" */
+	char version[16];         /* the control ROM's version */
+	char origin[512];
+	uint32_t rate;            /* what the library renders at */
+} machine_rom_info_t;
 
 /* Loads the ROMs, creates the machine and starts its thread, which boots it
  * (from the cache when it can).  NULL with a message in err on failure. */
 machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size);
 void machine_stop(machine_t *mc);
 
-scemu_model_t machine_model(const machine_t *mc);
-const char *machine_model_label(const machine_t *mc);
+scemu_model_t machine_model(machine_t *mc);
+const char *machine_model_label(machine_t *mc);
+void machine_rom_info(machine_t *mc, machine_rom_info_t *out);
+/* a bitmask by scemu_model_t of the models whose ROM set was there when the
+ * machine last loaded one */
+unsigned machine_models_available(machine_t *mc);
 
 void machine_snapshot(machine_t *mc, machine_state_t *out);
 
@@ -64,6 +79,11 @@ void machine_button(machine_t *mc, scemu_button_t b, bool down);
 void machine_button_after(machine_t *mc, scemu_button_t b, bool down, unsigned ms);
 void machine_power(machine_t *mc, bool on);            /* off: silence; on: reset and boot, keys held */
 void machine_set_gain(machine_t *mc, float gain);       /* 0..1, applied to the output */
+void machine_set_dac_rail(machine_t *mc, int bits);     /* 24..29, kept across boots */
+/* Another machine, in place: the song is unloaded, the old instance goes and
+ * the new one boots from its cache.  On a failure the old one keeps running
+ * and the snapshot's error says why. */
+void machine_set_model(machine_t *mc, scemu_model_t model);
 /* Reopen the output on another device (audio.h's index, -1 the default)
  * with another buffer; 0 keeps the block. */
 void machine_set_audio(machine_t *mc, int device, unsigned block);

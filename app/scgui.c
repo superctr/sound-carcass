@@ -17,13 +17,14 @@
 #include "smf.h"
 #include "midi_io.h"
 #include "audio.h"
+#include "roms.h"
+#include "config.h"
 #include "combos.h"
 
 #define MIDI_PORTS_MAX 64
 #define AUDIO_DEVICES_MAX 64
 #define MIDI_SLOTS 5           /* MIDI IN A, MIDI IN B, MIDI OUT, Song A, Song B */
 
-#define DEFAULT_PITCH 4
 #define KNOB_STEP 0.05f
 
 typedef struct app
@@ -32,7 +33,13 @@ typedef struct app
 	panel_t *panel;
 	int pitch, scale;
 	uint32_t *frame;
-	GtkWidget *window, *area, *playlist_window, *list, *audio_window, *audio_label, *audio_drop, *block_drop;
+	GtkWidget *window, *area, *playlist_window, *list;
+	GtkWidget *settings_window, *notebook, *audio_label, *audio_drop, *block_drop;
+	GtkWidget *system_label, *model_check[3], *rail_check;
+	GtkWidget *logo_popover;
+	scgui_config_t cfg;
+	char config_file[1024];
+	guint config_timer;
 	GMainLoop *loop;
 	GPtrArray *songs;          /* char * paths */
 	int current;               /* index in songs, or -1 */
@@ -55,6 +62,9 @@ typedef struct app
 	int device_count;
 	int audio_choice;              /* index into devices, or -1 for the default */
 	int block_choice;
+	bool rail_wide;                /* the output rail: 29 bits instead of the unit's 24 */
+	bool system_updating;          /* the radio group is being set from the machine */
+	scemu_model_t shown_model;
 	GtkWidget *midi_drop[MIDI_SLOTS];
 	int midi_choice[MIDI_SLOTS];   /* index into ports, or -1 */
 	GtkWidget *combo_popover;
@@ -100,10 +110,6 @@ static void usage(FILE *fp)
 
 static int parse_options(int argc, char **argv, options_t *o, GPtrArray *songs)
 {
-	memset(o, 0, sizeof(*o));
-	o->midi_rate = 31250;
-	o->pitch = DEFAULT_PITCH;
-	o->tail = 4;
 	for (int n = 1; n < argc; n++)
 	{
 		const char *a = argv[n];
@@ -144,6 +150,58 @@ static int parse_options(int argc, char **argv, options_t *o, GPtrArray *songs)
 			g_ptr_array_add(songs, g_strdup(a));
 	}
 	return 1;
+}
+
+/* ---------------------------------------------------------------- the settings file */
+
+static const char *const reset_words[MACHINE_RESET_COUNT] = { "none", "gm", "gs", "gm2", "sc88-single", "sc88-double" };
+static const char *const map_words[] = { "native", "sc55", "sc88", "sc88pro" };
+#define MAP_WORDS ((int)(sizeof(map_words) / sizeof(map_words[0])))
+
+static int word_index(const char *const *words, int count, const char *word, int fallback)
+{
+	for (int n = 0; n < count; n++)
+		if (!strcmp(words[n], word))
+			return n;
+	return fallback;
+}
+
+/* the entry of a fixed set nearest the file's number */
+static int nearest_index(const int *values, int count, int want)
+{
+	int best = 0;
+	for (int n = 1; n < count; n++)
+		if (abs(values[n] - want) < abs(values[best] - want))
+			best = n;
+	return best;
+}
+
+static void options_from_config(const scgui_config_t *c, options_t *o)
+{
+	memset(o, 0, sizeof(*o));
+	o->model = c->model[0] ? c->model : NULL;
+	o->rom = c->rom[0] ? c->rom : NULL;
+	o->pitch = c->size;
+	o->map = (scemu_map_t)word_index(map_words, MAP_WORDS, c->map, SCEMU_MAP_NATIVE);
+	o->midi_rate = (uint32_t)c->midi_rate;
+	o->keep_settings = c->keep_settings;
+	o->tail = c->tail;
+}
+
+static gboolean config_flush(gpointer user)
+{
+	app_t *app = user;
+	app->config_timer = 0;
+	if (app->config_file[0])
+		config_save(&app->cfg, app->config_file);
+	return G_SOURCE_REMOVE;
+}
+
+/* a moment after the last change, so the knob does not write a file per step */
+static void config_touch(app_t *app)
+{
+	if (!app->config_timer)
+		app->config_timer = g_timeout_add(1000, config_flush, app);
 }
 
 /* ---------------------------------------------------------------- playlist */
@@ -289,6 +347,8 @@ static void midi_apply(app_t *app, int slot)
 		machine_midi_input(app->mc, slot, choice >= 0 ? app->ports[choice].in_id : -1);
 	else
 		machine_midi_output(app->mc, slot - 2, choice >= 0 ? app->ports[choice].out_id : -1);
+	snprintf(app->cfg.midi[slot], sizeof(app->cfg.midi[slot]), "%s", choice >= 0 ? app->ports[choice].name : "");
+	config_touch(app);
 }
 
 static void on_midi_selected(GObject *drop, GParamSpec *spec, gpointer user)
@@ -376,6 +436,8 @@ static void on_reset_selected(GObject *drop, GParamSpec *spec, gpointer user)
 	{
 		app->reset = (machine_reset_t)sel;
 		machine_set_reset(app->mc, app->reset);
+		snprintf(app->cfg.reset, sizeof(app->cfg.reset), "%s", reset_words[app->reset]);
+		config_touch(app);
 	}
 }
 
@@ -387,6 +449,8 @@ static void on_map_selected(GObject *drop, GParamSpec *spec, gpointer user)
 	{
 		app->map = (scemu_map_t)sel;
 		machine_set_map(app->mc, app->map);
+		snprintf(app->cfg.map, sizeof(app->cfg.map), "%s", map_words[app->map]);
+		config_touch(app);
 	}
 }
 
@@ -538,7 +602,7 @@ static void play_index(app_t *app, int index)
 
 /* ---------------------------------------------------------------- audio settings */
 
-static const unsigned block_sizes[] = { 64, 128, 256, 512, 1024 };
+static const int block_sizes[] = { 64, 128, 256, 512, 1024 };
 #define BLOCK_CHOICES ((int)(sizeof(block_sizes) / sizeof(block_sizes[0])))
 
 static void audio_readout(app_t *app)
@@ -554,7 +618,11 @@ static void audio_readout(app_t *app)
 static void audio_apply(app_t *app)
 {
 	int device = app->audio_choice >= 0 ? app->devices[app->audio_choice].index : -1;
-	machine_set_audio(app->mc, device, block_sizes[app->block_choice]);
+	machine_set_audio(app->mc, device, (unsigned)block_sizes[app->block_choice]);
+	snprintf(app->cfg.audio_device, sizeof(app->cfg.audio_device), "%s",
+	         app->audio_choice >= 0 ? app->devices[app->audio_choice].name : "");
+	app->cfg.audio_block = block_sizes[app->block_choice];
+	config_touch(app);
 }
 
 static void on_audio_selected(GObject *drop, GParamSpec *spec, gpointer user)
@@ -616,47 +684,242 @@ static void on_audio_refresh(GtkButton *b, gpointer user)
 		audio_apply(app);
 }
 
-static void audio_show(app_t *app)
+static GtkWidget *audio_page(app_t *app)
 {
-	if (!app->audio_window)
+	GtkWidget *grid = settings_grid();
+	app->audio_drop = gtk_drop_down_new(NULL, NULL);
+	g_signal_connect(app->audio_drop, "notify::selected", G_CALLBACK(on_audio_selected), app);
+	grid_row(grid, 0, "Output device", app->audio_drop);
+	GtkWidget *refresh = gtk_button_new_from_icon_name("view-refresh-symbolic");
+	gtk_widget_set_tooltip_text(refresh, "Look for devices again");
+	g_signal_connect(refresh, "clicked", G_CALLBACK(on_audio_refresh), app);
+	gtk_grid_attach(GTK_GRID(grid), refresh, 2, 0, 1, 1);
+
+	GtkStringList *blocks = gtk_string_list_new(NULL);
+	for (int n = 0; n < BLOCK_CHOICES; n++)
+	{
+		char text[64];
+		snprintf(text, sizeof(text), "%d frames, %.0f ms", block_sizes[n], block_sizes[n] * 1000.0 / 32000);
+		gtk_string_list_append(blocks, text);
+	}
+	app->block_drop = gtk_drop_down_new(G_LIST_MODEL(blocks), NULL);
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(app->block_drop), app->block_choice);
+	g_signal_connect(app->block_drop, "notify::selected", G_CALLBACK(on_block_selected), app);
+	grid_row(grid, 1, "Buffer", app->block_drop);
+
+	app->audio_label = gtk_label_new("");
+	gtk_label_set_xalign(GTK_LABEL(app->audio_label), 0);
+	gtk_widget_set_margin_top(app->audio_label, 8);
+	gtk_grid_attach(GTK_GRID(grid), app->audio_label, 0, 2, 3, 1);
+	audio_fill(app);
+	audio_readout(app);
+	return grid;
+}
+
+/* ---------------------------------------------------------------- system settings */
+
+static const scemu_model_t system_models[] = { SCEMU_MODEL_SC88, SCEMU_MODEL_SC88VL, SCEMU_MODEL_SC88PRO };
+#define SYSTEM_MODELS ((int)(sizeof(system_models) / sizeof(system_models[0])))
+
+#define RAIL_NARROW 24
+#define RAIL_WIDE 29
+
+static void system_readout(app_t *app)
+{
+	if (!app->system_label)
+		return;
+	machine_rom_info_t info;
+	machine_rom_info(app->mc, &info);
+	char text[900];
+	size_t at = (size_t)snprintf(text, sizeof(text), "Running: %s, control ROM %s\nROMs: %s",
+	                             info.label, info.version[0] ? info.version : "unknown", info.origin);
+	if (app->state.error[0] && at < sizeof(text))
+		snprintf(text + at, sizeof(text) - at, "\n%s", app->state.error);
+	gtk_label_set_text(GTK_LABEL(app->system_label), text);
+	app->system_updating = true;
+	for (int n = 0; n < SYSTEM_MODELS; n++)
+		if (system_models[n] == info.model)
+			gtk_check_button_set_active(GTK_CHECK_BUTTON(app->model_check[n]), TRUE);
+	app->system_updating = false;
+}
+
+static void on_model_toggled(GtkCheckButton *b, gpointer user)
+{
+	app_t *app = user;
+	if (app->system_updating || !gtk_check_button_get_active(b))
+		return;
+	scemu_model_t model = (scemu_model_t)GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "model"));
+	if (model == machine_model(app->mc))
+		return;
+	machine_set_model(app->mc, model);
+	snprintf(app->cfg.model, sizeof(app->cfg.model), "%s", scplay_model_name(model));
+	config_touch(app);
+}
+
+static void on_rail_toggled(GtkCheckButton *b, gpointer user)
+{
+	app_t *app = user;
+	bool wide = gtk_check_button_get_active(b);
+	if (wide == app->rail_wide)
+		return;
+	app->rail_wide = wide;
+	app->cfg.dac_rail = wide ? RAIL_WIDE : RAIL_NARROW;
+	machine_set_dac_rail(app->mc, app->cfg.dac_rail);
+	config_touch(app);
+}
+
+static GtkWidget *system_page(app_t *app)
+{
+	GtkWidget *grid = settings_grid();
+	unsigned have = machine_models_available(app->mc);
+	scemu_model_t model = machine_model(app->mc);
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+	app->system_updating = true;
+	for (int n = 0; n < SYSTEM_MODELS; n++)
+	{
+		GtkWidget *b = gtk_check_button_new_with_label(scplay_model_label(system_models[n]));
+		app->model_check[n] = b;
+		if (n)
+			gtk_check_button_set_group(GTK_CHECK_BUTTON(b), GTK_CHECK_BUTTON(app->model_check[0]));
+		if (system_models[n] == model)
+			gtk_check_button_set_active(GTK_CHECK_BUTTON(b), TRUE);
+		if (!(have & (1u << system_models[n])))
+		{
+			gtk_widget_set_sensitive(b, FALSE);
+			gtk_widget_set_tooltip_text(b, "ROM images not found");
+		}
+		g_object_set_data(G_OBJECT(b), "model", GINT_TO_POINTER((int)system_models[n]));
+		g_signal_connect(b, "toggled", G_CALLBACK(on_model_toggled), app);
+		gtk_box_append(GTK_BOX(box), b);
+	}
+	app->system_updating = false;
+	grid_row(grid, 0, "System", box);
+
+	app->system_label = gtk_label_new("");
+	gtk_label_set_xalign(GTK_LABEL(app->system_label), 0);
+	gtk_label_set_wrap(GTK_LABEL(app->system_label), TRUE);
+	gtk_label_set_wrap_mode(GTK_LABEL(app->system_label), PANGO_WRAP_WORD_CHAR);
+	gtk_label_set_max_width_chars(GTK_LABEL(app->system_label), 60);
+	gtk_widget_set_margin_top(app->system_label, 8);
+	gtk_widget_set_margin_bottom(app->system_label, 8);
+	gtk_grid_attach(GTK_GRID(grid), app->system_label, 0, 1, 3, 1);
+
+	GtkWidget *rail_label = gtk_label_new("Wide output rail: 29 bits, 30 dB of headroom above the unit's 24"
+	                                      " (busy songs no longer clip; the knob sets the level)");
+	gtk_label_set_xalign(GTK_LABEL(rail_label), 0);
+	gtk_label_set_wrap(GTK_LABEL(rail_label), TRUE);
+	gtk_label_set_max_width_chars(GTK_LABEL(rail_label), 52);
+	app->rail_check = gtk_check_button_new();
+	gtk_check_button_set_child(GTK_CHECK_BUTTON(app->rail_check), rail_label);
+	gtk_check_button_set_active(GTK_CHECK_BUTTON(app->rail_check), app->rail_wide);
+	g_signal_connect(app->rail_check, "toggled", G_CALLBACK(on_rail_toggled), app);
+	gtk_grid_attach(GTK_GRID(grid), app->rail_check, 0, 2, 3, 1);
+	system_readout(app);
+	return grid;
+}
+
+/* ---------------------------------------------------------------- the settings window */
+
+#define SETTINGS_TAB_AUDIO 0
+#define SETTINGS_TAB_SYSTEM 1
+
+static void settings_show(app_t *app, int tab)
+{
+	if (!app->settings_window)
 	{
 		GtkWidget *w = gtk_window_new();
-		gtk_window_set_title(GTK_WINDOW(w), "Audio");
+		gtk_window_set_title(GTK_WINDOW(w), "Settings");
 		gtk_window_set_transient_for(GTK_WINDOW(w), GTK_WINDOW(app->window));
 		gtk_window_set_hide_on_close(GTK_WINDOW(w), TRUE);
 		gtk_window_set_default_size(GTK_WINDOW(w), 480, -1);
 
-		GtkWidget *grid = settings_grid();
-		app->audio_drop = gtk_drop_down_new(NULL, NULL);
-		g_signal_connect(app->audio_drop, "notify::selected", G_CALLBACK(on_audio_selected), app);
-		grid_row(grid, 0, "Output device", app->audio_drop);
-		GtkWidget *refresh = gtk_button_new_from_icon_name("view-refresh-symbolic");
-		gtk_widget_set_tooltip_text(refresh, "Look for devices again");
-		g_signal_connect(refresh, "clicked", G_CALLBACK(on_audio_refresh), app);
-		gtk_grid_attach(GTK_GRID(grid), refresh, 2, 0, 1, 1);
-
-		GtkStringList *blocks = gtk_string_list_new(NULL);
-		for (int n = 0; n < BLOCK_CHOICES; n++)
-		{
-			char text[64];
-			snprintf(text, sizeof(text), "%u frames, %.0f ms", block_sizes[n], block_sizes[n] * 1000.0 / 32000);
-			gtk_string_list_append(blocks, text);
-		}
-		app->block_drop = gtk_drop_down_new(G_LIST_MODEL(blocks), NULL);
-		gtk_drop_down_set_selected(GTK_DROP_DOWN(app->block_drop), app->block_choice);
-		g_signal_connect(app->block_drop, "notify::selected", G_CALLBACK(on_block_selected), app);
-		grid_row(grid, 1, "Buffer", app->block_drop);
-
-		app->audio_label = gtk_label_new("");
-		gtk_label_set_xalign(GTK_LABEL(app->audio_label), 0);
-		gtk_widget_set_margin_top(app->audio_label, 8);
-		gtk_grid_attach(GTK_GRID(grid), app->audio_label, 0, 2, 3, 1);
-		gtk_window_set_child(GTK_WINDOW(w), grid);
-		app->audio_window = w;
-		audio_fill(app);
-		audio_readout(app);
+		app->notebook = gtk_notebook_new();
+		gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), audio_page(app), gtk_label_new("Audio"));
+		gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), system_page(app), gtk_label_new("System"));
+		gtk_window_set_child(GTK_WINDOW(w), app->notebook);
+		app->settings_window = w;
 	}
-	gtk_window_present(GTK_WINDOW(app->audio_window));
+	gtk_notebook_set_current_page(GTK_NOTEBOOK(app->notebook), tab);
+	gtk_window_present(GTK_WINDOW(app->settings_window));
+}
+
+/* ---------------------------------------------------------------- the logo menu */
+
+static void about_show(app_t *app)
+{
+	machine_rom_info_t info;
+	machine_rom_info(app->mc, &info);
+	char text[900];
+	snprintf(text, sizeof(text), "%s, control ROM %s\nROMs: %s\nRendering at %u Hz",
+	         info.label, info.version[0] ? info.version : "unknown", info.origin, info.rate);
+	GtkWidget *d = gtk_about_dialog_new();
+	gtk_about_dialog_set_program_name(GTK_ABOUT_DIALOG(d), "SoundCarcass");
+	gtk_about_dialog_set_comments(GTK_ABOUT_DIALOG(d), text);
+	gtk_about_dialog_set_license_type(GTK_ABOUT_DIALOG(d), GTK_LICENSE_BSD_3);
+	gtk_window_set_transient_for(GTK_WINDOW(d), GTK_WINDOW(app->window));
+	gtk_window_set_modal(GTK_WINDOW(d), TRUE);
+	gtk_window_present(GTK_WINDOW(d));
+}
+
+static void on_menu_playlist(GtkButton *b, gpointer user)
+{
+	app_t *app = user;
+	gtk_popover_popdown(GTK_POPOVER(app->logo_popover));
+	playlist_show(app);
+}
+
+static void on_menu_audio(GtkButton *b, gpointer user)
+{
+	app_t *app = user;
+	gtk_popover_popdown(GTK_POPOVER(app->logo_popover));
+	settings_show(app, SETTINGS_TAB_AUDIO);
+}
+
+static void on_menu_system(GtkButton *b, gpointer user)
+{
+	app_t *app = user;
+	gtk_popover_popdown(GTK_POPOVER(app->logo_popover));
+	settings_show(app, SETTINGS_TAB_SYSTEM);
+}
+
+static void on_menu_about(GtkButton *b, gpointer user)
+{
+	app_t *app = user;
+	gtk_popover_popdown(GTK_POPOVER(app->logo_popover));
+	about_show(app);
+}
+
+static GtkWidget *menu_item(const char *text, GCallback cb, app_t *app)
+{
+	GtkWidget *label = gtk_label_new(text);
+	gtk_label_set_xalign(GTK_LABEL(label), 0);
+	GtkWidget *item = gtk_button_new();
+	gtk_button_set_child(GTK_BUTTON(item), label);
+	gtk_button_set_has_frame(GTK_BUTTON(item), FALSE);
+	g_signal_connect(item, "clicked", cb, app);
+	return item;
+}
+
+static void logo_menu(app_t *app, double x, double y)
+{
+	if (!app->logo_popover)
+	{
+		app->logo_popover = gtk_popover_new();
+		gtk_widget_set_parent(app->logo_popover, app->area);
+		GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+		gtk_box_append(GTK_BOX(box), menu_item("Playlist and MIDI", G_CALLBACK(on_menu_playlist), app));
+		gtk_box_append(GTK_BOX(box), menu_item("Audio", G_CALLBACK(on_menu_audio), app));
+		gtk_box_append(GTK_BOX(box), menu_item("System", G_CALLBACK(on_menu_system), app));
+		GtkWidget *sep = gtk_separator_new(GTK_ORIENTATION_HORIZONTAL);
+		gtk_widget_set_margin_top(sep, 4);
+		gtk_widget_set_margin_bottom(sep, 4);
+		gtk_box_append(GTK_BOX(box), sep);
+		gtk_box_append(GTK_BOX(box), menu_item("About SoundCarcass", G_CALLBACK(on_menu_about), app));
+		gtk_popover_set_child(GTK_POPOVER(app->logo_popover), box);
+	}
+	GdkRectangle at = { (int)x, (int)y, 1, 1 };
+	gtk_popover_set_pointing_to(GTK_POPOVER(app->logo_popover), &at);
+	gtk_popover_popup(GTK_POPOVER(app->logo_popover));
 }
 
 /* ---------------------------------------------------------------- the panel */
@@ -701,8 +964,11 @@ static gboolean on_tick(gpointer user)
 		app->state = st;
 		panel_set_lcd(app->panel, &st.lcd);
 		panel_set_leds(app->panel, st.leds);
-		if (app->audio_window && gtk_widget_get_visible(app->audio_window))
+		if (app->settings_window && gtk_widget_get_visible(app->settings_window))
+		{
 			audio_readout(app);
+			system_readout(app);
+		}
 		if (song_changed)
 			set_title(app);
 		if (finished_now && app->current >= 0 && app->current + 1 < (int)app->songs->len)
@@ -717,6 +983,13 @@ static gboolean on_tick(gpointer user)
 			app->macro_after_boot = false;
 			g_timeout_add(app->macro_ms, macro_done, app);
 		}
+	}
+	scemu_model_t model = machine_model(app->mc);
+	if (model != app->shown_model)
+	{
+		app->shown_model = model;
+		set_title(app);
+		system_readout(app);
 	}
 	if (panel_dirty(app->panel))
 		gtk_widget_queue_draw(app->area);
@@ -769,7 +1042,10 @@ static void element_action(app_t *app, int e)
 		playlist_show(app);
 		break;
 	case PANEL_JACK_PHONES:
-		audio_show(app);
+		settings_show(app, SETTINGS_TAB_AUDIO);
+		break;
+	case PANEL_LOGO:
+		logo_menu(app, app->pointer_x, app->pointer_y);
 		break;
 	default:
 		break;
@@ -1111,6 +1387,8 @@ static gboolean on_scroll(GtkEventControllerScroll *c, double dx, double dy, gpo
 	app->knob = app->knob < 0 ? 0 : app->knob > 1 ? 1 : app->knob;
 	panel_set_knob(app->panel, app->knob);
 	machine_set_gain(app->mc, app->knob * app->knob);
+	app->cfg.volume = app->knob;
+	config_touch(app);
 	return TRUE;
 }
 
@@ -1159,24 +1437,43 @@ int main(int argc, char **argv)
 	app.current = -1;
 	app.pressed_element = -1;
 	app.opposite_element = -1;
-	app.reset = MACHINE_RESET_GS;
 	for (int n = 0; n < MIDI_SLOTS; n++)
 		app.midi_choice[n] = -1;
 	app.power = true;
-	app.knob = 0.75f;
 	app.audio_choice = -1;
-	app.block_choice = 2;      /* 256 frames */
+
+	config_defaults(&app.cfg);
+	if (config_path(app.config_file, sizeof(app.config_file)))
+	{
+		char complaint[512] = "";
+		if (!config_load(&app.cfg, app.config_file, complaint, sizeof(complaint)))
+			fprintf(stderr, "scgui: cannot read %s\n", app.config_file);
+		else if (complaint[0])
+			fprintf(stderr, "scgui: %s\n", complaint);
+	}
+	options_from_config(&app.cfg, &opt);
 
 	int rc = parse_options(argc, argv, &opt, app.songs);
 	if (rc <= 0)
 		return rc == 0 ? 0 : 2;
+
+	app.knob = app.cfg.volume;
+	app.reset = (machine_reset_t)word_index(reset_words, MACHINE_RESET_COUNT, app.cfg.reset, MACHINE_RESET_GS);
+	app.block_choice = nearest_index(block_sizes, BLOCK_CHOICES, app.cfg.audio_block);
+	app.rail_wide = app.cfg.dac_rail >= RAIL_WIDE;
+	app.device_count = audio_list(app.devices, AUDIO_DEVICES_MAX);
+	for (int n = 0; n < app.device_count; n++)
+		if (app.cfg.audio_device[0] && !strcmp(app.devices[n].name, app.cfg.audio_device))
+			app.audio_choice = n;
 
 	gtk_init();
 
 	char exe_dir[PATH_MAX];
 	session_exe_directory(argv[0], exe_dir, sizeof(exe_dir));
 	machine_options_t mo = { opt.model, opt.rom, exe_dir, opt.map, opt.midi_rate, opt.tail,
-	                         opt.keep_settings, opt.no_cache, opt.no_audio, -1, block_sizes[app.block_choice] };
+	                         opt.keep_settings, opt.no_cache, opt.no_audio,
+	                         app.audio_choice >= 0 ? app.devices[app.audio_choice].index : -1,
+	                         (unsigned)block_sizes[app.block_choice] };
 	char err[512];
 	app.mc = machine_start(&mo, err, sizeof(err));
 	if (!app.mc)
@@ -1186,6 +1483,26 @@ int main(int argc, char **argv)
 			fprintf(stderr, "scgui: put sc88pro.zip (or sc88.zip, sc88vl.zip) beside the program"
 			                " or in ~/.mame/roms, or give --rom\n");
 		return 1;
+	}
+
+	app.shown_model = machine_model(app.mc);
+	machine_set_reset(app.mc, app.reset);
+	machine_set_dac_rail(app.mc, app.rail_wide ? RAIL_WIDE : RAIL_NARROW);
+	/* the ties the file remembers, by the device's name; one whose device is
+	 * not here now keeps its place in the file for the next time */
+	app.port_count = machine_midi_list(app.mc, app.ports, MIDI_PORTS_MAX);
+	for (int slot = 0; slot < MIDI_SLOTS; slot++)
+	{
+		if (!app.cfg.midi[slot][0])
+			continue;
+		for (int n = 0; n < app.port_count; n++)
+		{
+			bool fits = midi_slot_is_input[slot] ? app.ports[n].readable : app.ports[n].writable;
+			if (fits && !strcmp(app.ports[n].name, app.cfg.midi[slot]))
+				app.midi_choice[slot] = n;
+		}
+		if (app.midi_choice[slot] >= 0)
+			midi_apply(&app, slot);
 	}
 
 	app.window = gtk_window_new();
@@ -1238,10 +1555,16 @@ int main(int argc, char **argv)
 	guint tick = g_timeout_add(33, on_tick, &app);
 	g_main_loop_run(app.loop);
 	g_source_remove(tick);
+	if (app.config_timer)
+		g_source_remove(app.config_timer);
+	if (app.config_file[0])
+		config_save(&app.cfg, app.config_file);
 
 	machine_stop(app.mc);
 	if (app.combo_popover)
 		gtk_widget_unparent(app.combo_popover);
+	if (app.logo_popover)
+		gtk_widget_unparent(app.logo_popover);
 	gtk_window_destroy(GTK_WINDOW(app.window));
 	free(app.frame);
 	panel_destroy(app.panel);

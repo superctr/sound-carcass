@@ -26,7 +26,7 @@
 typedef enum command_kind
 {
 	CMD_PLAY, CMD_PAUSE, CMD_STOP, CMD_BUTTON, CMD_POWER, CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT,
-	CMD_RESET, CMD_MAP, CMD_QUIT
+	CMD_RESET, CMD_MAP, CMD_RAIL, CMD_MODEL, CMD_QUIT
 } command_kind_t;
 
 typedef struct command
@@ -46,6 +46,7 @@ struct machine
 	scplay_audio_t *audio;
 	midi_io_t *midi;
 	machine_options_t opt;
+	char model_name[16];      /* opt.model points here once the model has been switched */
 	size_t block;             /* frames per render, the audio device's buffer */
 
 	pthread_t thread;
@@ -53,6 +54,8 @@ struct machine
 	command_t queue[QUEUE_SIZE];
 	int q_head, q_count;
 	machine_state_t state;
+	machine_rom_info_t info;
+	unsigned models;          /* a bit per scemu_model_t whose ROM set is there */
 
 	/* the thread's own */
 	smf_t smf;
@@ -64,6 +67,7 @@ struct machine
 	int timed_count;
 	uint64_t frames;          /* rendered since the start; what the timed keys wait on */
 	float gain;
+	int rail;
 	machine_reset_t reset;
 	double clock_start;
 	uint64_t clock_frames;
@@ -146,6 +150,7 @@ static void publish(machine_t *mc, bool booting)
 	pthread_mutex_lock(&mc->lock);
 	snprintf(s.song, sizeof(s.song), "%s", mc->state.song);
 	snprintf(s.title, sizeof(s.title), "%s", mc->state.title);
+	snprintf(s.error, sizeof(s.error), "%s", mc->state.error);
 	s.generation = mc->state.generation;
 	if (memcmp(&s.lcd, &mc->state.lcd, sizeof(s.lcd)) != 0 || s.leds != mc->state.leds || s.power != mc->state.power
 	    || s.booting != mc->state.booting || s.playing != mc->state.playing || s.paused != mc->state.paused
@@ -161,6 +166,30 @@ static void set_song(machine_t *mc, const char *song, const char *title)
 	pthread_mutex_lock(&mc->lock);
 	snprintf(mc->state.song, sizeof(mc->state.song), "%s", song ? song : "");
 	snprintf(mc->state.title, sizeof(mc->state.title), "%s", title ? title : "");
+	mc->state.generation++;
+	pthread_mutex_unlock(&mc->lock);
+}
+
+static void set_error(machine_t *mc, const char *text)
+{
+	pthread_mutex_lock(&mc->lock);
+	snprintf(mc->state.error, sizeof(mc->state.error), "%s", text ? text : "");
+	mc->state.generation++;
+	pthread_mutex_unlock(&mc->lock);
+}
+
+/* the machine's own thread looks for the other models' ROMs: the catalog
+ * behind it is not shared with another thread's load */
+static void set_rom_info(machine_t *mc)
+{
+	unsigned models = scplay_roms_available(mc->opt.rom, mc->opt.exe_dir);
+	pthread_mutex_lock(&mc->lock);
+	mc->models = models;
+	mc->info.model = mc->roms.model;
+	mc->info.label = scplay_model_label(mc->roms.model);
+	snprintf(mc->info.version, sizeof(mc->info.version), "%s", mc->roms.version);
+	snprintf(mc->info.origin, sizeof(mc->info.origin), "%s", mc->roms.origin);
+	mc->info.rate = mc->rate;
 	mc->state.generation++;
 	pthread_mutex_unlock(&mc->lock);
 }
@@ -218,6 +247,7 @@ static void boot(machine_t *mc, bool use_cache)
 	session_boot(&mc->session, use_cache, boot_progress, mc);
 	scemu_set_map(mc->m, mc->opt.map);
 	scemu_set_midi_rate(mc->m, mc->opt.midi_rate);
+	scemu_set_dac_rail(mc->m, mc->rail);
 	publish(mc, false);
 }
 
@@ -303,6 +333,7 @@ static void feed_events(machine_t *mc, size_t n)
 }
 
 static void render_block(machine_t *mc, size_t n);
+static void midi_out(const uint8_t *bytes, size_t count, void *user);
 
 /* every note and every sound off on every part of both ports, and time for
  * the firmware to act on it */
@@ -336,6 +367,58 @@ static void open_audio(machine_t *mc)
 	mc->audio = audio_open(mc->rate, mc->opt.audio_device, block, err, sizeof(err));
 	if (!mc->audio)
 		fprintf(stderr, "scgui: no audio (%s), running silently\n", err);
+}
+
+/* Another machine in place of this one: the new ROMs are loaded before the
+ * old instance goes, so a set that is not there leaves the old one playing. */
+static void switch_model(machine_t *mc, scemu_model_t model)
+{
+	const char *name = scplay_model_name(model);
+	if (!name || model == mc->roms.model)
+		return;
+	scplay_roms_t roms;
+	char err[256];
+	if (!scplay_roms_load(&roms, name, mc->opt.rom, mc->opt.exe_dir, err, sizeof(err)))
+	{
+		set_error(mc, err);
+		return;
+	}
+	scemu_t *m = scemu_create(roms.model, &roms.roms, NULL);
+	if (!m)
+	{
+		set_error(mc, scemu_error(NULL));
+		scplay_roms_free(&roms);
+		return;
+	}
+	bool was_on = mc->power;
+	if (was_on)
+	{
+		if (mc->have_smf)
+			quiet(mc);
+		session_save_settings(&mc->session);
+	}
+	unload_song(mc);
+	set_song(mc, "", "");
+	mc->power = false;
+	session_free(&mc->session);
+	scemu_destroy(mc->m);
+	scplay_roms_free(&mc->roms);
+
+	mc->roms = roms;
+	mc->m = m;
+	mc->rate = scemu_sample_rate(m);
+	snprintf(mc->model_name, sizeof(mc->model_name), "%s", name);
+	mc->opt.model = mc->model_name;
+	session_init(&mc->session, mc->m, mc->roms.model_name, mc->roms.hash, mc->opt.no_cache, mc->opt.keep_settings);
+	scemu_set_midi_out(mc->m, midi_out, mc);
+	set_error(mc, "");
+	set_rom_info(mc);
+	if (was_on)
+		boot(mc, true);
+	else
+		publish(mc, false);
+	mc->clock_start = now_seconds();
+	mc->clock_frames = 0;
 }
 
 static void handle(machine_t *mc, const command_t *c)
@@ -409,16 +492,23 @@ static void handle(machine_t *mc, const command_t *c)
 		if (mc->power)
 			scemu_set_map(mc->m, mc->opt.map);
 		break;
+	case CMD_RAIL:
+		mc->rail = c->a;
+		scemu_set_dac_rail(mc->m, mc->rail);
+		break;
+	case CMD_MODEL:
+		switch_model(mc, (scemu_model_t)c->a);
+		break;
 	case CMD_QUIT:
 		break;
 	}
 }
 
-static void to_s16(const int32_t *in, int16_t *out, size_t samples, float gain)
+static void to_s16(const int32_t *in, int16_t *out, size_t samples, float gain, int rail)
 {
 	for (size_t n = 0; n < samples; n++)
 	{
-		float v = (float)(in[n] >> 8) * gain;
+		float v = (float)(in[n] >> (rail - 16)) * gain;
 		out[n] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
 	}
 }
@@ -429,7 +519,7 @@ static void render_block(machine_t *mc, size_t n)
 	int16_t pcm[BLOCK_MAX * 2];
 	int32_t *const out[2] = { raw, NULL };
 	scemu_render(mc->m, out, n);
-	to_s16(raw, pcm, n * 2, mc->gain);
+	to_s16(raw, pcm, n * 2, mc->gain, mc->rail);
 	if (mc->audio)
 	{
 		audio_push(mc->audio, pcm, n);
@@ -599,13 +689,17 @@ machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size)
 		return NULL;
 	}
 	mc->rate = scemu_sample_rate(mc->m);
+	snprintf(mc->model_name, sizeof(mc->model_name), "%s", mc->roms.model_name);
+	mc->opt.model = mc->model_name;
 	session_init(&mc->session, mc->m, mc->roms.model_name, mc->roms.hash, o->no_cache, o->keep_settings);
 	open_audio(mc);
 	mc->gain = 0.75f * 0.75f;
+	mc->rail = 24;
 	mc->reset = MACHINE_RESET_GS;
 	mc->midi = midi_io_open("scgui");
 	scemu_set_midi_out(mc->m, midi_out, mc);
 	pthread_mutex_init(&mc->lock, NULL);
+	set_rom_info(mc);
 	if (pthread_create(&mc->thread, NULL, run, mc) != 0)
 	{
 		snprintf(err, err_size, "cannot start the machine's thread");
@@ -637,8 +731,36 @@ void machine_stop(machine_t *mc)
 	free(mc);
 }
 
-scemu_model_t machine_model(const machine_t *mc) { return mc->roms.model; }
-const char *machine_model_label(const machine_t *mc) { return scplay_model_label(mc->roms.model); }
+scemu_model_t machine_model(machine_t *mc)
+{
+	pthread_mutex_lock(&mc->lock);
+	scemu_model_t model = mc->info.model;
+	pthread_mutex_unlock(&mc->lock);
+	return model;
+}
+
+const char *machine_model_label(machine_t *mc)
+{
+	pthread_mutex_lock(&mc->lock);
+	const char *label = mc->info.label;
+	pthread_mutex_unlock(&mc->lock);
+	return label;
+}
+
+void machine_rom_info(machine_t *mc, machine_rom_info_t *out)
+{
+	pthread_mutex_lock(&mc->lock);
+	*out = mc->info;
+	pthread_mutex_unlock(&mc->lock);
+}
+
+unsigned machine_models_available(machine_t *mc)
+{
+	pthread_mutex_lock(&mc->lock);
+	unsigned models = mc->models;
+	pthread_mutex_unlock(&mc->lock);
+	return models;
+}
 
 void machine_play(machine_t *mc, const char *path)
 {
@@ -679,6 +801,18 @@ void machine_power(machine_t *mc, bool on)
 void machine_set_gain(machine_t *mc, float gain)
 {
 	command_t c = { CMD_GAIN, 0, 0, 0, gain, NULL };
+	post(mc, c);
+}
+
+void machine_set_dac_rail(machine_t *mc, int bits)
+{
+	command_t c = { CMD_RAIL, bits < 24 ? 24 : bits > 29 ? 29 : bits, 0, 0, 0, NULL };
+	post(mc, c);
+}
+
+void machine_set_model(machine_t *mc, scemu_model_t model)
+{
+	command_t c = { CMD_MODEL, (int)model, 0, 0, 0, NULL };
 	post(mc, c);
 }
 

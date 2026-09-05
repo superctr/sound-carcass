@@ -5,14 +5,14 @@ from a playlist, with the panel's buttons under the mouse.
 
     scgui [options] [file.mid ...]
 
-It finds its ROM images the way `scplay` does (a zip or directory named after the model beside the
-program or in `~/.mame/roms`, or `--rom`), and boots the firmware once, caching the booted machine.
-Files on the command line become the playlist and the first one plays.
+It finds its ROM images the way `scplay` does (recognised by their contents in `--rom`, beside the
+program or in `~/.mame/roms`, whatever they are named), and boots the firmware once, caching the booted
+machine.  Files on the command line become the playlist and the first one plays.
 
 | option | |
 |---|---|
 | `--model sc88pro \| sc88 \| sc88vl` | which machine; the default is the SC-88Pro when its ROMs are found |
-| `--rom PATH` | a zip or a directory holding the ROM images |
+| `--rom PATH` | a zip or a directory holding the ROM images, whatever they are named |
 | `--size 4 \| 8` | the window size, named by the display's dot pitch in pixels: 4 is 1399 × 440, 8 twice that.  On a HiDPI screen the 8 is used for a 4 automatically |
 | `--map sc55 \| sc88 \| sc88pro` | play every part from that instrument map, as in scplay |
 | `--midi-rate BAUD` | the speed of the MIDI input, as in scplay |
@@ -36,7 +36,9 @@ Files on the command line become the playlist and the first one plays.
   machine itself has no volume control in software.  The knob's push switch (PREVIEW) is a button.
 - **The power switch** switches the emulated unit off and on.  Switching on boots the firmware for
   real (not from the cache), with any queued keys held, so the power-on combinations work.
-- **The MIDI IN B jack** opens the playlist, **the PHONES jack** the audio window.
+- **The MIDI IN B jack** opens the playlist, **the PHONES jack** the Settings window.
+- **The logotype** at the bottom left opens a menu where the pointer is: the playlist, the Settings
+  window on its Audio or its System tab, and About.
 
 - **Combinations from the manual**: a middle-click (or Ctrl and the right button) on a key opens a
   menu of every multi-key operation the owner's manual and the service notes list for that key, each
@@ -85,16 +87,41 @@ every millisecond, stamps each message as it is seen, and places it one buffer p
 after that on the machine's own clock, so what you play lands with the same delay every time -- the
 jitter is the polling, about a millisecond, instead of a whole buffer.
 
-## Audio
+## Settings
 
-The PHONES jack opens the audio window: the output device (every device PortAudio finds, on every host
-API it was built with -- on Linux ALSA, JACK and PulseAudio -- or the host's default), the device's
-buffer (64 to 1024 frames, 2 to 32 ms at the machine's 32 kHz; 256 by default), and a readout of the
-device in use, the latency from the machine to the jack and the underruns so far.  The machine keeps
-two buffers ahead of the device -- two of the buffer chosen, or of the period the host actually takes
-when that is larger, as under JACK, where the server sets it; a smaller buffer means less delay from
-a key to the sound and more chance of a dropout on a busy host.  A device that will not open at 32 kHz runs at its own rate, and
-the output is resampled on the way (a 32-tap windowed sinc).
+The PHONES jack opens the Settings window, which has two tabs.
+
+**Audio**: the output device (every device PortAudio finds, on every host API it was built with -- on
+Linux ALSA, JACK and PulseAudio -- or the host's default), the device's buffer (64 to 1024 frames, 2
+to 32 ms at the machine's 32 kHz; 256 by default), and a readout of the device in use, the latency
+from the machine to the jack and the underruns so far.  The machine keeps two buffers ahead of the
+device -- two of the buffer chosen, or of the period the host actually takes when that is larger, as
+under JACK, where the server sets it; a smaller buffer means less delay from a key to the sound and
+more chance of a dropout on a busy host.  A device that will not open at 32 kHz runs at its own rate,
+and the output is resampled on the way (a 32-tap windowed sinc).
+
+**System**: which machine this is -- SC-88, SC-88VL or SC-88Pro.  A model whose ROM images were not
+found is greyed out.  Choosing another one switches at once: the song is unloaded, the machine is
+replaced and the new one comes up from its own boot cache, so it is instant from the second time on;
+the sound card and the MIDI ties stay as they are.  Below the choice is what is running: the model,
+its control ROM version, and the file its images came from.
+
+The **wide output rail** is a box on the same tab.  The unit's DSP saturates the words it hands the
+converters at 24 bits, and a busy song runs into that ceiling and clips there, as it does on the real
+thing.  Ticking the box gives those words 29 bits -- the width of the DSP's own accumulator, 30 dB
+above the ceiling -- and changes nothing below it, so the sound stays the unit's and only what would
+have been chopped off is kept.  The wide rail plays that much quieter; the volume knob brings the
+level back.
+
+## The settings file
+
+`$XDG_CONFIG_HOME/scemu/scgui.conf`, or `~/.config/scemu/scgui.conf`, keeps what the windows set: the
+machine and where its ROMs are, the window size, the output device and its buffer, the volume knob
+and the rail, the five MIDI ties by the device's name, the message before each song, the instrument
+map, the MIDI speed, whether the settings memory is kept, and the tail.  It is read at start, written
+a moment after a setting changes, and written again on exit.  An option on the command line overrides
+the file for that run and does not change it.  The file is `key = value` text with `#` comments; a
+line it cannot make sense of is complained about on stderr and every other line is still taken.
 
 ## Building
 
