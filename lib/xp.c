@@ -327,6 +327,7 @@ static uint32_t translate(const xp_t *xp, uint32_t address)
 static void write_run_mask(xp_t *xp, int word, uint16_t data);
 static void commit_run_mask(xp_t *xp);
 static void decode_cram(xp_slot_t *s, uint16_t c);
+static uint16_t decode_offset(const xp_t *xp, int i);
 
 uint16_t xp_read(xp_t *xp, uint32_t offset)
 {
@@ -387,14 +388,16 @@ void xp_write(xp_t *xp, uint32_t offset, uint16_t data, uint16_t mask)
 	}
 	else if (address < XP_IRAM_BASE)
 	{
-		xp->regs[address >> 1] = data;
 		const int i = (int)((address - XP_CRAM_BASE) >> 1);
-		if (xp->live[i] && !xp->program_dirty && xp->slots[i].function != 0)
+		if (xp->regs[address >> 1] == data)
+			return;
+		xp->regs[address >> 1] = data;
+		if ((xp->live[i] & XP_LIVE_CRAM) && !xp->program_dirty && xp->slots[i].function != 0)
 			decode_cram(&xp->slots[i], data);
 		else
 		{
 			if (xp->frame[0])
-				xp->live[i] = 1;
+				xp->live[i] |= XP_LIVE_CRAM;
 			xp->program_dirty = true;
 		}
 	}
@@ -416,9 +419,24 @@ void xp_write(xp_t *xp, uint32_t offset, uint16_t data, uint16_t mask)
 			xp->write_latch = data;
 		else
 		{
+			const int j = (int)((address - XP_PRAM_BASE) >> 2);
+			const uint32_t was = ((uint32_t)xp->regs[(address >> 1) & ~1] << 16) | xp->regs[address >> 1];
+			const uint32_t now = ((uint32_t)xp->write_latch << 16) | data;
+			const uint32_t changed = was ^ now;
 			xp->regs[(address >> 1) & ~1] = xp->write_latch;
 			xp->regs[address >> 1] = data;
-			xp->program_dirty = true;
+			if (!changed)
+				return;
+			const int first = xp->slots[j].eram_op && !(changed & ~(0x7fu << 16)) ? j
+				: xp->slots[j].eram_second && !(changed & ~(0x1ffu << 16)) ? j - 1 : -1;
+			if (first >= 0 && (xp->live[first] & XP_LIVE_OFFSET) && !xp->program_dirty)
+				xp->slots[first].eram_offset = decode_offset(xp, first);
+			else
+			{
+				if (first >= 0 && xp->frame[0])
+					xp->live[first] |= XP_LIVE_OFFSET;
+				xp->program_dirty = true;
+			}
 		}
 	}
 	else if (address < XP_SEND_BASE)
@@ -1012,6 +1030,14 @@ static bool special(const xp_slot_t *s, int which)
 	return s->function == 0 && s->input == which;
 }
 
+static uint16_t decode_offset(const xp_t *xp, int i)
+{
+	const uint16_t *pram = &xp->regs[XP_PRAM_BASE >> 1];
+	const uint32_t w = ((uint32_t)pram[i * 2] << 16) | pram[i * 2 + 1];
+	const uint32_t next = ((uint32_t)pram[i * 2 + 2] << 16) | pram[i * 2 + 3];
+	return (uint16_t)((((w >> 16) & 0x7f) << 9) | ((next >> 16) & 0x1ff));
+}
+
 static void decode_cram(xp_slot_t *s, uint16_t c)
 {
 	const int32_t mantissa = (int32_t)(int16_t)(c << 2) >> 2;
@@ -1045,12 +1071,11 @@ void xp_decode_program(xp_t *xp)
 	for (int i = 0; i < XP_DSP_SLOTS - 1; )
 	{
 		const uint32_t w = ((uint32_t)pram[i * 2] << 16) | pram[i * 2 + 1];
-		const uint32_t next = ((uint32_t)pram[i * 2 + 2] << 16) | pram[i * 2 + 3];
 		const int op = (w >> 23) & 3;
 		if (op)
 		{
 			xp->slots[i].eram_op = (uint8_t)op;
-			xp->slots[i].eram_offset = (uint16_t)((((w >> 16) & 0x7f) << 9) | ((next >> 16) & 0x1ff));
+			xp->slots[i].eram_offset = decode_offset(xp, i);
 			xp->slots[i + 1].eram_second = 1;
 			i += 2;
 		}
@@ -1265,10 +1290,16 @@ static void e_mulq15(jit_builder_t *b, sljit_s32 dst, sljit_s32 a, sljit_s32 f, 
 }
 
 /* R3 = ((offset + cursor) & 0xffff) * 4, an ERAM byte offset */
-static void e_eram_index(jit_builder_t *b, uint16_t offset)
+static void e_eram_index(jit_builder_t *b, int i, const xp_slot_t *s, bool live)
 {
 	sljit_emit_op1(b->c, SLJIT_MOV_U16, SLJIT_R3, 0, CELL(dsp.cursor));
-	sljit_emit_op2(b->c, SLJIT_ADD, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, offset);
+	if (live)
+	{
+		sljit_emit_op1(b->c, SLJIT_MOV_U16, SLJIT_R4, 0, SLOT_CELL(i, eram_offset));
+		sljit_emit_op2(b->c, SLJIT_ADD, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_R4, 0);
+	}
+	else
+		sljit_emit_op2(b->c, SLJIT_ADD, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, s->eram_offset);
 	sljit_emit_op2(b->c, SLJIT_AND, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 0xffff);
 	sljit_emit_op2(b->c, SLJIT_SHL, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 2);
 }
@@ -1581,7 +1612,7 @@ static int e_execute(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched
 	return issued ? 1 : 0;
 }
 
-static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t *o, int parity, bool by_pc, bool live)
+static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t *o, int parity, bool by_pc, int live)
 {
 	e_mov(b, XP_REG_ABEF, XP_REG_ACC, 0);
 
@@ -1605,9 +1636,10 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 		e_store(b, CELL(dsp.latch), SLJIT_R3);
 	}
 	bool reads = false;
+	const bool live_offset = (live & XP_LIVE_OFFSET) != 0;
 	if (s->eram_op == 1)
 	{
-		e_eram_index(b, s->eram_offset);
+		e_eram_index(b, i, s, live_offset);
 		e_load(b, SLJIT_R3, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0);
 		e_store(b, CELL(dsp.pend[pend]), SLJIT_R3);
 		reads = true;
@@ -1632,7 +1664,7 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 	if (s->st == 1)
 		e_load(b, SLJIT_R1, IRAM_CELL(cell_of(s->word, parity)));
 
-	const int issued = e_execute(b, i, s, o, live && s->function != 0);
+	const int issued = e_execute(b, i, s, o, (live & XP_LIVE_CRAM) && s->function != 0);
 
 	if (o->gain_load)
 	{
@@ -1653,15 +1685,15 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 	}
 	if (s->eram_op == 3)
 	{
+		e_eram_index(b, i, s, live_offset);
 		e_mov(b, SLJIT_R4, XP_REG_ABEF, 0);
 		e_clamp24(b, SLJIT_R4);
-		e_eram_index(b, s->eram_offset);
 		e_store(b, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0, SLJIT_R4);
 	}
 	else if (s->eram_op == 2)
 	{
+		e_eram_index(b, i, s, live_offset);
 		e_load(b, SLJIT_R4, CELL(dsp.r));
-		e_eram_index(b, s->eram_offset);
 		e_store(b, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0, SLJIT_R4);
 	}
 	if (o->now_valid)

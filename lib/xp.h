@@ -79,6 +79,7 @@ typedef struct xp_voice
 /* the multiply input a slot's col[5:4] selects, and what it selects instead when the function is 0 */
 enum { XP_INPUT_PREVIOUS, XP_INPUT_ACC, XP_INPUT_R, XP_INPUT_LATCH };
 enum { XP_SPECIAL_NOP, XP_SPECIAL_BRANCH, XP_SPECIAL_INDEXED_READ, XP_SPECIAL_PARALLEL };
+enum { XP_LIVE_CRAM = 1, XP_LIVE_OFFSET = 2 };
 
 /* One decoded program slot, the input of the schedule pass. */
 typedef struct xp_slot
@@ -166,7 +167,7 @@ typedef struct xp
 	bool dsp_enabled;
 	bool program_dirty;
 	bool branching;
-	uint8_t live[XP_DSP_SLOTS];
+	uint8_t live[XP_DSP_SLOTS];   /* XP_LIVE_CRAM, XP_LIVE_OFFSET: what the code reads from the slot */
 	uint16_t strobe_slots[XP_DSP_SLOTS];
 	int strobe_count;
 	uint32_t compiles;
