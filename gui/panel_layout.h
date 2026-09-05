@@ -32,6 +32,7 @@ typedef enum panel_element
 	PANEL_JACK_PHONES,
 	PANEL_LCD_GLASS,
 	PANEL_LENS_USER_INST,
+	PANEL_LOGO,
 	PANEL_BUTTON_ALL,
 	PANEL_BUTTON_MUTE,
 	PANEL_BUTTON_SC55_MAP,
@@ -112,7 +113,7 @@ typedef enum panel_sprite_id
 
 /* the sprite that is an element's key, for drawing it pressed; -1 for the rest */
 static const int16_t panel_element_sprite[PANEL_ELEMENT_COUNT] = {
-	-1, -1, -1, -1, -1, -1, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40
+	-1, -1, -1, -1, -1, -1, -1, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40
 };
 
 typedef struct panel_size
@@ -126,7 +127,7 @@ typedef struct panel_size
 } panel_size_t;
 
 static const char *const panel_element_name[PANEL_ELEMENT_COUNT] = {
-	"switch-power", "knob-volume", "jack-midi-in-b", "jack-phones", "lcd-glass", "lens-user-inst", "button-all", "button-mute", "button-sc55-map", "button-sc88-map", "button-part-left", "button-part-right", "button-instrument-left", "button-instrument-right", "button-level-left", "button-level-right", "button-pan-left", "button-pan-right", "button-reverb-left", "button-reverb-right", "button-chorus-left", "button-chorus-right", "button-key-shift-left", "button-key-shift-right", "button-midi-ch-left", "button-midi-ch-right", "button-user-inst", "button-select", "button-edit1-left", "button-edit1-right", "button-edit2-left", "button-edit2-right", "button-edit3-left", "button-edit3-right", "button-preview"
+	"switch-power", "knob-volume", "jack-midi-in-b", "jack-phones", "lcd-glass", "lens-user-inst", "logo", "button-all", "button-mute", "button-sc55-map", "button-sc88-map", "button-part-left", "button-part-right", "button-instrument-left", "button-instrument-right", "button-level-left", "button-level-right", "button-pan-left", "button-pan-right", "button-reverb-left", "button-reverb-right", "button-chorus-left", "button-chorus-right", "button-key-shift-left", "button-key-shift-right", "button-midi-ch-left", "button-midi-ch-right", "button-user-inst", "button-select", "button-edit1-left", "button-edit1-right", "button-edit2-left", "button-edit2-right", "button-edit3-left", "button-edit3-right", "button-preview"
 };
 
 static const char *const panel_sprite_name[PANEL_SPRITE_COUNT] = {
@@ -147,6 +148,7 @@ static const panel_size_t panel_sizes[PANEL_SIZE_COUNT] = {
 			{ 210, 178, 49, 50 },  /* jack-phones */
 			{ 350, 50, 480, 184 },  /* lcd-glass */
 			{ 639, 367, 43, 44 },  /* lens-user-inst */
+			{ 65, 379, 412, 37 },  /* logo */
 			{ 948, 42, 30, 29 },  /* button-all */
 			{ 948, 99, 30, 30 },  /* button-mute */
 			{ 948, 156, 30, 29 },  /* button-sc55-map */
@@ -295,6 +297,7 @@ static const panel_size_t panel_sizes[PANEL_SIZE_COUNT] = {
 			{ 420, 357, 99, 99 },  /* jack-phones */
 			{ 701, 100, 960, 368 },  /* lcd-glass */
 			{ 1277, 734, 87, 87 },  /* lens-user-inst */
+			{ 130, 758, 825, 74 },  /* logo */
 			{ 1897, 83, 59, 59 },  /* button-all */
 			{ 1897, 199, 59, 59 },  /* button-mute */
 			{ 1897, 312, 59, 59 },  /* button-sc55-map */
