@@ -198,6 +198,16 @@ uint32_t scemu_midi_rate(const scemu_t *m);
 void scemu_set_map(scemu_t *m, scemu_map_t map);
 scemu_map_t scemu_map(const scemu_t *m);
 
+/* The width of the rail the DSP program's output words saturate at, in bits:
+ * 24 is the chip's, and a busy song clips on it as the unit does; up to 29,
+ * the accumulator's own width, gives the words up to 30 dB of headroom above
+ * it.  The rendered words are then `bits` wide, full scale 2^(bits-1), and
+ * the host scales them.  Only words the program never reads back are
+ * widened; everything it computes with stays the chip's, so below the rail
+ * the sound is the unit's.  Kept across a state load, like the MIDI rate. */
+void scemu_set_dac_rail(scemu_t *m, int bits);
+int scemu_dac_rail(const scemu_t *m);
+
 /* Panel. */
 void scemu_button(scemu_t *m, scemu_button_t button, bool down);
 void scemu_set_computer_switch(scemu_t *m, scemu_computer_switch_t sw);
@@ -206,12 +216,24 @@ const scemu_lcd_t *scemu_lcd(scemu_t *m);
 void scemu_lcd_ack(scemu_t *m);
 
 /* State.  A state is the whole machine at a frame boundary, including the
- * battery-backed SRAM, and is only valid for the same model and ROM set.
- * scemu_state_load returns false and leaves the machine unchanged if the
- * buffer does not fit. */
+ * battery-backed SRAM and the MIDI not yet delivered, as a byte stream that
+ * does not depend on the host or the build: a header naming the model and
+ * the ROM set, then tagged chunks (docs/scemu_design.md, "State").  It is
+ * only valid for the same model and ROM set, which scemu_state_load checks;
+ * it returns false and leaves the machine unchanged if the buffer is not
+ * such a state.  Host settings (the MIDI rate, the map, the DAC rail) are
+ * not part of it.  The same stream serves as a save state and as the boot
+ * snapshot a host loads for an instant start. */
 size_t scemu_state_size(const scemu_t *m);
 size_t scemu_state_save(const scemu_t *m, void *buffer, size_t size);
 bool scemu_state_load(scemu_t *m, const void *buffer, size_t size);
+
+/* What a state is for, read from its header without a machine: false if
+ * the buffer is not a state.  Any out pointer may be NULL. */
+bool scemu_state_info(const void *buffer, size_t size, scemu_model_t *model, uint64_t *rom_id, uint64_t *frame);
+
+/* The identity of the machine's ROM set, as a state's header carries it. */
+uint64_t scemu_rom_id(const scemu_t *m);
 
 /* The battery-backed SRAM on its own, for a host that keeps user settings
  * across sessions without a full state. */

@@ -157,6 +157,16 @@ void scemu_set_midi_out(scemu_t *m, scemu_midi_out_fn fn, void *user)
 	m->machine.midi_out_user = user;
 }
 
+void scemu_set_dac_rail(scemu_t *m, int bits)
+{
+	xp_set_rail(&m->machine.xp, bits);
+}
+
+int scemu_dac_rail(const scemu_t *m)
+{
+	return m->machine.xp.rail_bits;
+}
+
 void scemu_button(scemu_t *m, scemu_button_t button, bool down)
 {
 	sc88_button(&m->machine, button, down);
