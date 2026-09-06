@@ -218,6 +218,7 @@ typedef struct options
 	scemu_map_t map;
 	uint32_t midi_rate;
 	scemu_computer_switch_t computer;
+	bool computer_given;
 } options_t;
 
 /* the rear switch, by the word the unit's own panel prints on it */
@@ -250,14 +251,15 @@ static void usage(FILE *fp)
 	        "  --keep-settings               start from, and save, the settings memory of the\n"
 	        "                                last --keep-settings run instead of factory settings\n"
 	        "  --tail N                      seconds to keep running after the last event (default 4)\n"
-	        "  --port 0|1                    MIDI IN for tracks that name no port (default A);\n"
-	        "                                a track's port event routes it to A (0) or B (1);\n"
-	        "                                ports 2 and 3 (an SC-8850's C and D) are not played\n"
+	        "  --port 0|1|2|3                MIDI IN for tracks that name no port (default A);\n"
+	        "                                a track's port event routes it to A, B, and on an\n"
+	        "                                SC-8850 whose switch is on USB, C and D as well\n"
 	        "  --map sc55|sc88|sc88pro       play every part from that instrument map, whatever\n"
 	        "                                the song selects (the SC-88 has no SC-88Pro map)\n"
 	        "  --midi-rate BAUD              speed of the MIDI input: 31250 (the cable, default),\n"
 	        "                                38400 (the computer port), 0 for no limit\n"
-	        "  --computer midi|pc1|pc2|mac   the rear COMPUTER switch (default midi); usb is the\n"
+	        "  --computer midi|pc1|pc2|mac   the rear COMPUTER switch (default midi, usb on the\n"
+	        "                                SC-8850); usb is the\n"
 	        "                                SC-8850's fourth position, the mac one elsewhere\n"
 	        "  --hold                        wait for a key when the song ends\n"
 	        "  --help\n");
@@ -286,15 +288,19 @@ static int parse_options(int argc, char **argv, options_t *o)
 		else if (!strcmp(a, "--tail") && n + 1 < argc)
 			o->tail = atof(argv[++n]);
 		else if (!strcmp(a, "--port") && n + 1 < argc)
-			o->port = atoi(argv[++n]) ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A;
+		{
+			int port = atoi(argv[++n]);
+			o->port = port < 0 ? 0 : port > SCEMU_MIDI_IN_D ? SCEMU_MIDI_IN_D : port;
+		}
 		else if (!strcmp(a, "--map") && n + 1 < argc)
 		{
 			const char *name = argv[++n];
 			o->map = !strcmp(name, "sc55") ? SCEMU_MAP_SC55 : !strcmp(name, "sc88") ? SCEMU_MAP_SC88
-					: !strcmp(name, "sc88pro") ? SCEMU_MAP_SC88PRO : SCEMU_MAP_NATIVE;
+					: !strcmp(name, "sc88pro") ? SCEMU_MAP_SC88PRO : !strcmp(name, "sc8850") ? SCEMU_MAP_SC8850
+					: SCEMU_MAP_NATIVE;
 			if (o->map == SCEMU_MAP_NATIVE)
 			{
-				fprintf(stderr, "scplay: --map takes sc55, sc88 or sc88pro\n");
+				fprintf(stderr, "scplay: --map takes sc55, sc88, sc88pro or sc8850\n");
 				return -1;
 			}
 		}
@@ -302,6 +308,7 @@ static int parse_options(int argc, char **argv, options_t *o)
 			o->midi_rate = (uint32_t)atoi(argv[++n]);
 		else if (!strcmp(a, "--computer") && n + 1 < argc)
 		{
+			o->computer_given = true;
 			if (!computer_switch_for(argv[++n], &o->computer))
 			{
 				fprintf(stderr, "scplay: --computer takes midi, pc1, pc2, mac or usb\n");
@@ -434,7 +441,14 @@ int main(int argc, char **argv)
 		scplay_roms_free(&roms);
 		return 1;
 	}
+	/* the SC-8850 takes four port groups when its rear switch is on USB, everything else two;
+	 * USB is its default, MIDI everyone else's */
+	if (!opt.computer_given && roms.model == SCEMU_MODEL_SC8850)
+		opt.computer = SCEMU_COMPUTER_MAC;
 	scemu_set_computer_switch(m, opt.computer);
+	const int midi_ports = roms.model == SCEMU_MODEL_SC8850 && opt.computer == SCEMU_COMPUTER_MAC ? 4 : 2;
+	if (opt.port >= midi_ports)
+		opt.port = midi_ports - 1;
 	uint32_t rate = scemu_sample_rate(m);
 
 	smf_t smf;
@@ -563,9 +577,9 @@ int main(int argc, char **argv)
 				uint32_t offset = e->frame > pos ? (uint32_t)(e->frame - pos) : 0;
 				if (e->tempo_change)
 					continue;
-				if (e->port != SMF_PORT_UNSET && e->port > 1)
+				if (e->port != SMF_PORT_UNSET && e->port >= midi_ports)
 					continue;
-				int port = e->port == SMF_PORT_UNSET ? opt.port : e->port ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A;
+				int port = e->port == SMF_PORT_UNSET ? opt.port : e->port;
 				if (e->status[0] == 0xf0 && e->bytes)
 				{
 					scemu_midi_write(m, port, e->status, 1, offset);

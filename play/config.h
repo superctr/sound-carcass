@@ -63,13 +63,14 @@ typedef struct scgui_config
 	int size;                /* the window size: 4 the small panel, 8 twice as large */
 	char audio_device[128];  /* PortAudio device name; "" = the default */
 	int audio_block;         /* frames per device buffer: 64..1024 */
-	char midi[5][80];        /* host MIDI device names tied to MIDI IN A, MIDI IN B, MIDI OUT, Song to A, Song to B; "" = none */
+	char midi[9][80];        /* host MIDI device names tied to MIDI IN A-D, MIDI OUT, Song to A-D; "" = none */
 	char reset[24];          /* what precedes each song: "none", "gm", "gs", "gm2", "sc88-single", "sc88-double" */
 	char map[16];            /* instrument map override: "native", "sc55", "sc88", "sc88pro" */
 	int midi_rate;           /* baud of the MIDI input: 31250, 38400, 0 */
 	char computer[CONFIG_SYSTEMS][8];  /* the rear switch of each system: "midi", "pc1", "pc2", "mac" ("usb" on the SC-8850) */
 	bool keep_settings;      /* keep the machine's own settings memory across sessions */
 	float volume;            /* the knob, 0..1 */
+	int knob_notches;        /* notches of the scroll wheel from silent to full: 5..200 */
 	int dac_rail;            /* the DSP output rail in bits: 24, the unit's, or 29, the wide one */
 	float tail;              /* seconds after a song's last event */
 } scgui_config_t;

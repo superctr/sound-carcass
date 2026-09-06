@@ -295,7 +295,7 @@ static int smf_load(smf_t *s, const uint8_t *data, size_t size, uint32_t rate)
 
 static void usage(const char *argv0)
 {
-	fprintf(stderr, "usage: %s <sc88|sc88vl|sc88pro|sc8850> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--tail N] [--state boot.state] [--map sc55|sc88|sc88pro] [--midi-rate BAUD] [--rail BITS] [--raw words.bin] [--no-jit]\n", argv0);
+	fprintf(stderr, "usage: %s <sc88|sc88vl|sc88pro|sc8850> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--tail N] [--state boot.state] [--map sc55|sc88|sc88pro|sc8850] [--midi-rate BAUD] [--computer midi|pc1|pc2|usb] [--rail BITS] [--raw words.bin] [--no-jit]\n", argv0);
 }
 
 int main(int argc, char **argv)
@@ -321,6 +321,8 @@ int main(int argc, char **argv)
 	scemu_config_t config = { 0 };
 	scemu_map_t map = SCEMU_MAP_NATIVE;
 	uint32_t midi_rate = 31250;
+	scemu_computer_switch_t computer = SCEMU_COMPUTER_MIDI;
+	bool computer_given = false;
 	for (int n = 4; n < argc; n++)
 	{
 		if (!strcmp(argv[n], "--midi") && n + 1 < argc)
@@ -339,11 +341,30 @@ int main(int argc, char **argv)
 			raw_path = argv[++n];
 		else if (!strcmp(argv[n], "--midi-rate") && n + 1 < argc)
 			midi_rate = (uint32_t)atoi(argv[++n]);
+		else if (!strcmp(argv[n], "--computer") && n + 1 < argc)
+		{
+			const char *name = argv[++n];
+			computer_given = true;
+			if (!strcmp(name, "midi"))
+				computer = SCEMU_COMPUTER_MIDI;
+			else if (!strcmp(name, "pc1"))
+				computer = SCEMU_COMPUTER_PC1;
+			else if (!strcmp(name, "pc2"))
+				computer = SCEMU_COMPUTER_PC2;
+			else if (!strcmp(name, "usb") || !strcmp(name, "mac"))
+				computer = SCEMU_COMPUTER_MAC;
+			else
+			{
+				usage(argv[0]);
+				return 2;
+			}
+		}
 		else if (!strcmp(argv[n], "--map") && n + 1 < argc)
 		{
 			const char *name = argv[++n];
 			map = !strcmp(name, "sc55") ? SCEMU_MAP_SC55 : !strcmp(name, "sc88") ? SCEMU_MAP_SC88
-					: !strcmp(name, "sc88pro") ? SCEMU_MAP_SC88PRO : SCEMU_MAP_NATIVE;
+					: !strcmp(name, "sc88pro") ? SCEMU_MAP_SC88PRO : !strcmp(name, "sc8850") ? SCEMU_MAP_SC8850
+					: SCEMU_MAP_NATIVE;
 			if (map == SCEMU_MAP_NATIVE)
 			{
 				usage(argv[0]);
@@ -387,6 +408,10 @@ int main(int argc, char **argv)
 		fprintf(stderr, "scemu_create: %s\n", scemu_error(NULL));
 		return 1;
 	}
+	if (!computer_given && set->model == SCEMU_MODEL_SC8850)
+		computer = SCEMU_COMPUTER_MAC;
+	scemu_set_computer_switch(m, computer);
+	const int midi_ports = set->model == SCEMU_MODEL_SC8850 && computer == SCEMU_COMPUTER_MAC ? 4 : 2;
 	uint32_t rate = scemu_sample_rate(m);
 
 	bool booted = false;
@@ -458,9 +483,9 @@ int main(int argc, char **argv)
 			uint32_t offset = e->frame > done ? (uint32_t)(e->frame - done) : 0;
 			if (e->tempo_change)
 				continue;
-			if (e->port > 1)
+			if (e->port >= midi_ports)
 				continue;
-			int port = e->port ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A;
+			int port = e->port;
 			if (e->status[0] == 0xf0 && e->bytes)
 			{
 				scemu_midi_write(m, port, e->status, 1, offset);

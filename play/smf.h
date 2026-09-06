@@ -33,6 +33,8 @@ typedef struct smf
 	uint8_t ports;
 } smf_t;
 
+/* the SC-8850 takes four port groups over USB; every other machine two */
+#define SMF_PORTS 4
 #define SMF_PORT_UNSET 0xff
 
 int smf_load(smf_t *s, const char *path, uint32_t rate);

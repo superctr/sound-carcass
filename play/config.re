@@ -37,7 +37,7 @@ typedef struct key
 
 static const char *const model_words[] = { "", "sc88pro", "sc88", "sc88vl", "sc8850", NULL };
 static const char *const reset_words[] = { "none", "gm", "gs", "gm2", "sc88-single", "sc88-double", NULL };
-static const char *const map_words[] = { "native", "sc55", "sc88", "sc88pro", NULL };
+static const char *const map_words[] = { "native", "sc55", "sc88", "sc88pro", "sc8850", NULL };
 static const int size_numbers[] = { 4, 8, -1 };
 static const int rate_numbers[] = { 0, 31250, 38400, -1 };
 static const int rail_numbers[] = { 24, 29, -1 };
@@ -46,8 +46,8 @@ static const char *const computer_words[] = { "midi", "pc1", "pc2", "mac", "usb"
 static const char group_machine[] = "the machine: which module, where its ROMs are, and what it remembers";
 static const char group_window[] = "the window: 4 the small panel, 8 twice as large";
 static const char group_computer[] = "the rear COMPUTER switch of each system: midi, pc1, pc2, mac (usb on the SC-8850)";
-static const char group_audio[] = "audio: the output device, its buffer, the knob and the DSP rail";
-static const char group_midi[] = "MIDI: the host ports, and the speed of the inputs";
+static const char group_audio[] = "audio: the output device, its buffer, the knob, its wheel travel and the DSP rail";
+static const char group_midi[] = "MIDI: the host ports (C and D only on an SC-8850 on USB), and the speed of the inputs";
 static const char group_song[] = "each song: the reset that precedes it and the tail that follows it";
 
 #define FIELD(f) (unsigned short)offsetof(scgui_config_t, f), (unsigned short)sizeof(((scgui_config_t *)0)->f)
@@ -65,12 +65,17 @@ static const config_key_t keys[] = {
 	{ "audio_device",     SLOT_TEXT, FIELD(audio_device),  0, 0,     NULL,           NULL,         group_audio },
 	{ "audio_block",      SLOT_INT,  FIELD(audio_block),   64, 1024, NULL,           NULL,         group_audio },
 	{ "volume",           SLOT_REAL, FIELD(volume),        0, 1,     NULL,           NULL,         group_audio },
+	{ "knob_notches",     SLOT_INT,  FIELD(knob_notches),  5, 200,   NULL,           NULL,         group_audio },
 	{ "dac_rail",         SLOT_INT,  FIELD(dac_rail),      0, 0,     NULL,           rail_numbers, group_audio },
 	{ "midi_in_a",        SLOT_TEXT, FIELD(midi[0]),       0, 0,     NULL,           NULL,         group_midi },
 	{ "midi_in_b",        SLOT_TEXT, FIELD(midi[1]),       0, 0,     NULL,           NULL,         group_midi },
-	{ "midi_out",         SLOT_TEXT, FIELD(midi[2]),       0, 0,     NULL,           NULL,         group_midi },
-	{ "song_a",           SLOT_TEXT, FIELD(midi[3]),       0, 0,     NULL,           NULL,         group_midi },
-	{ "song_b",           SLOT_TEXT, FIELD(midi[4]),       0, 0,     NULL,           NULL,         group_midi },
+	{ "midi_in_c",        SLOT_TEXT, FIELD(midi[2]),       0, 0,     NULL,           NULL,         group_midi },
+	{ "midi_in_d",        SLOT_TEXT, FIELD(midi[3]),       0, 0,     NULL,           NULL,         group_midi },
+	{ "midi_out",         SLOT_TEXT, FIELD(midi[4]),       0, 0,     NULL,           NULL,         group_midi },
+	{ "song_a",           SLOT_TEXT, FIELD(midi[5]),       0, 0,     NULL,           NULL,         group_midi },
+	{ "song_b",           SLOT_TEXT, FIELD(midi[6]),       0, 0,     NULL,           NULL,         group_midi },
+	{ "song_c",           SLOT_TEXT, FIELD(midi[7]),       0, 0,     NULL,           NULL,         group_midi },
+	{ "song_d",           SLOT_TEXT, FIELD(midi[8]),       0, 0,     NULL,           NULL,         group_midi },
 	{ "midi_rate",        SLOT_INT,  FIELD(midi_rate),     0, 0,     NULL,           rate_numbers, group_midi },
 	{ "reset",            SLOT_TEXT, FIELD(reset),         0, 0,     reset_words,    NULL,         group_song },
 	{ "tail",             SLOT_REAL, FIELD(tail),          0, 300,   NULL,           NULL,         group_song },
@@ -87,8 +92,10 @@ void config_defaults(scgui_config_t *c)
 	snprintf(c->map, sizeof(c->map), "native");
 	for (int n = 0; n < CONFIG_SYSTEMS; n++)
 		snprintf(c->computer[n], sizeof(c->computer[n]), "midi");
+	snprintf(c->computer[3], sizeof(c->computer[3]), "usb");
 	c->midi_rate = 31250;
 	c->volume = 0.75f;
+	c->knob_notches = 20;
 	c->dac_rail = 24;
 	c->tail = 4;
 }
