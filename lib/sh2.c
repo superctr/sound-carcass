@@ -461,10 +461,19 @@ static void sci_int(sh2_t *cpu, int ch, int which, bool state)
 	case 2: flag = &cpu->sci[ch].int_txi; break;
 	default: flag = &cpu->sci[ch].int_tei; break;
 	}
-	if (*flag == state)
+	if (!state && !*flag)
 		return;
 	*flag = state;
 	intc_set(cpu, sci_vector[ch][which], state);
+}
+
+static void sci_ints(sh2_t *cpu, int ch)
+{
+	const sh2_sci_t *s = &cpu->sci[ch];
+	sci_int(cpu, ch, 0, (s->scr & SCR_RIE) && (s->ssr & (SSR_ORER | SSR_FER | SSR_PER)));
+	sci_int(cpu, ch, 1, (s->scr & SCR_RIE) && (s->ssr & SSR_RDRF));
+	sci_int(cpu, ch, 2, (s->scr & SCR_TIE) && (s->ssr & SSR_TDRE));
+	sci_int(cpu, ch, 3, (s->scr & SCR_TEIE) && (s->ssr & SSR_TEND));
 }
 
 static void sci_tx_start(sh2_t *cpu, int ch)
@@ -475,9 +484,8 @@ static void sci_tx_start(sh2_t *cpu, int ch)
 	s->tx_shift = s->tdr;
 	s->tx_busy = true;
 	s->tx_timer = sci_char_cycles(cpu, ch);
-	s->ssr = (uint8_t)((s->ssr & ~SSR_TEND) | SSR_TDRE);
-	if (s->scr & SCR_TIE)
-		sci_int(cpu, ch, 2, true);
+	s->ssr |= SSR_TDRE;
+	sci_ints(cpu, ch);
 }
 
 static void sci_update(sh2_t *cpu, int ch, uint32_t cycles)
@@ -503,8 +511,7 @@ static void sci_update(sh2_t *cpu, int ch, uint32_t cycles)
 			else
 			{
 				s->ssr |= SSR_TEND;
-				if (s->scr & SCR_TEIE)
-					sci_int(cpu, ch, 3, true);
+				sci_ints(cpu, ch);
 			}
 		}
 	}
@@ -516,15 +523,12 @@ static void sci_update(sh2_t *cpu, int ch, uint32_t cycles)
 		{
 			s->rdr = s->rx_byte;
 			s->ssr |= SSR_RDRF;
-			if (s->scr & SCR_RIE)
-				sci_int(cpu, ch, 1, true);
 		}
 		else
 		{
 			s->ssr |= SSR_ORER;
-			if (s->scr & SCR_RIE)
-				sci_int(cpu, ch, 0, true);
 		}
+		sci_ints(cpu, ch);
 	}
 }
 
@@ -1011,41 +1015,26 @@ static void sci_write(sh2_t *cpu, int ch, int reg, uint8_t data)
 	case 0: s->smr = data; break;
 	case 1: s->brr = data; break;
 	case 2:
-	{
-		uint8_t old = s->scr;
-		if ((old & SCR_TE) && !(data & SCR_TE))
-			s->ssr |= (uint8_t)(SSR_TEND | SSR_TDRE);
-		if ((old & SCR_TIE) && !(data & SCR_TIE))
-			sci_int(cpu, ch, 2, false);
-		if ((old & SCR_TEIE) && !(data & SCR_TEIE))
-			sci_int(cpu, ch, 3, false);
-		if ((old & SCR_RIE) && !(data & SCR_RIE))
-		{
-			sci_int(cpu, ch, 1, false);
-			sci_int(cpu, ch, 0, false);
-		}
 		s->scr = data;
+		if (!(data & SCR_TE))
+			s->ssr |= (uint8_t)(SSR_TEND | SSR_TDRE);
+		sci_ints(cpu, ch);
 		break;
-	}
 	case 3: s->tdr = data; break;
 	case 4:
 	{
 		uint8_t old = s->ssr;
-		uint8_t keep = (uint8_t)(SSR_TDRE | SSR_RDRF | SSR_ORER | SSR_FER | SSR_PER);
-		s->ssr = (uint8_t)((data & old & keep) | (old & (SSR_TEND | SSR_MPB)) | (data & SSR_MPBT));
-		if (!(s->scr & SCR_TE))
+		uint8_t clearable = (uint8_t)(SSR_TDRE | SSR_RDRF | SSR_ORER | SSR_FER | SSR_PER);
+		uint8_t held = (uint8_t)(old & (data | (uint8_t)~clearable) & (uint8_t)~SSR_MPBT);
+		s->ssr = (uint8_t)(held | (data & SSR_MPBT));
+		if ((old & SSR_TDRE) && !(s->ssr & SSR_TDRE))
 		{
-			s->ssr |= (uint8_t)(SSR_TEND | SSR_TDRE);
-		}
-		else if (old & SSR_TDRE)
-		{
-			s->ssr &= (uint8_t)~(SSR_TEND | SSR_TDRE);
+			s->ssr &= (uint8_t)~SSR_TEND;
 			sci_tx_start(cpu, ch);
 		}
-		if (!(s->ssr & SSR_RDRF))
-			sci_int(cpu, ch, 1, false);
-		if (!(s->ssr & (SSR_ORER | SSR_FER | SSR_PER)))
-			sci_int(cpu, ch, 0, false);
+		if (!(s->scr & SCR_TE))
+			s->ssr |= (uint8_t)(SSR_TEND | SSR_TDRE);
+		sci_ints(cpu, ch);
 		break;
 	}
 	default: break;
