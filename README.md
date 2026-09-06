@@ -54,15 +54,17 @@ caches the booted machine, so later runs start instantly from factory settings (
 the machine's settings memory across sessions instead).  `--no-audio --wav out.wav` renders a file
 about ten times faster than real time instead, and `--map sc55` (or `sc88`, `sc88pro`) plays every part
 from that instrument map whatever the song selects; `--midi-rate 38400` feeds the file at the
-computer port's speed instead of the cable's.  A dual-port file (tracks with port events, the
+computer port's speed instead of the cable's, and `--rate 44100` asks the sound card, and writes the
+wav, at that rate instead of the machine's own.  A dual-port file (tracks with port events, the
 32-part songs written for a Pro on both MIDI INs) plays on both blocks, and on an SC-8850, whose
 switch is on USB by default, a four-port file plays on all four groups, 64 parts.  See [docs/scplay.md](docs/scplay.md).
 
 `scgui` is the same player as a desktop window: the front panel drawn from `gui/`'s artwork, its
 buttons under the mouse, the volume knob and the SC-8850's value dial under the wheel, a playlist in a
 second window.  It needs GTK 4 besides zlib.  See [docs/scgui.md](docs/scgui.md).  Both players play
-through PortAudio and `scgui` takes MIDI through PortMidi, built from the submodules
-(`git submodule update --init`).
+through PortAudio, convert to the output rate with libsamplerate and `scgui` takes MIDI through
+PortMidi, all built from the submodules (`git submodule update --init`).  The library itself renders
+at the machine's own rate and resamples nothing.
 Without zlib the library and `scemu-cli` still build.
 
 ## Status

@@ -19,10 +19,11 @@ and starts instantly on later runs.
 |---|---|
 | `--model sc88 \| sc88vl \| sc88pro \| sc8850 \| sc55mk2` | which machine (default `sc88pro`) |
 | `--rom PATH` | a zip or a directory holding the ROM images, whatever they are named, searched before the usual places |
-| `--wav FILE` | also write what is played, 16-bit stereo at the machine's own rate: 32 kHz, and 66206 Hz on the SC-55mkII |
+| `--wav FILE` | also write what is played, 16-bit stereo at the rate `--rate` chose: by default the machine's own, 32 kHz, and 66206 Hz on the SC-55mkII |
 | `--no-audio` | render as fast as the host allows and open no sound card; for `--wav` |
 | `--audio-device NAME` | play on the output device whose name holds `NAME` (any case) instead of the host's default; `--audio-device list` prints them and exits |
 | `--audio-block N` | the device's buffer in frames (default 256, 8 ms at 32 kHz); the player keeps two of them ahead, or two of the host's own period when that is larger |
+| `--rate native \| 32000 \| 44100 \| 48000` | the rate to ask the output device for, and to write `--wav` at.  `native`, the default, is the machine's own — 32 kHz, and 66206 Hz on the SC-55mkII.  The machine always renders at its own rate; what this picks is what it is converted to |
 | `--no-cache` | boot the firmware instead of loading the cached boot state, and use no cached settings memory |
 | `--keep-settings` | start from the settings memory the last `--keep-settings` run left, and save it again on exit |
 | `--midi-rate BAUD` | the speed of the MIDI input: 31250 is the cable and the default, 38400 the SC-88Pro's computer port, 0 removes the limit.  Faster than the firmware can take loses messages inside it: a song with a large setup block right after its GS reset plays with wrong sounds and levels at 0 |
@@ -173,15 +174,17 @@ ANSI; the terminal is left as it was found, including after Ctrl-C.
 
 ## Audio
 
-Output goes through PortAudio at the machine's own rate — 32 kHz, and the SC-55mkII's 66206 Hz —
-stereo, 16-bit, on the host's default device or the one `--audio-device` names (`--audio-device list`
-shows what there is, with its host API: on Linux ALSA, JACK and PulseAudio).  A device that will not
-open at that rate runs at its own and the output is resampled on the way, through a 32-tap windowed
-sinc.  The emulation keeps two device buffers (`--audio-block`, 256 frames, 8 ms at 32 kHz, by
+Output goes through PortAudio, stereo, 16-bit, on the host's default device or the one
+`--audio-device` names (`--audio-device list` shows what there is, with its host API: on Linux ALSA,
+JACK and PulseAudio).  The rate asked of the device is `--rate`'s: the machine's own by default — 32
+kHz, and the SC-55mkII's 66206 Hz — or 32000, 44100 or 48000.  A device that will not open at the
+rate asked for runs at one of its own; whatever it opens at, the machine's output is converted to it
+with libsamplerate's medium sinc.  The emulation keeps two device buffers (`--audio-block`, 256 frames, 8 ms at 32 kHz, by
 default; the host's own period when that is larger, as under JACK) ahead of PortAudio's callback; if
 the host cannot keep up, scplay counts the
 dropouts and shows them.  The Pro's OUTPUT 2 is not played;
 only OUTPUT 1 is.
 
 Without a sound card, `--no-audio --wav out.wav` renders the file as fast as the machine allows — about
-nine to twelve times real time on a current desktop.
+nine to twelve times real time on a current desktop.  The file is written at `--rate`'s rate too, so
+`--rate 44100` gives a wav a CD player will take.

@@ -18,6 +18,7 @@ machine.  Files on the command line become the playlist and the first one plays.
 | `--size 4 \| 8` | the window size: 4 is the small panel (1399 × 440 for the SC-88 and the SC-88Pro, 1399 × 282 for the shallower SC-88VL and SC-55mkII, 1696 × 692 for the SC-8850), 8 twice that.  The bake is named by the glass's dot pitch, which is 4 and 8 on the 88 family and the SC-55mkII and 3 and 6 on the SC-8850, whose display has more and smaller dots.  On a HiDPI screen the large bake is used for the small size automatically |
 | `--map sc55 \| sc88 \| sc88pro \| sc8850` | play every part from that instrument map, as in scplay |
 | `--midi-rate BAUD` | the speed of the MIDI input, as in scplay |
+| `--rate native \| 32000 \| 44100 \| 48000` | the rate to ask the output device for, as in scplay; `native`, the default, is the machine's own |
 | `--keep-settings` | keep the machine's settings memory across sessions |
 | `--no-cache` | boot the firmware every time |
 | `--no-audio` | no sound card; the machine runs at real time anyway |
@@ -113,15 +114,19 @@ jitter is the polling, about a millisecond, instead of a whole buffer.
 The PHONES jack opens the Settings window, which has two tabs.
 
 **Audio**: the output device (every device PortAudio finds, on every host API it was built with -- on
-Linux ALSA, JACK and PulseAudio -- or the host's default), the device's buffer (64 to 1024 frames, 2
-to 32 ms at 32 kHz; 256 by default), the volume knob's travel in notches of the scroll wheel (5 to
-200 from silent to full; 20 by default), and a readout of the device in use, the latency
-from the machine to the jack and the underruns so far.  The machine keeps two buffers ahead of the
-device -- two of the buffer chosen, or of the period the host actually takes when that is larger, as
-under JACK, where the server sets it; a smaller buffer means less delay from a key to the sound and
-more chance of a dropout on a busy host.  A device that will not open at the machine's own rate -- 32
-kHz, and the SC-55mkII's 66206 Hz -- runs at its own, and the output is resampled on the way (a 32-tap
-windowed sinc).
+Linux ALSA, JACK and PulseAudio -- or the host's default), the rate to ask it for, the device's buffer
+(64 to 1024 frames, 2 to 32 ms at 32 kHz; 256 by default), the volume knob's travel in notches of the
+scroll wheel (5 to 200 from silent to full; 20 by default), and a readout of the device in use, the
+latency from the machine to the jack and the underruns so far.  Changing the device or the rate
+reopens the stream where it stands, as changing the buffer does.  The machine keeps two buffers ahead
+of the device -- two of the buffer chosen, or of the period the host actually takes when that is
+larger, as under JACK, where the server sets it; a smaller buffer means less delay from a key to the
+sound and more chance of a dropout on a busy host.
+
+The rate is the machine's own, 32 kHz and the SC-55mkII's 66206 Hz, or 32000, 44100 or 48000; a
+device that will not open at the one asked for runs at one of its own.  The machine always renders at
+its own rate, and whatever the device opens at, the output is converted to it with libsamplerate's
+medium sinc.
 
 **System**: which machine this is -- SC-88, SC-88VL, SC-88Pro, SC-8850 or SC-55mkII.  A model whose
 ROM images were not found is greyed out.  Choosing another one switches at once: the song is
@@ -159,7 +164,8 @@ there.
 ## The settings file
 
 `$XDG_CONFIG_HOME/scemu/scgui.conf`, or `~/.config/scemu/scgui.conf`, keeps what the windows set: the
-machine and where its ROMs are, the window size, the output device and its buffer, the volume knob,
+machine and where its ROMs are, the window size, the output device, the rate asked of it (`audio_rate`,
+0 for the machine's own) and its buffer, the volume knob,
 its travel in notches and the rail, the nine MIDI ties by the device's name, the message before each song, the instrument
 map, the MIDI speed, the computer switch of each system (`computer_sc88`, `computer_sc88vl`,
 `computer_sc88pro`, `computer_sc8850` and `computer_sc55mk2`, each `midi`, `pc1`, `pc2` or `mac`, with
@@ -170,6 +176,6 @@ line it cannot make sense of is complained about on stderr and every other line 
 
 ## Building
 
-Needs GTK 4 and zlib, besides the library; PortAudio and PortMidi are built from the submodules, so
+Needs GTK 4 and zlib, besides the library; PortAudio, PortMidi and libsamplerate are built from the submodules, so
 clone with them (`git submodule update --init`).  Without GTK 4 the build skips it and
 still makes `scplay`.
