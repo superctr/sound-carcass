@@ -76,9 +76,10 @@ flash (its parameter and drum tables) and two 16 MB wave ROMs.
 | wave ROM IC53 | 16 MiB | `2cfe5aa2` |
 | wave ROM IC54 | 16 MiB | `623015b6` |
 
-The USB controller's mask ROM has never been dumped and is not needed: the machine comes up without
-it, and puts its own "USB Hardware Error" box on the display for a moment while its USB task looks for
-it, as the hardware does with the controller unplugged.
+The USB controller's mask ROM has never been dumped and is not needed: what the controller says on
+its two mailboxes is emulated at a high level, so the machine comes up as one with the controller
+fitted — the boot's box reads "USB On Line" when the rear COMPUTER switch is on USB, and the four
+MIDI port groups A-D, 64 parts, go through it.
 
 ## The sub-CPU
 

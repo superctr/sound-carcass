@@ -15,7 +15,7 @@ machine.  Files on the command line become the playlist and the first one plays.
 | `--model sc88pro \| sc88 \| sc88vl \| sc8850` | which machine; the default is the SC-88Pro when its ROMs are found |
 | `--rom PATH` | a zip or a directory holding the ROM images, whatever they are named |
 | `--size 4 \| 8` | the window size: 4 is the small panel (1399 × 440 for the 88 family, 1696 × 692 for the SC-8850), 8 twice that.  The bake is named by the glass's dot pitch, which is 4 and 8 on the 88 family and 3 and 6 on the SC-8850, whose display has more and smaller dots.  On a HiDPI screen the large bake is used for the small size automatically |
-| `--map sc55 \| sc88 \| sc88pro` | play every part from that instrument map, as in scplay |
+| `--map sc55 \| sc88 \| sc88pro \| sc8850` | play every part from that instrument map, as in scplay |
 | `--midi-rate BAUD` | the speed of the MIDI input, as in scplay |
 | `--keep-settings` | keep the machine's settings memory across sessions |
 | `--no-cache` | boot the firmware every time |
@@ -49,7 +49,7 @@ machine.  Files on the command line become the playlist and the first one plays.
   window on its Audio or its System tab, a **Send** submenu, and About.  Send puts a message on both of
   the machine's inputs at once (and on the song outputs, for a unit playing along): GM System On, GS
   Reset, GM2 System On, the SC-88 mode sets, or a bank select and program change that puts every part
-  on the SC-55, SC-88 or SC-88Pro map -- the one-off form of the map override, and the way to reach
+  on the SC-55, SC-88, SC-88Pro or SC-8850 map -- the one-off form of the map override, and the way to reach
   those on a machine with no panel of its own.
 
 - **Combinations from the manual**: a middle-click (or Ctrl and the right button) on a key opens a
@@ -77,22 +77,26 @@ or Shift-JIS, as in scplay).
 
 The bottom of the playlist window ties the machine to the host's MIDI devices, through PortMidi.  On
 Linux that is the ALSA sequencer, where `scgui` is a client with ports of its own -- MIDI IN A, MIDI
-IN B, MIDI OUT, Song A, Song B -- so other programs can connect to it as well; the drop-downs tie one
-of those to a device besides:
+IN B, MIDI OUT, Song A, Song B, and on an SC-8850 whose computer switch is on USB also MIDI IN C, MIDI
+IN D, Song C and Song D -- so other programs can connect to it as well; the drop-downs tie one of
+those to a device besides:
 
 | | |
 |---|---|
-| MIDI IN A, MIDI IN B | a device feeding the machine's two inputs: a keyboard, an interface, another program's port |
+| MIDI IN A, MIDI IN B | a device feeding the machine's inputs: a keyboard, an interface, another program's port |
+| MIDI IN C, MIDI IN D | the same for port groups C and D; the rows are there while the machine has them, an SC-8850 on USB, and the ports on the sequencer with them |
 | MIDI OUT | where the machine's own MIDI OUT goes |
 | Song to A, Song to B | the song being played is also sent here, port A's and port B's tracks separately, with the same GS reset and the same notes-off on pause and stop: for a real unit playing along, e.g. an SC-8850's Part A and Part B |
+| Song to C, Song to D | port C's and port D's tracks, with the rows above |
 
 The refresh button looks for devices again after plugging something in; a tie survives it when its
 device is still there.  A program that lists the sequencer's ports once, when it starts -- Wine's
 MIDI does -- sees `scgui`'s ports only if `scgui` was running first; the tie can be made from this
 side instead, since such a program's own output port (Wine's "WINE ALSA Output #n") is in the
-drop-downs too, or through "Midi Through Port-0" with both ends set to it.  The first three are always in view; the toolbar's gear button reveals the song
-outputs together with the message sent before each song and the instrument map override ("as the song
-selects", or one of the three maps forced on every part, the same as `--map`).
+drop-downs too, or through "Midi Through Port-0" with both ends set to it.  The inputs and MIDI OUT
+are always in view; the toolbar's gear button reveals the song outputs together with the message
+sent before each song and the instrument map override ("as the song selects", or one of the four maps
+forced on every part, the same as `--map`).
 
 What arrives from the host is timed, not just taken: the machine's thread looks at the ports about
 every millisecond, stamps each message as it is seen, and places it one buffer plus two milliseconds
@@ -105,7 +109,8 @@ The PHONES jack opens the Settings window, which has two tabs.
 
 **Audio**: the output device (every device PortAudio finds, on every host API it was built with -- on
 Linux ALSA, JACK and PulseAudio -- or the host's default), the device's buffer (64 to 1024 frames, 2
-to 32 ms at the machine's 32 kHz; 256 by default), and a readout of the device in use, the latency
+to 32 ms at the machine's 32 kHz; 256 by default), the volume knob's travel in notches of the scroll
+wheel (5 to 200 from silent to full; 20 by default), and a readout of the device in use, the latency
 from the machine to the jack and the underruns so far.  The machine keeps two buffers ahead of the
 device -- two of the buffer chosen, or of the period the host actually takes when that is larger, as
 under JACK, where the server sets it; a smaller buffer means less delay from a key to the sound and
@@ -123,11 +128,13 @@ positions that system has -- MIDI, PC-1, PC-2 and Mac on the 88 family, MIDI, PC
 the SC-8850.  It belongs to the system, not to the program, so each one keeps its own; the row always
 shows the running one.  The firmware reads the ladder once when it comes up, so changing it replaces
 the machine and boots it again, the way changing the model does (from that position's own boot cache).
-MIDI is the default everywhere and the position to leave it in: on the SC-8850 the other three take
-the parts off the MIDI IN jacks and wait for a serial or a USB host, neither of which is answered here
-yet, so the machine plays nothing, and on the 88 family the sub-CPU is emulated at a high level and
-feeds the firmware from the jacks whatever the switch says, so only the boot differs.  This is not the
-MIDI speed: a computer port also runs at 38400 baud, which is `--midi-rate`.
+MIDI is the default on the 88 family, where the sub-CPU is emulated at a high level and feeds the
+firmware from the jacks whatever the switch says, so only the boot differs.  USB is the default on
+the SC-8850: it is the position that carries all four port groups A-D, 64 parts, so a four-port song
+plays whole and the playlist window gets the rows for C and D; its boot puts up the "USB On Line" box.
+MIDI there is the two jacks, groups A and B, and PC-1 and PC-2 take the parts off the jacks and wait
+for a serial host, which is not answered here, so the machine plays nothing.  This is not the MIDI
+speed: a computer port also runs at 38400 baud, which is `--midi-rate`.
 
 The **wide output rail** is a box on the same tab.  The unit's DSP saturates the words it hands the
 converters at 24 bits, and a busy song runs into that ceiling and clips there, as it does on the real
@@ -140,8 +147,8 @@ scale at the sound card, so turn the knob down for a song that used to clip.
 ## The settings file
 
 `$XDG_CONFIG_HOME/scemu/scgui.conf`, or `~/.config/scemu/scgui.conf`, keeps what the windows set: the
-machine and where its ROMs are, the window size, the output device and its buffer, the volume knob
-and the rail, the five MIDI ties by the device's name, the message before each song, the instrument
+machine and where its ROMs are, the window size, the output device and its buffer, the volume knob,
+its travel in notches and the rail, the nine MIDI ties by the device's name, the message before each song, the instrument
 map, the MIDI speed, the computer switch of each system (`computer_sc88`, `computer_sc88vl`,
 `computer_sc88pro` and `computer_sc8850`, each `midi`, `pc1`, `pc2` or `mac`, with `usb` taken as the
 SC-8850's word for the last), whether the settings memory is kept, and the tail.  It is read at start, written

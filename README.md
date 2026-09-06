@@ -38,7 +38,7 @@ battery-backed settings memory, can be saved and restored.
 
 ## Tools
 
-`scemu-cli <sc88|sc88vl|sc88pro|sc8850> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--state boot.state] [--rail BITS]
+`scemu-cli <sc88|sc88vl|sc88pro|sc8850> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--state boot.state] [--computer midi|pc1|pc2|usb] [--rail BITS]
 ...` boots the machine (or loads a saved state, saving one after the boot when the file is not there) and
 renders a song to a WAV file; `--rail 29` widens the DSP's output rail for the busy songs that clip on the
 unit's 24 bits.
@@ -54,7 +54,8 @@ the machine's settings memory across sessions instead).  `--no-audio --wav out.w
 about ten times faster than real time instead, and `--map sc55` (or `sc88`, `sc88pro`) plays every part
 from that instrument map whatever the song selects; `--midi-rate 38400` feeds the file at the
 computer port's speed instead of the cable's.  A dual-port file (tracks with port events, the
-32-part songs written for a Pro on both MIDI INs) plays on both blocks.  See [docs/scplay.md](docs/scplay.md).
+32-part songs written for a Pro on both MIDI INs) plays on both blocks, and on an SC-8850, whose
+switch is on USB by default, a four-port file plays on all four groups, 64 parts.  See [docs/scplay.md](docs/scplay.md).
 
 `scgui` is the same player as a desktop window: the front panel drawn from `gui/`'s artwork, its
 buttons under the mouse, the volume knob and the SC-8850's value dial under the wheel, a playlist in a
@@ -68,7 +69,8 @@ Without zlib the library and `scemu-cli` still build.
 Playable.  The SC-88 and the SC-88Pro boot their real firmware through the display sequence, the
 front panel and its LEDs work, MIDI files render and play on both, and the SC-88VL boots and plays
 with the SC-88's wave ROMs.  The SC-8850 boots its own firmware on the SH-2, draws its graphic
-display, answers its panel and its value dial and plays, on the interpreter for now.  What is
+display, answers its panel and its value dial and plays, and with its rear COMPUTER switch on USB it
+takes all four MIDI port groups A-D — 64 parts — and sends its MIDI out back on the port it came from.  What is
 emulated:
 
 | part | how | checked against |
@@ -78,6 +80,7 @@ emulated:
 | LSP insertion-effect processor (SC-88Pro) | the 384-word program compiled per sample, coefficient patches without recompiling | MAME's device on 171 firmware programs, and an SC-8850 |
 | gate array (interrupts, LEDs, LCD interface), LCD controller | C | firmware behaviour |
 | sub-CPU (MIDI in, panel matrix, MIDI out) | high-level emulation; its ROM is not dumped | firmware behaviour |
+| SC-8850 USB controller (the four port groups, the boot's box) | high-level emulation of its mailbox protocol; its ROM is not dumped | firmware behaviour |
 | wave ROMs | unscrambled on load | descrambled chips |
 
 `*`: MAME refers to a branch containing a previous version of the XP/LSP emulator created by this author.
