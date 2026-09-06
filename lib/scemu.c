@@ -2,11 +2,35 @@
 #include <string.h>
 #include "scemu_internal.h"
 
+#define SAMPLE_RATE 32000u
+
 static const char *g_create_error;
+
+static const board_ops_t *board_ops_for(scemu_model_t model)
+{
+	switch (model)
+	{
+	case SCEMU_MODEL_SC88:
+	case SCEMU_MODEL_SC88VL:
+	case SCEMU_MODEL_SC88PRO:
+	case SCEMU_MODEL_VEGSPRO:
+		return &sc88_board_ops;
+	case SCEMU_MODEL_SC8850:
+		return &sc8850_board_ops;
+	default:
+		return NULL;
+	}
+}
 
 scemu_t *scemu_create(scemu_model_t model, const scemu_roms_t *roms, const scemu_config_t *config)
 {
-	g_create_error = sc88_validate_roms(model, roms);
+	const board_ops_t *ops = board_ops_for(model);
+	if (!ops)
+	{
+		g_create_error = "unknown model";
+		return NULL;
+	}
+	g_create_error = ops->validate_roms(model, roms);
 	if (g_create_error)
 		return NULL;
 
@@ -17,17 +41,18 @@ scemu_t *scemu_create(scemu_model_t model, const scemu_roms_t *roms, const scemu
 		return NULL;
 	}
 	m->model = model;
+	m->ops = ops;
 	if (config)
 		m->config = *config;
 
-	if (!sc88_init(&m->machine, model, roms, &m->config))
+	if (!ops->init(&m->board, model, roms, &m->config))
 	{
-		sc88_release(&m->machine);
+		ops->release(&m->board);
 		free(m);
 		g_create_error = "machine initialisation failed";
 		return NULL;
 	}
-	sc88_reset(&m->machine);
+	ops->reset(&m->board);
 	return m;
 }
 
@@ -35,7 +60,7 @@ void scemu_destroy(scemu_t *m)
 {
 	if (!m)
 		return;
-	sc88_release(&m->machine);
+	m->ops->release(&m->board);
 	free(m);
 }
 
@@ -52,62 +77,60 @@ scemu_model_t scemu_model(const scemu_t *m)
 uint32_t scemu_sample_rate(const scemu_t *m)
 {
 	(void)m;
-	return SC88_SAMPLE_RATE;
+	return SAMPLE_RATE;
 }
 
 int scemu_output_count(const scemu_t *m)
 {
-	return m->machine.has_lsp ? 2 : 1;
+	return m->ops->output_count(&m->board);
 }
 
 void scemu_reset(scemu_t *m)
 {
-	sc88_reset(&m->machine);
+	m->ops->reset(&m->board);
 }
 
 uint64_t scemu_boot(scemu_t *m)
 {
-	uint64_t start = m->machine.frame;
-	uint64_t limit = start + 20 * SC88_SAMPLE_RATE;
+	const uint64_t start = m->ops->frame(&m->board);
+	const uint64_t limit = start + 20 * SAMPLE_RATE;
 	do
-		sc88_run_frame(&m->machine);
-	while (!sc88_idle(&m->machine) && m->machine.frame < limit);
-	return m->machine.frame - start;
+		m->ops->run_frame(&m->board);
+	while (!m->ops->idle(&m->board) && m->ops->frame(&m->board) < limit);
+	return m->ops->frame(&m->board) - start;
 }
 
 bool scemu_muted(const scemu_t *m)
 {
-	return !sc88_idle(&m->machine);
+	return !m->ops->idle(&m->board);
 }
 
 void scemu_render(scemu_t *m, int32_t *const out[2], size_t frames)
 {
-	sc88_t *b = &m->machine;
+	const board_ops_t *ops = m->ops;
+	void *b = &m->board;
+	const int pairs = ops->output_count(b);
 	for (size_t n = 0; n < frames; n++)
 	{
-		sc88_run_frame(b);
-		if (out[0])
+		ops->run_frame(b);
+		for (int pair = 0; pair < pairs; pair++)
 		{
-			/* the SC-88's one DAC on SDOC, the frame half picking left or right; the SC-88Pro's two,
-			   SDOC carrying both left channels and SDOD both right, the half picking the DAC; the
-			   SC-88VL's one DAC on SDOC, its right word the position after the left, as the Pro's */
-			out[0][2 * n] = b->mute ? 0 : xp_output(&b->xp, 2);
-			out[0][2 * n + 1] = b->mute ? 0 : xp_output(&b->xp, b->dac_right);
-		}
-		if (out[1] && b->has_lsp)
-		{
-			out[1][2 * n] = b->mute ? 0 : xp_output(&b->xp, 3);
-			out[1][2 * n + 1] = b->mute ? 0 : xp_output(&b->xp, 5);
+			if (!out[pair])
+				continue;
+			out[pair][2 * n] = ops->output(b, pair, 0);
+			out[pair][2 * n + 1] = ops->output(b, pair, 1);
 		}
 	}
 }
 
 void scemu_midi_write(scemu_t *m, int port, const uint8_t *bytes, size_t count, uint32_t frame_offset)
 {
+	midi_queue_t *q = m->ops->midi(&m->board);
+	const uint32_t frame = (uint32_t)m->ops->frame(&m->board) + frame_offset;
 	if (!m->map.map)
 	{
 		for (size_t n = 0; n < count; n++)
-			sc88_queue_midi(&m->machine, port, bytes[n], frame_offset);
+			midi_queue_push(q, port, bytes[n], frame);
 		return;
 	}
 	uint8_t out[MIDI_MAP_MAX_OUT];
@@ -115,29 +138,31 @@ void scemu_midi_write(scemu_t *m, int port, const uint8_t *bytes, size_t count, 
 	{
 		size_t len = midi_map_filter(&m->map, port, bytes[n], out);
 		for (size_t i = 0; i < len; i++)
-			sc88_queue_midi(&m->machine, port, out[i], frame_offset);
+			midi_queue_push(q, port, out[i], frame);
 	}
 }
 
 static void send_preset(scemu_t *m)
 {
+	midi_queue_t *q = m->ops->midi(&m->board);
+	const uint32_t frame = (uint32_t)m->ops->frame(&m->board);
 	uint8_t out[MIDI_MAP_MAX_OUT];
 	for (int port = 0; port < MIDI_MAP_PORTS; port++)
 	{
 		size_t len = midi_map_preset(&m->map, port, out);
 		for (size_t i = 0; i < len; i++)
-			sc88_queue_midi(&m->machine, port, out[i], 0);
+			midi_queue_push(q, port, out[i], frame);
 	}
 }
 
 void scemu_set_midi_rate(scemu_t *m, uint32_t baud)
 {
-	m->machine.midi_baud = baud;
+	m->ops->midi(&m->board)->baud = baud;
 }
 
 uint32_t scemu_midi_rate(const scemu_t *m)
 {
-	return m->machine.midi_baud;
+	return m->ops->midi((void *)&m->board)->baud;
 }
 
 void scemu_set_map(scemu_t *m, scemu_map_t map)
@@ -168,63 +193,82 @@ size_t scemu_map_selection(scemu_map_t map, uint8_t *out, size_t size)
 
 void scemu_set_midi_out(scemu_t *m, scemu_midi_out_fn fn, void *user)
 {
-	m->machine.midi_out = fn;
-	m->machine.midi_out_user = user;
+	m->ops->set_midi_out(&m->board, fn, user);
 }
 
 void scemu_set_dac_rail(scemu_t *m, int bits)
 {
-	xp_set_rail(&m->machine.xp, bits);
+	m->ops->set_rail(&m->board, bits);
 }
 
 int scemu_dac_rail(const scemu_t *m)
 {
-	return m->machine.xp.rail_bits;
+	return m->ops->rail(&m->board);
 }
 
 void scemu_button(scemu_t *m, scemu_button_t button, bool down)
 {
-	sc88_button(&m->machine, button, down);
+	m->ops->button(&m->board, button, down);
 }
 
 void scemu_set_computer_switch(scemu_t *m, scemu_computer_switch_t sw)
 {
-	m->machine.computer_switch = sw;
+	m->ops->set_computer_switch(&m->board, sw);
 }
 
 uint32_t scemu_leds(const scemu_t *m)
 {
-	return m->machine.ga.leds;
+	return m->ops->leds(&m->board);
 }
 
 const scemu_lcd_t *scemu_lcd(scemu_t *m)
 {
-	return &m->machine.lcd.out;
+	return m->ops->lcd ? m->ops->lcd(&m->board) : NULL;
 }
 
 void scemu_lcd_ack(scemu_t *m)
 {
-	m->machine.lcd.out.changed = false;
+	scemu_lcd_t *lcd = m->ops->lcd ? m->ops->lcd(&m->board) : NULL;
+	if (lcd)
+		lcd->changed = false;
+}
+
+const scemu_glcd_t *scemu_glcd(scemu_t *m)
+{
+	return m->ops->glcd ? m->ops->glcd(&m->board) : NULL;
+}
+
+void scemu_glcd_ack(scemu_t *m)
+{
+	scemu_glcd_t *glcd = m->ops->glcd ? m->ops->glcd(&m->board) : NULL;
+	if (glcd)
+		glcd->changed = false;
+}
+
+void scemu_dial(scemu_t *m, int steps)
+{
+	if (m->ops->dial)
+		m->ops->dial(&m->board, steps);
 }
 
 size_t scemu_state_size(const scemu_t *m)
 {
-	return sc88_state_size(&m->machine);
+	return m->ops->state_size(&m->board);
 }
 
 size_t scemu_state_save(const scemu_t *m, void *buffer, size_t size)
 {
-	return sc88_state_save(&m->machine, buffer, size);
+	return m->ops->state_save(&m->board, buffer, size);
 }
 
 bool scemu_state_load(scemu_t *m, const void *buffer, size_t size)
 {
-	uint32_t baud = m->machine.midi_baud;
-	int rail = m->machine.xp.rail_bits;
-	if (!sc88_state_load(&m->machine, buffer, size))
+	const uint32_t baud = m->ops->midi(&m->board)->baud;
+	const int rail = m->ops->rail(&m->board);
+	if (!m->ops->state_load(&m->board, buffer, size))
 		return false;
-	m->machine.midi_baud = baud;
-	xp_set_rail(&m->machine.xp, rail);
+	m->ops->midi(&m->board)->baud = baud;
+	m->ops->set_rail(&m->board, rail);
 	scemu_set_map(m, (scemu_map_t)m->map.map);
 	return true;
 }
@@ -236,27 +280,20 @@ bool scemu_state_info(const void *buffer, size_t size, scemu_model_t *model, uin
 
 uint64_t scemu_rom_id(const scemu_t *m)
 {
-	return m->machine.rom_id;
+	return m->ops->rom_id(&m->board);
 }
 
 size_t scemu_nvram_size(const scemu_t *m)
 {
-	(void)m;
-	return SC88_SRAM_SIZE;
+	return m->ops->nvram_size(&m->board);
 }
 
 size_t scemu_nvram_get(const scemu_t *m, void *buffer, size_t size)
 {
-	if (size < SC88_SRAM_SIZE)
-		return 0;
-	memcpy(buffer, m->machine.sram, SC88_SRAM_SIZE);
-	return SC88_SRAM_SIZE;
+	return m->ops->nvram_get(&m->board, buffer, size);
 }
 
 bool scemu_nvram_set(scemu_t *m, const void *buffer, size_t size)
 {
-	if (size != SC88_SRAM_SIZE)
-		return false;
-	memcpy(m->machine.sram, buffer, SC88_SRAM_SIZE);
-	return true;
+	return m->ops->nvram_set(&m->board, buffer, size);
 }

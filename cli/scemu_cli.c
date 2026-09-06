@@ -18,20 +18,25 @@ typedef struct rom_set
 	rom_file_t program;
 	rom_file_t wave[8];
 	int wave_count;
+	rom_file_t boot;
+	rom_file_t tone;
 } rom_set_t;
 
 static const rom_set_t ROM_SETS[] =
 {
 	{ "sc88", SCEMU_MODEL_SC88, { "roland_sc88-control-1.04.ic17", 0x80000 },
 	  { { "sc88-pcm-ic-325.ic14", 0x200000 }, { "sc88-pcm-ic-326.ic8", 0x200000 },
-	    { "sc88-pcm-ic-327.ic7", 0x200000 }, { "sc88-pcm-ic-328.ic6", 0x200000 } }, 4 },
+	    { "sc88-pcm-ic-327.ic7", 0x200000 }, { "sc88-pcm-ic-328.ic6", 0x200000 } }, 4, { NULL, 0 }, { NULL, 0 } },
 	{ "sc88vl", SCEMU_MODEL_SC88VL, { "roland_sc88_vl-1.04.ic29", 0x80000 },
 	  { { "sc88-pcm-ic-325.ic14", 0x200000 }, { "sc88-pcm-ic-326.ic8", 0x200000 },
-	    { "sc88-pcm-ic-327.ic7", 0x200000 }, { "sc88-pcm-ic-328.ic6", 0x200000 } }, 4 },
+	    { "sc88-pcm-ic-327.ic7", 0x200000 }, { "sc88-pcm-ic-328.ic6", 0x200000 } }, 4, { NULL, 0 }, { NULL, 0 } },
 	{ "sc88pro", SCEMU_MODEL_SC88PRO, { "roland_sc88pro-1.04.ic26", 0x100000 },
 	  { { "roland-r01017834-378.ic20", 0x400000 }, { "roland-r01017845-379.ic21", 0x400000 },
 	    { "roland-r01124778-519.ic22", 0x400000 }, { "roland-r01124789-520.ic23", 0x400000 },
-	    { "roland-r01124790-521.ic24", 0x400000 } }, 5 },
+	    { "roland-r01124790-521.ic24", 0x400000 } }, 5, { NULL, 0 }, { NULL, 0 } },
+	{ "sc8850", SCEMU_MODEL_SC8850, { "roland-r01678145.ic9", 0x100000 },
+	  { { "roland-r01891445-823.ic53", 0x1000000 }, { "roland-r01891456-824.ic54", 0x1000000 } }, 2,
+	  { "roland-r01783490.ic1", 0x10000 }, { "roland-r01561945.ic10", 0x200000 } },
 };
 
 /* ---------------------------------------------------------------- files */
@@ -290,7 +295,7 @@ static int smf_load(smf_t *s, const uint8_t *data, size_t size, uint32_t rate)
 
 static void usage(const char *argv0)
 {
-	fprintf(stderr, "usage: %s <sc88|sc88vl|sc88pro> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--tail N] [--state boot.state] [--map sc55|sc88|sc88pro] [--midi-rate BAUD] [--rail BITS] [--raw words.bin] [--no-jit]\n", argv0);
+	fprintf(stderr, "usage: %s <sc88|sc88vl|sc88pro|sc8850> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--tail N] [--state boot.state] [--map sc55|sc88|sc88pro] [--midi-rate BAUD] [--rail BITS] [--raw words.bin] [--no-jit]\n", argv0);
 }
 
 int main(int argc, char **argv)
@@ -327,7 +332,7 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[n], "--state") && n + 1 < argc)
 			state_path = argv[++n];
 		else if (!strcmp(argv[n], "--no-jit"))
-			config.h8500_interpreter = true;
+			config.h8500_interpreter = config.sh2_interpreter = true;
 		else if (!strcmp(argv[n], "--rail") && n + 1 < argc)
 			rail = atoi(argv[++n]);
 		else if (!strcmp(argv[n], "--raw") && n + 1 < argc)
@@ -366,6 +371,15 @@ int main(int argc, char **argv)
 	for (int n = 0; n < set->wave_count; n++)
 		if (!roms.wave_rom[n])
 			return 1;
+	if (set->boot.name)
+	{
+		roms.boot_rom = load_rom(argv[2], &set->boot);
+		roms.boot_rom_size = set->boot.size;
+		roms.tone_rom = load_rom(argv[2], &set->tone);
+		roms.tone_rom_size = set->tone.size;
+		if (!roms.boot_rom || !roms.tone_rom)
+			return 1;
+	}
 
 	scemu_t *m = scemu_create(set->model, &roms, &config);
 	if (!m)
@@ -477,6 +491,8 @@ int main(int argc, char **argv)
 	free(smf.events);
 	free(midi_data);
 	scemu_destroy(m);
+	free((void *)roms.boot_rom);
+	free((void *)roms.tone_rom);
 	free((void *)roms.program_rom);
 	for (int n = 0; n < set->wave_count; n++)
 		free((void *)roms.wave_rom[n]);

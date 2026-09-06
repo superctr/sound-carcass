@@ -11,6 +11,8 @@ size_t wave_rom_size(scemu_model_t model)
 	case SCEMU_MODEL_SC88PRO:
 	case SCEMU_MODEL_VEGSPRO:
 		return 0x1400000;
+	case SCEMU_MODEL_SC8850:
+		return 0x2000000;
 	default:
 		return 0;
 	}
@@ -21,9 +23,11 @@ uint32_t wave_rom_chip_size(scemu_model_t model)
 	return (model == SCEMU_MODEL_SC88 || model == SCEMU_MODEL_SC88VL) ? 0x200000 : 0x400000;
 }
 
-static void unscramble(uint8_t *out, const uint8_t *in, size_t size)
+static const uint8_t ADDRESS_LINES_SC88[18] = { 0, 4, 2, 3, 1, 13, 7, 12, 5, 10, 16, 9, 6, 8, 14, 17, 11, 15 };
+static const uint8_t ADDRESS_LINES_SC8850[18] = { 0, 4, 2, 3, 1, 8, 12, 6, 13, 11, 9, 16, 7, 5, 14, 17, 10, 15 };
+
+static void unscramble(uint8_t *out, const uint8_t *in, size_t size, const uint8_t *address_lines)
 {
-	static const uint8_t address_lines[18] = { 0, 4, 2, 3, 1, 13, 7, 12, 5, 10, 16, 9, 6, 8, 14, 17, 11, 15 };
 	static const uint8_t data_lines[8] = { 2, 0, 4, 5, 7, 6, 3, 1 };
 	uint32_t address_of[3][64];
 	uint8_t data_of[256];
@@ -57,13 +61,14 @@ static void unscramble(uint8_t *out, const uint8_t *in, size_t size)
 bool wave_rom_build(scemu_model_t model, const scemu_roms_t *roms, uint8_t *out, size_t out_size)
 {
 	size_t offset = 0;
+	const uint8_t *address_lines = model == SCEMU_MODEL_SC8850 ? ADDRESS_LINES_SC8850 : ADDRESS_LINES_SC88;
 	if (out_size < wave_rom_size(model))
 		return false;
 	for (int n = 0; n < roms->wave_rom_count; n++)
 	{
 		if (offset + roms->wave_rom_size[n] > out_size)
 			return false;
-		unscramble(out + offset, roms->wave_rom[n], roms->wave_rom_size[n]);
+		unscramble(out + offset, roms->wave_rom[n], roms->wave_rom_size[n], address_lines);
 		offset += roms->wave_rom_size[n];
 	}
 	return offset == wave_rom_size(model);

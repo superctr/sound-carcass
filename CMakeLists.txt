@@ -32,13 +32,19 @@ endif()
 add_library(scemu STATIC
 	lib/scemu.c
 	lib/h8500.c
+	lib/sh2.c
+	lib/sh2_jit.c
 	lib/xp.c
 	lib/lsp.c
 	lib/sc88.c
+	lib/sc8850.c
 	lib/state.c
-	lib/gate_array.c
+	lib/state_sc8850.c
+	lib/midi_queue.c
 	lib/sub_hle.c
 	lib/lcd.c
+	lib/glcd.c
+	lib/flash.c
 	lib/wave_rom.c
 	lib/jit.c
 	lib/midi_map.c
@@ -95,6 +101,9 @@ if(ZLIB_FOUND)
 		foreach(pitch 4 8)
 			list(APPEND PANEL_ART panel_${model}_base_p${pitch} panel_${model}_atlas_p${pitch})
 		endforeach()
+	endforeach()
+	foreach(pitch 3 6)   # the SC-8850's glass is a 160 x 64 dot panel, so its own pitches
+		list(APPEND PANEL_ART panel_sc8850_base_p${pitch} panel_sc8850_atlas_p${pitch})
 	endforeach()
 	foreach(art ${PANEL_ART})
 		set(src ${CMAKE_CURRENT_SOURCE_DIR}/gui/${art}.png)

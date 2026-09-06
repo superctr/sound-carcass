@@ -26,6 +26,7 @@ typedef enum scemu_model
 	SCEMU_MODEL_SC88VL,
 	SCEMU_MODEL_SC88PRO,
 	SCEMU_MODEL_VEGSPRO,
+	SCEMU_MODEL_SC8850,
 	SCEMU_MODEL_COUNT
 } scemu_model_t;
 
@@ -41,6 +42,13 @@ typedef struct scemu_roms
 	const void *wave_rom[SCEMU_MAX_WAVE_ROMS];
 	size_t wave_rom_size[SCEMU_MAX_WAVE_ROMS];
 	int wave_rom_count;
+	/* the SC-8850 only: the CPU's own 64 KB ROM and the 2 MB tone parameter
+	 * flash; program_rom is its 1 MB program flash, and the wave ROMs are
+	 * IC53, IC54 */
+	const void *boot_rom;
+	size_t boot_rom_size;
+	const void *tone_rom;
+	size_t tone_rom_size;
 } scemu_roms_t;
 
 /* Executable memory for the DSP code generators.  Both hooks NULL selects the
@@ -54,6 +62,8 @@ typedef struct scemu_config
 	/* run the H8/510 firmware through the interpreter rather than the
 	 * dynamic translator (also SCEMU_H8500_JIT=0 in the environment) */
 	bool h8500_interpreter;
+	/* the same for the SC-8850's SH-2 (SCEMU_SH2_JIT=0) */
+	bool sh2_interpreter;
 } scemu_config_t;
 
 /* Front panel buttons.  The matrix positions are the same on the SC-88 and the
@@ -90,6 +100,23 @@ typedef enum scemu_button
 	SCEMU_BUTTON_EDIT2_RIGHT,
 	SCEMU_BUTTON_EDIT3_LEFT,      /* Vib Delay / Resonance / Release / EFX Value */
 	SCEMU_BUTTON_EDIT3_RIGHT,
+	SCEMU_BUTTON_F1,              /* the SC-8850 from here: the four keys under the display */
+	SCEMU_BUTTON_F2,
+	SCEMU_BUTTON_F3,
+	SCEMU_BUTTON_F4,
+	SCEMU_BUTTON_MAP,             /* SC-8850: Inst Map, the fifth key under the display */
+	SCEMU_BUTTON_VALUE,           /* SC-8850: the value dial's push switch */
+	SCEMU_BUTTON_EDIT,            /* SC-8850: Edit / Util */
+	SCEMU_BUTTON_DRUM,
+	SCEMU_BUTTON_EFFECTS,
+	SCEMU_BUTTON_SHIFT,
+	SCEMU_BUTTON_DOWN,            /* SC-8850: the down key, Variation with Shift */
+	SCEMU_BUTTON_UP,              /* SC-8850: the up key, Instrument with Shift */
+	SCEMU_BUTTON_EXIT,
+	SCEMU_BUTTON_ENTER,
+	SCEMU_BUTTON_SOLO,
+	SCEMU_BUTTON_DEC,
+	SCEMU_BUTTON_INC,
 	SCEMU_BUTTON_COUNT
 } scemu_button_t;
 
@@ -123,6 +150,10 @@ typedef enum scemu_led
 	SCEMU_LED_EDIT3,
 	SCEMU_LED_USER_INST,          /* the lens; green */
 	SCEMU_LED_USER_INST_RED,      /* the Pro's second lens die; both lit is EFX mode */
+	SCEMU_LED_SOLO,               /* the SC-8850 from here; its Mute LED is SCEMU_LED_MUTE */
+	SCEMU_LED_EDIT,
+	SCEMU_LED_DRUM,
+	SCEMU_LED_EFFECTS,
 	SCEMU_LED_COUNT
 } scemu_led_t;
 
@@ -137,6 +168,19 @@ typedef struct scemu_lcd
 	bool display_on;
 	bool changed;
 } scemu_lcd_t;
+
+/* The graphic display's memory.  The SC-8850 draws its whole panel — the letters
+ * as much as the instrument pictures and the part meters — as a bitmap into the
+ * SED1335's graphics page, and the frame reaches the host in the controller's
+ * own layout: 64 lines of 27 bytes, six dots to a byte, bit 7 of byte 0 the
+ * leftmost dot of a line.  The last two dots of byte 26 hang off the 160 dot
+ * panel.  The host draws the glass from this. */
+typedef struct scemu_glcd
+{
+	uint8_t bitmap[64 * 27];
+	bool display_on;
+	bool changed;
+} scemu_glcd_t;
 
 /* MIDI IN ports.  The Pro's front panel jack is a switch onto port B. */
 enum { SCEMU_MIDI_IN_A = 0, SCEMU_MIDI_IN_B = 1 };
@@ -219,6 +263,11 @@ void scemu_set_computer_switch(scemu_t *m, scemu_computer_switch_t sw);
 uint32_t scemu_leds(const scemu_t *m);
 const scemu_lcd_t *scemu_lcd(scemu_t *m);
 void scemu_lcd_ack(scemu_t *m);
+/* The graphic display of the models that have one; NULL on the rest. */
+const scemu_glcd_t *scemu_glcd(scemu_t *m);
+void scemu_glcd_ack(scemu_t *m);
+/* One detent of an endless encoder, positive clockwise: the SC-8850's value dial. */
+void scemu_dial(scemu_t *m, int steps);
 
 /* State.  A state is the whole machine at a frame boundary, including the
  * battery-backed SRAM and the MIDI not yet delivered, as a byte stream that
