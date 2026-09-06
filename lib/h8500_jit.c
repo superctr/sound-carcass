@@ -56,6 +56,7 @@ struct h8500_jit
 	uint8_t *wr8[PAGE_COUNT];
 	uint8_t *wr16[PAGE_COUNT];
 	uint32_t limit_base;
+	uint32_t io_base, io_size, addr_mask;
 	uint64_t stat_blocks_run;
 	uint64_t stat_fallbacks;
 	uint64_t stat_interrupts;
@@ -209,14 +210,17 @@ int h8500_jit_run(h8500_t *cpu, int cycles)
 /* helpers the translated code calls                                  */
 /* ------------------------------------------------------------------ */
 
-static int is_internal(uint32_t addr)
+/* the register file, wherever the part keeps it and through whatever page
+ * the access reached it */
+static int is_internal(h8500_t *cpu, uint32_t addr)
 {
-	return addr >= H8500_IO_BASE && addr < H8500_IO_BASE + H8500_IO_SIZE;
+	addr &= cpu->var->addr_mask;
+	return addr - cpu->var->io_base < cpu->var->io_size;
 }
 
 static sljit_sw SLJIT_FUNC hread8(h8500_t *cpu, sljit_sw addr)
 {
-	if (is_internal((uint32_t)addr))
+	if (is_internal(cpu, (uint32_t)addr))
 		flush(cpu);
 	return h8500_mem_read8(cpu, (uint32_t)addr);
 }
@@ -224,7 +228,7 @@ static sljit_sw SLJIT_FUNC hread8(h8500_t *cpu, sljit_sw addr)
 static sljit_sw SLJIT_FUNC hread16(h8500_t *cpu, sljit_sw addr)
 {
 	uint32_t a = (uint32_t)addr;
-	if (is_internal(a) || is_internal(a + 1))
+	if (is_internal(cpu, a) || is_internal(cpu, a + 1))
 		flush(cpu);
 	return h8500_mem_read16(cpu, a);
 }
@@ -232,7 +236,7 @@ static sljit_sw SLJIT_FUNC hread16(h8500_t *cpu, sljit_sw addr)
 static void SLJIT_FUNC hwrite8(h8500_t *cpu, sljit_sw addr, sljit_sw data)
 {
 	uint32_t a = (uint32_t)addr;
-	if (is_internal(a))
+	if (is_internal(cpu, a))
 	{
 		flush(cpu);
 		h8500_mem_write8(cpu, a, (uint8_t)data);
@@ -245,7 +249,7 @@ static void SLJIT_FUNC hwrite8(h8500_t *cpu, sljit_sw addr, sljit_sw data)
 static void SLJIT_FUNC hwrite16(h8500_t *cpu, sljit_sw addr, sljit_sw data)
 {
 	uint32_t a = (uint32_t)addr;
-	if (is_internal(a) || is_internal(a + 1))
+	if (is_internal(cpu, a) || is_internal(cpu, a + 1))
 	{
 		flush(cpu);
 		h8500_mem_write16(cpu, a, (uint16_t)data);
@@ -767,8 +771,8 @@ static void mem_read(emitter_t *e, int sz, sljit_s32 dst)
 	struct sljit_jump *slow1, *slow2, *slow3 = NULL, *done;
 	uint8_t **table = sz ? e->j->rd16 : e->j->rd8;
 
-	op2(e, SLJIT_SUB, SLJIT_R1, 0, EA, 0, SLJIT_IMM, sz ? H8500_IO_BASE - 1 : H8500_IO_BASE);
-	slow1 = sljit_emit_cmp(e->c, SLJIT_LESS, SLJIT_R1, 0, SLJIT_IMM, sz ? H8500_IO_SIZE + 1 : H8500_IO_SIZE);
+	op2(e, SLJIT_SUB, SLJIT_R1, 0, EA, 0, SLJIT_IMM, sz ? e->j->io_base - 1 : e->j->io_base);
+	slow1 = sljit_emit_cmp(e->c, SLJIT_LESS, SLJIT_R1, 0, SLJIT_IMM, sz ? e->j->io_size + 1 : e->j->io_size);
 	if (sz)
 	{
 		op2(e, SLJIT_AND, SLJIT_R1, 0, EA, 0, SLJIT_IMM, 1);
@@ -806,8 +810,8 @@ static void mem_write(emitter_t *e, int sz, sljit_s32 src)
 	struct sljit_jump *slow1, *slow2, *slow3 = NULL, *done;
 	uint8_t **table = sz ? e->j->wr16 : e->j->wr8;
 
-	op2(e, SLJIT_SUB, SLJIT_R1, 0, EA, 0, SLJIT_IMM, sz ? H8500_IO_BASE - 1 : H8500_IO_BASE);
-	slow1 = sljit_emit_cmp(e->c, SLJIT_LESS, SLJIT_R1, 0, SLJIT_IMM, sz ? H8500_IO_SIZE + 1 : H8500_IO_SIZE);
+	op2(e, SLJIT_SUB, SLJIT_R1, 0, EA, 0, SLJIT_IMM, sz ? e->j->io_base - 1 : e->j->io_base);
+	slow1 = sljit_emit_cmp(e->c, SLJIT_LESS, SLJIT_R1, 0, SLJIT_IMM, sz ? e->j->io_size + 1 : e->j->io_size);
 	if (sz)
 	{
 		op2(e, SLJIT_AND, SLJIT_R1, 0, EA, 0, SLJIT_IMM, 1);
@@ -2047,7 +2051,7 @@ static block_t *translate(h8500_t *cpu, uint32_t key)
 	j->count++;
 
 	for (n = 0; n < cpu->region_count; n++)
-		if (key - cpu->regions[n].base < cpu->regions[n].size)
+		if ((key & cpu->var->addr_mask) - cpu->regions[n].base < cpu->regions[n].size)
 		{
 			r = cpu->regions[n].writable ? NULL : &cpu->regions[n];
 			break;
@@ -2056,7 +2060,7 @@ static block_t *translate(h8500_t *cpu, uint32_t key)
 		return b;
 
 	d.base = r->data;
-	d.region_base = r->base;
+	d.region_base = r->base + (key & ~cpu->var->addr_mask);
 	d.region_size = r->size;
 	d.cp = (uint8_t)(key >> 16);
 	d.pc = (uint16_t)key;
@@ -2128,17 +2132,24 @@ static bool make_exit_stub(struct h8500_jit *j)
 	return j->exit_code != NULL;
 }
 
+/* One entry per 4 KB of the 24-bit space; a page the address mask folds
+ * elsewhere takes its region from the folded address, and a page holding
+ * on-chip RAM is left to the slow path (the register file is diverted
+ * before the table). */
 static void build_pages(h8500_t *cpu)
 {
 	struct h8500_jit *j = cpu->jit;
+	const h8500_variant_t *v = cpu->var;
 	uint32_t p;
 	for (p = 0; p < PAGE_COUNT; p++)
 	{
-		uint32_t addr = p << PAGE_SHIFT;
+		uint32_t addr = (p << PAGE_SHIFT) & v->addr_mask;
 		const h8500_region_t *r = NULL;
 		int n;
 		uint8_t *biased;
 		j->rd8[p] = j->rd16[p] = j->wr8[p] = j->wr16[p] = NULL;
+		if (v->ram_size && addr + (1u << PAGE_SHIFT) > v->ram_base && addr < v->io_base)
+			continue;
 		for (n = 0; n < cpu->region_count; n++)
 			if (addr - cpu->regions[n].base < cpu->regions[n].size)
 			{
@@ -2147,7 +2158,7 @@ static void build_pages(h8500_t *cpu)
 			}
 		if (!r)
 			continue;
-		biased = (uint8_t *)((uintptr_t)r->data - r->base);
+		biased = (uint8_t *)((uintptr_t)r->data - r->base - ((p << PAGE_SHIFT) - addr));
 		if (r->base + r->size >= addr + (1u << PAGE_SHIFT))
 		{
 			j->rd8[p] = biased;
@@ -2187,6 +2198,9 @@ bool h8500_jit_attach(h8500_t *cpu, struct jit_alloc *alloc)
 		free(j);
 		return false;
 	}
+	j->io_base = cpu->var->io_base;
+	j->io_size = cpu->var->io_size;
+	j->addr_mask = cpu->var->addr_mask;
 	cpu->jit = j;
 	build_pages(cpu);
 	cpu->jit_enabled = true;

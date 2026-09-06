@@ -6,15 +6,18 @@
 #include <stddef.h>
 
 /*
- * Hitachi H8/510 (HD6415108) in mode 4: 24-bit addresses, 16-bit external
- * bus, big-endian.  The core owns everything on the chip — CPU, interrupt
- * controller, the two SCIs, the A/D converter, FRT1/FRT2, the 8-bit timer,
- * the watchdog, the I/O ports — and reaches the board through h8500_bus_t.
- * The on-chip register file at page 0 FE80-FFFF never reaches the bus.
+ * The Hitachi H8/500 family in mode 4 (maximum mode), big-endian: the
+ * H8/510 (HD6415108, 24-bit addresses, 16-bit bus) and the H8/532
+ * (HD6475328, 20-bit addresses, 8-bit bus).  The core owns everything on
+ * the chip — CPU, interrupt controller, the SCIs, the A/D converter, the
+ * free-running timers, the 8-bit timer, the watchdog, the I/O ports, and
+ * the on-chip RAM where the part has one — and reaches the board through
+ * h8500_bus_t.  The on-chip register file in page 0 never reaches the bus.
+ * Which part is which is one h8500_variant_t; see docs/h8500_notes.md.
  *
- * Time is φ cycles (the crystal halved: 10 MHz on the SC-88).  All state is
- * plain data; a snapshot is a copy of the struct with the bus and the region
- * pointers put back.
+ * Time is φ cycles (the crystal halved: 10 MHz on the SC-88, 12 MHz on the
+ * SC-55mkII).  All state is plain data; a snapshot is a copy of the struct
+ * with the bus, the variant and the region pointers put back.
  */
 
 typedef struct h8500_bus
@@ -62,7 +65,7 @@ enum
 enum
 {
 	H8500_PORT1 = 1, H8500_PORT2, H8500_PORT3, H8500_PORT4,
-	H8500_PORT5, H8500_PORT6, H8500_PORT7, H8500_PORT8
+	H8500_PORT5, H8500_PORT6, H8500_PORT7, H8500_PORT8, H8500_PORT9
 };
 
 enum
@@ -71,12 +74,76 @@ enum
 	H8500_SCI2 = 1
 };
 
+enum
+{
+	H8500_H8510 = 0,
+	H8500_H8532
+};
+
+/* the H8/510's register file; io[] is sized for it and the H8/532's fits
+ * inside */
 #define H8500_IO_BASE 0xfe80
 #define H8500_IO_SIZE 0x180
+
+#define H8500_MAX_PORTS 10
+#define H8500_MAX_FRT 3
+#define H8500_MAX_SCI 2
+#define H8500_MAX_IRAM 0x400
+
+/* Everything that differs between the parts, as plain data: where each
+ * module's registers sit in the register file (offsets from io_base, -1
+ * for a module or register the part does not have), which vector each one
+ * raises, and the vector -> IPR slot table.  Even slots are bits 6-4 of
+ * IPR[slot/2], odd slots bits 2-0; -1 is a source with no programmable
+ * priority. */
+typedef struct h8500_variant
+{
+	uint32_t addr_mask;
+	uint16_t io_base, io_size;
+	uint16_t ram_base, ram_size;
+	bool bus8;
+
+	int port_count;
+	int16_t port_ddr[H8500_MAX_PORTS];
+	int16_t port_dr[H8500_MAX_PORTS];
+	uint8_t port_ddr_fixed[H8500_MAX_PORTS];
+	uint8_t port_ddr_reset[H8500_MAX_PORTS];
+	uint8_t port_mask[H8500_MAX_PORTS];
+
+	int frt_count;
+	uint8_t frt_reg[H8500_MAX_FRT];
+	uint8_t frt_vector[H8500_MAX_FRT];
+	bool frt_temp;
+
+	uint8_t tmr_reg, tmr_vector;
+
+	int sci_count;
+	uint8_t sci_reg[H8500_MAX_SCI];
+	uint8_t sci_vector[H8500_MAX_SCI];
+
+	uint8_t adc_reg, adc_vector;
+
+	int16_t wdt_reg;
+	uint8_t wdt_vector;
+
+	uint8_t ipr_reg;
+
+	int irq_pin_count;
+	uint8_t irq_vector[4];
+	int16_t ctl_reg[2];
+	uint8_t ctl_write[2], ctl_read[2];
+	uint8_t irq_ctl, irq_ctl_shift;
+	uint8_t nmi_ctl, nmi_ctl_bit;
+
+	signed char vector_slot[64];
+} h8500_variant_t;
+
+const h8500_variant_t *h8500_variant(int model);
 
 typedef struct h8500
 {
 	h8500_bus_t bus;
+	const h8500_variant_t *var;
 	h8500_region_t regions[H8500_MAX_REGIONS];
 	int region_count;
 
@@ -93,10 +160,15 @@ typedef struct h8500
 	uint32_t irq_pend[3];
 	bool no_irq;
 
-	/* on-chip register file, FE80-FFFF, and the peripherals behind it */
+	/* on-chip register file and the peripherals behind it; io_kind/io_unit
+	 * say which module owns each byte of it, filled in from the variant */
 	uint8_t io[H8500_IO_SIZE];
-	uint16_t frt_count[2];
-	uint32_t frt_prescale[2];
+	uint8_t io_kind[H8500_IO_SIZE];
+	uint8_t io_unit[H8500_IO_SIZE];
+	uint8_t iram[H8500_MAX_IRAM];
+	uint16_t frt_count[H8500_MAX_FRT];
+	uint32_t frt_prescale[H8500_MAX_FRT];
+	uint8_t frt_temp[H8500_MAX_FRT];
 	uint8_t tmr_count;
 	uint32_t tmr_prescale;
 	uint32_t wdt_prescale;
@@ -111,7 +183,7 @@ typedef struct h8500
 		uint8_t ssr_read;
 		bool tx_busy;
 	} sci[2];
-	uint16_t port_out[9];
+	uint16_t port_out[H8500_MAX_PORTS];
 
 	/* time */
 	uint64_t cycles;
@@ -125,7 +197,9 @@ typedef struct h8500
 	uint64_t jit_deadline;
 } h8500_t;
 
+/* h8500_init is the H8/510; h8500_init_model picks the part. */
 void h8500_init(h8500_t *cpu, const h8500_bus_t *bus);
+void h8500_init_model(h8500_t *cpu, const h8500_bus_t *bus, int model);
 void h8500_map(h8500_t *cpu, uint32_t base, uint32_t size, uint8_t *data, bool writable);
 void h8500_reset(h8500_t *cpu);
 

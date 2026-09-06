@@ -21,22 +21,6 @@ enum
 	VEC_TRAPA = 16
 };
 
-static const int irq_pin_vector[4] = { 32, 36, 37, 38 };
-
-/* IPR slot per vector: even slots are bits 6-4 of IPR[slot/2], odd slots
- * bits 2-0; -1 means the source has no programmable priority. */
-static const signed char vector_slot[64] =
-{
-	-1, -1, -1, -1, -1, -1, -1, -1,
-	-1, -1, -1, -1, -1, -1, -1, -1,
-	-1, -1, -1, -1, -1, -1, -1, -1,
-	-1, -1, -1, -1, -1, -1, -1, -1,
-	 0,  0, -1, -1,  1,  1,  1, -1,
-	 2,  2,  2,  2,  3,  3,  3,  3,
-	 4,  4,  4, -1,  5,  5,  5, -1,
-	 6,  6,  6, -1,  7, -1, -1, -1
-};
-
 static void wdt_write16(h8500_t *cpu, uint16_t data);
 
 #define mem_read8 h8500_mem_read8
@@ -77,17 +61,25 @@ static int region_find(h8500_t *cpu, uint32_t addr, int len, uint8_t **ptr)
 	return 0;
 }
 
-static int is_internal(uint32_t addr)
+/* the register file, and the on-chip RAM below it where the part has one */
+static int is_internal(h8500_t *cpu, uint32_t addr)
 {
-	return addr >= H8500_IO_BASE && addr < H8500_IO_BASE + H8500_IO_SIZE;
+	const h8500_variant_t *v = cpu->var;
+	return addr - v->ram_base < (uint32_t)(v->ram_size + v->io_size);
+}
+
+static int is_iram(h8500_t *cpu, uint32_t addr)
+{
+	return addr < cpu->var->io_base;
 }
 
 uint8_t h8500_mem_read8(h8500_t *cpu, uint32_t addr)
 {
 	uint8_t *p;
-	addr &= 0xffffffu;
-	if (is_internal(addr))
-		return h8500_io_read(cpu, (uint16_t)addr);
+	addr &= cpu->var->addr_mask;
+	if (is_internal(cpu, addr))
+		return is_iram(cpu, addr) ? cpu->iram[addr - cpu->var->ram_base]
+		                          : h8500_io_read(cpu, (uint16_t)addr);
 	if (region_find(cpu, addr, 1, &p))
 		return *p;
 	return cpu->bus.read8 ? cpu->bus.read8(cpu->bus.user, addr) : 0xff;
@@ -96,10 +88,13 @@ uint8_t h8500_mem_read8(h8500_t *cpu, uint32_t addr)
 void h8500_mem_write8(h8500_t *cpu, uint32_t addr, uint8_t data)
 {
 	uint8_t *p;
-	addr &= 0xffffffu;
-	if (is_internal(addr))
+	addr &= cpu->var->addr_mask;
+	if (is_internal(cpu, addr))
 	{
-		h8500_io_write(cpu, (uint16_t)addr, data);
+		if (is_iram(cpu, addr))
+			cpu->iram[addr - cpu->var->ram_base] = data;
+		else
+			h8500_io_write(cpu, (uint16_t)addr, data);
 		return;
 	}
 	switch (region_find(cpu, addr, 1, &p))
@@ -115,14 +110,21 @@ void h8500_mem_write8(h8500_t *cpu, uint32_t addr, uint8_t data)
 uint16_t h8500_mem_read16(h8500_t *cpu, uint32_t addr)
 {
 	uint8_t *p;
-	addr &= 0xffffffu;
+	addr &= cpu->var->addr_mask;
 	if (addr & 1)
 		return (uint16_t)((mem_read8(cpu, addr) << 8) | mem_read8(cpu, addr + 1));
-	if (is_internal(addr))
+	if (is_internal(cpu, addr))
+	{
+		if (is_iram(cpu, addr))
+			return (uint16_t)((cpu->iram[addr - cpu->var->ram_base] << 8) |
+			                  cpu->iram[addr + 1 - cpu->var->ram_base]);
 		return (uint16_t)((h8500_io_read(cpu, (uint16_t)addr) << 8) |
 		                  h8500_io_read(cpu, (uint16_t)(addr + 1)));
+	}
 	if (region_find(cpu, addr, 2, &p))
 		return (uint16_t)((p[0] << 8) | p[1]);
+	if (cpu->var->bus8)
+		return (uint16_t)((mem_read8(cpu, addr) << 8) | mem_read8(cpu, addr + 1));
 	if (cpu->bus.read16)
 		return cpu->bus.read16(cpu->bus.user, addr);
 	return 0xffff;
@@ -131,16 +133,22 @@ uint16_t h8500_mem_read16(h8500_t *cpu, uint32_t addr)
 void h8500_mem_write16(h8500_t *cpu, uint32_t addr, uint16_t data)
 {
 	uint8_t *p;
-	addr &= 0xffffffu;
+	addr &= cpu->var->addr_mask;
 	if (addr & 1)
 	{
 		mem_write8(cpu, addr, (uint8_t)(data >> 8));
 		mem_write8(cpu, addr + 1, (uint8_t)data);
 		return;
 	}
-	if (is_internal(addr))
+	if (is_internal(cpu, addr))
 	{
-		if (addr == 0xff10)
+		if (is_iram(cpu, addr))
+		{
+			cpu->iram[addr - cpu->var->ram_base] = (uint8_t)(data >> 8);
+			cpu->iram[addr + 1 - cpu->var->ram_base] = (uint8_t)data;
+		}
+		else if (cpu->var->wdt_reg >= 0 &&
+		         addr == (uint32_t)(cpu->var->io_base + cpu->var->wdt_reg))
 			wdt_write16(cpu, data);
 		else
 		{
@@ -159,6 +167,12 @@ void h8500_mem_write16(h8500_t *cpu, uint32_t addr, uint16_t data)
 		return;
 	default:
 		break;
+	}
+	if (cpu->var->bus8)
+	{
+		mem_write8(cpu, addr, (uint8_t)(data >> 8));
+		mem_write8(cpu, addr + 1, (uint8_t)data);
+		return;
 	}
 	if (cpu->bus.write16)
 		cpu->bus.write16(cpu->bus.user, addr, data);
@@ -213,10 +227,43 @@ enum
 	R_NMICR = 0x9c, R_IRQCR
 };
 
+/* H8/532 register file, offsets from FF80 */
+enum
+{
+	M_P1DDR = 0x00, M_P2DDR, M_P1DR, M_P2DR,
+	M_P4DDR = 0x05, M_P3DR, M_P4DR,
+	M_P5DDR = 0x08, M_P6DDR, M_P5DR, M_P6DR,
+	M_P7DDR = 0x0c, M_P7DR = 0x0e, M_P8DR,
+	M_FRT1  = 0x10,
+	M_FRT2  = 0x20,
+	M_FRT3  = 0x30,
+	M_TMRCR = 0x50,
+	M_SCI1  = 0x58,
+	M_ADDR0 = 0x60,
+	M_WDT   = 0x6c,
+	M_IPRA  = 0x70,
+	M_DTEA  = 0x74,
+	M_P1CR  = 0x7c,
+	M_P9DDR = 0x7e, M_P9DR
+};
+
 /* FRT sub-offsets */
 enum { F_TCR = 0, F_TCSR, F_FRCH, F_FRCL, F_OCRAH, F_OCRAL, F_OCRBH, F_OCRBL, F_ICRH, F_ICRL };
+/* 8-bit timer sub-offsets */
+enum { T_TCR = 0, T_TCSR, T_TCORA, T_TCORB, T_TCNT };
 /* SCI sub-offsets */
 enum { S_SMR = 0, S_BRR, S_SCR, S_TDR, S_SSR, S_RDR };
+/* A/D sub-offsets */
+enum { A_ADDR0 = 0, A_ADCSR = 8, A_ADCR };
+/* watchdog sub-offsets */
+enum { W_TCSR = 0, W_TCNT };
+
+/* which module owns a byte of the register file */
+enum
+{
+	IOK_PLAIN = 0, IOK_PORT_DDR, IOK_PORT_DR,
+	IOK_FRT, IOK_TMR, IOK_SCI, IOK_ADC, IOK_WDT, IOK_IPR, IOK_CTL
+};
 
 /* SSR bits */
 #define SSR_TDRE 0x80
@@ -226,9 +273,114 @@ enum { S_SMR = 0, S_BRR, S_SCR, S_TDR, S_SSR, S_RDR };
 #define SSR_PER  0x08
 #define SSR_TEND 0x04
 
-static const uint8_t port_ddr_reg[9] = { 0, R_P1DDR, R_P2DDR, R_P3DDR, R_P4DDR, R_P5DDR, R_P6DDR, 0, R_P8DDR };
-static const uint8_t port_dr_reg[9]  = { 0, R_P1DR, R_P2DR, R_P3DR, R_P4DR, R_P5DR, R_P6DR, R_P7DR, R_P8DR };
-static const uint8_t port_mask[9]    = { 0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x00 };
+static const h8500_variant_t variant_h8510 =
+{
+	.addr_mask = 0xffffffu,
+	.io_base = 0xfe80, .io_size = 0x180,
+	.ram_base = 0xfe80, .ram_size = 0,
+	.bus8 = false,
+
+	.port_count = 8,
+	.port_ddr = { -1, R_P1DDR, R_P2DDR, R_P3DDR, R_P4DDR, R_P5DDR, R_P6DDR, -1, R_P8DDR, -1 },
+	.port_dr  = { -1, R_P1DR, R_P2DR, R_P3DR, R_P4DR, R_P5DR, R_P6DR, R_P7DR, R_P8DR, -1 },
+	.port_ddr_fixed = { 0, 0, 0, 0, 0, 0, 0, 0xff, 0, 0 },
+	.port_ddr_reset = { 0, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0, 0x00, 0 },
+	.port_mask = { 0, 0, 0, 0, 0, 0, 0, 0xf0, 0, 0 },
+
+	.frt_count = 2,
+	.frt_reg = { R_FRT1, R_FRT2 },
+	.frt_vector = { 40, 44 },
+	.frt_temp = false,
+
+	.tmr_reg = R_TMRCR, .tmr_vector = 48,
+
+	.sci_count = 2,
+	.sci_reg = { R_SCI1, R_SCI2 },
+	.sci_vector = { 52, 56 },
+
+	.adc_reg = R_ADDR0, .adc_vector = 60,
+
+	.wdt_reg = R_WDT, .wdt_vector = 33,
+
+	.ipr_reg = R_IPRA,
+
+	.irq_pin_count = 4,
+	.irq_vector = { 32, 36, 37, 38 },
+	.ctl_reg = { R_NMICR, R_IRQCR },
+	.ctl_write = { 0x01, 0x0f },
+	.ctl_read = { 0xfe, 0xf0 },
+	.irq_ctl = 1, .irq_ctl_shift = 0,
+	.nmi_ctl = 0, .nmi_ctl_bit = 0,
+
+	.vector_slot =
+	{
+		-1, -1, -1, -1, -1, -1, -1, -1,
+		-1, -1, -1, -1, -1, -1, -1, -1,
+		-1, -1, -1, -1, -1, -1, -1, -1,
+		-1, -1, -1, -1, -1, -1, -1, -1,
+		 0,  0, -1, -1,  1,  1,  1, -1,
+		 2,  2,  2,  2,  3,  3,  3,  3,
+		 4,  4,  4, -1,  5,  5,  5, -1,
+		 6,  6,  6, -1,  7, -1, -1, -1
+	}
+};
+
+static const h8500_variant_t variant_h8532 =
+{
+	.addr_mask = 0x0fffffu,
+	.io_base = 0xff80, .io_size = 0x80,
+	.ram_base = 0xfb80, .ram_size = 0x400,
+	.bus8 = true,
+
+	.port_count = 9,
+	.port_ddr = { -1, M_P1DDR, M_P2DDR, -1, M_P4DDR, M_P5DDR, M_P6DDR, M_P7DDR, -1, M_P9DDR },
+	.port_dr  = { -1, M_P1DR, M_P2DR, M_P3DR, M_P4DR, M_P5DR, M_P6DR, M_P7DR, M_P8DR, M_P9DR },
+	.port_ddr_fixed = { 0, 0, 0, 0xff, 0, 0, 0, 0, 0x00, 0 },
+	.port_ddr_reset = { 0, 0xff, 0xff, 0, 0xff, 0xff, 0xff, 0xff, 0, 0xff },
+	.port_mask = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+
+	.frt_count = 3,
+	.frt_reg = { M_FRT1, M_FRT2, M_FRT3 },
+	.frt_vector = { 36, 40, 44 },
+	.frt_temp = true,
+
+	.tmr_reg = M_TMRCR, .tmr_vector = 48,
+
+	.sci_count = 1,
+	.sci_reg = { M_SCI1 },
+	.sci_vector = { 52 },
+
+	.adc_reg = M_ADDR0, .adc_vector = 56,
+
+	.wdt_reg = M_WDT, .wdt_vector = 32,
+
+	.ipr_reg = M_IPRA,
+
+	.irq_pin_count = 2,
+	.irq_vector = { 32, 33 },
+	.ctl_reg = { M_P1CR, -1 },
+	.ctl_write = { 0x78, 0 },
+	.ctl_read = { 0x87, 0 },
+	.irq_ctl = 0, .irq_ctl_shift = 5,
+	.nmi_ctl = 0, .nmi_ctl_bit = 4,
+
+	.vector_slot =
+	{
+		-1, -1, -1, -1, -1, -1, -1, -1,
+		-1, -1, -1, -1, -1, -1, -1, -1,
+		-1, -1, -1, -1, -1, -1, -1, -1,
+		-1, -1, -1, -1, -1, -1, -1, -1,
+		 0,  1, -1, -1,  2,  2,  2,  2,
+		 3,  3,  3,  3,  4,  4,  4,  4,
+		 5,  5,  5, -1,  6,  6,  6, -1,
+		 7, -1, -1, -1, -1, -1, -1, -1
+	}
+};
+
+const h8500_variant_t *h8500_variant(int model)
+{
+	return model == H8500_H8532 ? &variant_h8532 : &variant_h8510;
+}
 
 static void irq_raise(h8500_t *cpu, int vector)
 {
@@ -247,24 +399,24 @@ static int irq_priority(h8500_t *cpu, int vector)
 		return 8;
 	if (vector < 0 || vector >= 64)
 		return 0;
-	slot = vector_slot[vector];
+	slot = cpu->var->vector_slot[vector];
 	if (slot < 0)
 		return 0;
-	return (cpu->io[R_IPRA + (slot >> 1)] >> ((slot & 1) ? 0 : 4)) & 7;
+	return (cpu->io[cpu->var->ipr_reg + (slot >> 1)] >> ((slot & 1) ? 0 : 4)) & 7;
 }
 
 static uint8_t port_ddr(h8500_t *cpu, int port)
 {
-	if (port == H8500_PORT7)
-		return 0xff;
-	return cpu->io[port_ddr_reg[port]];
+	if (cpu->var->port_ddr[port] < 0)
+		return cpu->var->port_ddr_fixed[port];
+	return cpu->io[cpu->var->port_ddr[port]];
 }
 
 static void port_update(h8500_t *cpu, int port)
 {
 	uint8_t ddr = port_ddr(cpu, port);
-	uint8_t dr = cpu->io[port_dr_reg[port]];
-	uint8_t mask = port_mask[port];
+	uint8_t dr = cpu->io[cpu->var->port_dr[port]];
+	uint8_t mask = cpu->var->port_mask[port];
 	uint8_t data = (uint8_t)((dr | (uint8_t)~ddr) & (uint8_t)~mask);
 	uint16_t out;
 	ddr = (uint8_t)(ddr & (uint8_t)~mask);
@@ -280,8 +432,8 @@ static void port_update(h8500_t *cpu, int port)
 static uint8_t port_read(h8500_t *cpu, int port)
 {
 	uint8_t ddr = port_ddr(cpu, port);
-	uint8_t mask = port_mask[port];
-	uint8_t res = (uint8_t)(mask | (cpu->io[port_dr_reg[port]] & ddr));
+	uint8_t mask = cpu->var->port_mask[port];
+	uint8_t res = (uint8_t)(mask | (cpu->io[cpu->var->port_dr[port]] & ddr));
 	if ((uint8_t)(ddr & ~mask) != (uint8_t)~mask)
 	{
 		uint8_t pins = cpu->bus.read_port ? cpu->bus.read_port(cpu->bus.user, port) : 0xff;
@@ -294,7 +446,7 @@ static uint8_t port_read(h8500_t *cpu, int port)
 
 static uint32_t sci_char_cycles(h8500_t *cpu, int ch)
 {
-	int base = ch ? R_SCI2 : R_SCI1;
+	int base = cpu->var->sci_reg[ch];
 	uint8_t smr = cpu->io[base + S_SMR];
 	uint32_t d = 32u * ((uint32_t)cpu->io[base + S_BRR] + 1u);
 	uint32_t cks = smr & 3u;
@@ -315,8 +467,8 @@ static uint32_t sci_char_cycles(h8500_t *cpu, int ch)
 
 static void sci_tx_start(h8500_t *cpu, int ch)
 {
-	int base = ch ? R_SCI2 : R_SCI1;
-	int vec = ch ? 56 : 52;
+	int base = cpu->var->sci_reg[ch];
+	int vec = cpu->var->sci_vector[ch];
 	if (cpu->sci[ch].tx_busy)
 		return;
 	if (!(cpu->io[base + S_SCR] & 0x20))
@@ -333,8 +485,8 @@ static void sci_tx_start(h8500_t *cpu, int ch)
 
 static void sci_update(h8500_t *cpu, int ch, uint32_t cycles)
 {
-	int base = ch ? R_SCI2 : R_SCI1;
-	int vec = ch ? 56 : 52;
+	int base = cpu->var->sci_reg[ch];
+	int vec = cpu->var->sci_vector[ch];
 	uint8_t scr = cpu->io[base + S_SCR];
 
 	if (cpu->sci[ch].tx_busy)
@@ -385,8 +537,8 @@ static void sci_update(h8500_t *cpu, int ch, uint32_t cycles)
 
 static void frt_update(h8500_t *cpu, int n, uint32_t cycles)
 {
-	int base = (n == 0) ? R_FRT1 : R_FRT2;
-	int vec = (n == 0) ? 40 : 44;
+	int base = cpu->var->frt_reg[n];
+	int vec = cpu->var->frt_vector[n];
 	uint8_t tcr = cpu->io[base + F_TCR];
 	uint8_t tcsr = cpu->io[base + F_TCSR];
 	uint32_t shift, steps;
@@ -449,8 +601,10 @@ static void frt_update(h8500_t *cpu, int n, uint32_t cycles)
 static void tmr_update(h8500_t *cpu, uint32_t cycles)
 {
 	static const uint8_t shifts[4] = { 0, 3, 6, 10 };
-	uint8_t tcr = cpu->io[R_TMRCR];
-	uint8_t tcsr = cpu->io[R_TMRCSR];
+	int base = cpu->var->tmr_reg;
+	int vec = cpu->var->tmr_vector;
+	uint8_t tcr = cpu->io[base + T_TCR];
+	uint8_t tcsr = cpu->io[base + T_TCSR];
 	uint32_t shift, steps;
 	uint8_t cnt, cora, corb;
 	int clr = (tcr >> 3) & 3;
@@ -465,8 +619,8 @@ static void tmr_update(h8500_t *cpu, uint32_t cycles)
 	if (!steps)
 		return;
 
-	cora = cpu->io[R_TCORA];
-	corb = cpu->io[R_TCORB];
+	cora = cpu->io[base + T_TCORA];
+	corb = cpu->io[base + T_TCORB];
 	cnt = cpu->tmr_count;
 
 	while (steps--)
@@ -479,7 +633,7 @@ static void tmr_update(h8500_t *cpu, uint32_t cycles)
 			{
 				tcsr |= 0x40;
 				if (tcr & 0x40)
-					irq_raise(cpu, 48);
+					irq_raise(cpu, vec);
 			}
 			if (clr == 1)
 			{
@@ -493,7 +647,7 @@ static void tmr_update(h8500_t *cpu, uint32_t cycles)
 			{
 				tcsr |= 0x80;
 				if (tcr & 0x80)
-					irq_raise(cpu, 49);
+					irq_raise(cpu, vec + 1);
 			}
 			if (clr == 2)
 			{
@@ -507,13 +661,13 @@ static void tmr_update(h8500_t *cpu, uint32_t cycles)
 			{
 				tcsr |= 0x20;
 				if (tcr & 0x20)
-					irq_raise(cpu, 50);
+					irq_raise(cpu, vec + 2);
 			}
 		}
 	}
 
 	cpu->tmr_count = cnt;
-	cpu->io[R_TMRCSR] = tcsr;
+	cpu->io[base + T_TCSR] = tcsr;
 }
 
 /* ---- watchdog ---- */
@@ -521,12 +675,16 @@ static void tmr_update(h8500_t *cpu, uint32_t cycles)
 static void wdt_update(h8500_t *cpu, uint32_t cycles)
 {
 	static const uint8_t shifts[8] = { 1, 5, 6, 7, 8, 9, 11, 12 };
-	uint8_t tcsr = cpu->io[R_WDT];
+	int base = cpu->var->wdt_reg;
+	uint8_t tcsr;
 	uint32_t shift, steps;
 
+	if (base < 0)
+		return;
+	tcsr = cpu->io[base + W_TCSR];
 	if (!(tcsr & 0x20))
 	{
-		cpu->io[R_WDT + 1] = 0;
+		cpu->io[base + W_TCNT] = 0;
 		return;
 	}
 	shift = shifts[tcsr & 7];
@@ -537,18 +695,18 @@ static void wdt_update(h8500_t *cpu, uint32_t cycles)
 
 	while (steps--)
 	{
-		cpu->io[R_WDT + 1]++;
-		if (cpu->io[R_WDT + 1] == 0)
+		cpu->io[base + W_TCNT]++;
+		if (cpu->io[base + W_TCNT] == 0)
 		{
 			if (tcsr & 0x40)
 			{
 				h8500_reset(cpu);
 				return;
 			}
-			if (!(cpu->io[R_WDT] & 0x80))
+			if (!(cpu->io[base + W_TCSR] & 0x80))
 			{
-				cpu->io[R_WDT] |= 0x80;
-				irq_raise(cpu, 33);
+				cpu->io[base + W_TCSR] |= 0x80;
+				irq_raise(cpu, cpu->var->wdt_vector);
 			}
 		}
 	}
@@ -558,20 +716,21 @@ static void wdt_update(h8500_t *cpu, uint32_t cycles)
 
 static uint32_t adc_conv_cycles(h8500_t *cpu, int first)
 {
-	if (cpu->io[R_ADCSR] & 0x08)
+	if (cpu->io[cpu->var->adc_reg + A_ADCSR] & 0x08)
 		return first ? 134u : 128u;
 	return first ? 266u : 256u;
 }
 
 static void adc_start(h8500_t *cpu)
 {
-	uint8_t adcsr = cpu->io[R_ADCSR];
+	uint8_t adcsr = cpu->io[cpu->var->adc_reg + A_ADCSR];
 	cpu->adc_channel = (uint8_t)((adcsr & 0x10) ? (adcsr & 4) : (adcsr & 7));
 	cpu->adc_busy = adc_conv_cycles(cpu, 1);
 }
 
 static void adc_update(h8500_t *cpu, uint32_t cycles)
 {
+	int base = cpu->var->adc_reg;
 	uint8_t adcsr;
 	int scan, endch;
 	uint16_t v;
@@ -585,27 +744,27 @@ static void adc_update(h8500_t *cpu, uint32_t cycles)
 	}
 	cpu->adc_busy = 0;
 
-	adcsr = cpu->io[R_ADCSR];
+	adcsr = cpu->io[base + A_ADCSR];
 	scan = (adcsr & 0x10) != 0;
 	endch = adcsr & 7;
 
 	v = cpu->bus.read_adc ? cpu->bus.read_adc(cpu->bus.user, cpu->adc_channel) : 0;
-	cpu->io[R_ADDR0 + ((cpu->adc_channel & 3) << 1)] = (uint8_t)(v >> 2);
-	cpu->io[R_ADDR0 + ((cpu->adc_channel & 3) << 1) + 1] = (uint8_t)((v << 6) & 0xff);
+	cpu->io[base + A_ADDR0 + ((cpu->adc_channel & 3) << 1)] = (uint8_t)(v >> 2);
+	cpu->io[base + A_ADDR0 + ((cpu->adc_channel & 3) << 1) + 1] = (uint8_t)((v << 6) & 0xff);
 
 	if (!scan)
 	{
-		cpu->io[R_ADCSR] = (uint8_t)((adcsr | 0x80) & ~0x20u);
+		cpu->io[base + A_ADCSR] = (uint8_t)((adcsr | 0x80) & ~0x20u);
 		if (adcsr & 0x40)
-			irq_raise(cpu, 60);
+			irq_raise(cpu, cpu->var->adc_vector);
 		return;
 	}
 
 	if (cpu->adc_channel == (uint8_t)endch)
 	{
-		cpu->io[R_ADCSR] |= 0x80;
+		cpu->io[base + A_ADCSR] |= 0x80;
 		if (adcsr & 0x40)
-			irq_raise(cpu, 60);
+			irq_raise(cpu, cpu->var->adc_vector);
 		cpu->adc_channel = (uint8_t)(adcsr & 4);
 	}
 	else
@@ -617,20 +776,21 @@ static void adc_update(h8500_t *cpu, uint32_t cycles)
 
 void h8500_peripherals_tick(h8500_t *cpu, uint32_t cycles)
 {
+	int n;
 	if (!cycles)
 		return;
-	frt_update(cpu, 0, cycles);
-	frt_update(cpu, 1, cycles);
+	for (n = 0; n < cpu->var->frt_count; n++)
+		frt_update(cpu, n, cycles);
 	tmr_update(cpu, cycles);
 	wdt_update(cpu, cycles);
 	adc_update(cpu, cycles);
-	sci_update(cpu, 0, cycles);
-	sci_update(cpu, 1, cycles);
+	for (n = 0; n < cpu->var->sci_count; n++)
+		sci_update(cpu, n, cycles);
 }
 
 static uint32_t frt_horizon(h8500_t *cpu, int n)
 {
-	int base = (n == 0) ? R_FRT1 : R_FRT2;
+	int base = cpu->var->frt_reg[n];
 	uint8_t tcr = cpu->io[base + F_TCR];
 	uint32_t shift, d, best;
 	uint16_t ocra, ocrb, cnt;
@@ -660,16 +820,17 @@ static uint32_t frt_horizon(h8500_t *cpu, int n)
 static uint32_t tmr_horizon(h8500_t *cpu)
 {
 	static const uint8_t shifts[4] = { 0, 3, 6, 10 };
-	uint8_t tcr = cpu->io[R_TMRCR];
+	int base = cpu->var->tmr_reg;
+	uint8_t tcr = cpu->io[base + T_TCR];
 	uint32_t shift, d, best;
 	uint8_t cnt = cpu->tmr_count;
 
 	if ((tcr & 7) == 0 || (tcr & 7) > 3)
 		return UINT32_MAX;
 	shift = shifts[tcr & 3];
-	best = (uint32_t)((uint8_t)(cpu->io[R_TCORA] + 1 - cnt));
+	best = (uint32_t)((uint8_t)(cpu->io[base + T_TCORA] + 1 - cnt));
 	if (!best) best = 0x100;
-	d = (uint32_t)((uint8_t)(cpu->io[R_TCORB] + 1 - cnt));
+	d = (uint32_t)((uint8_t)(cpu->io[base + T_TCORB] + 1 - cnt));
 	if (!d) d = 0x100;
 	if (d < best) best = d;
 	d = (uint32_t)((uint8_t)(0 - cnt));
@@ -681,16 +842,21 @@ static uint32_t tmr_horizon(h8500_t *cpu)
 static uint32_t wdt_horizon(h8500_t *cpu)
 {
 	static const uint8_t shifts[8] = { 1, 5, 6, 7, 8, 9, 11, 12 };
-	uint8_t tcsr = cpu->io[R_WDT];
-	uint32_t shift = shifts[tcsr & 7];
+	int base = cpu->var->wdt_reg;
+	uint8_t tcsr;
+	uint32_t shift;
+	if (base < 0)
+		return UINT32_MAX;
+	tcsr = cpu->io[base + W_TCSR];
+	shift = shifts[tcsr & 7];
 	if (!(tcsr & 0x20))
 		return UINT32_MAX;
-	return ((256u - cpu->io[R_WDT + 1]) << shift) - cpu->wdt_prescale;
+	return ((256u - cpu->io[base + W_TCNT]) << shift) - cpu->wdt_prescale;
 }
 
 static uint32_t sci_horizon(h8500_t *cpu, int ch)
 {
-	int base = ch ? R_SCI2 : R_SCI1;
+	int base = cpu->var->sci_reg[ch];
 	uint32_t h = UINT32_MAX;
 	if (cpu->sci[ch].rx_pending && (cpu->io[base + S_SCR] & 0x10))
 		return 1;
@@ -705,47 +871,154 @@ static uint32_t sci_horizon(h8500_t *cpu, int ch)
  * peripherals in the same state as ticking them at once. */
 uint32_t h8500_tick_horizon(h8500_t *cpu)
 {
-	uint32_t h = frt_horizon(cpu, 0), d;
-	d = frt_horizon(cpu, 1); if (d < h) h = d;
+	uint32_t h = UINT32_MAX, d;
+	int n;
+	for (n = 0; n < cpu->var->frt_count; n++)
+	{
+		d = frt_horizon(cpu, n); if (d < h) h = d;
+	}
 	d = tmr_horizon(cpu); if (d < h) h = d;
 	d = wdt_horizon(cpu); if (d < h) h = d;
 	d = cpu->adc_busy ? cpu->adc_busy : UINT32_MAX; if (d < h) h = d;
-	d = sci_horizon(cpu, 0); if (d < h) h = d;
-	d = sci_horizon(cpu, 1); if (d < h) h = d;
+	for (n = 0; n < cpu->var->sci_count; n++)
+	{
+		d = sci_horizon(cpu, n); if (d < h) h = d;
+	}
 	return h ? h : 1;
 }
 
 /* ---- register file ---- */
 
+static uint8_t frt_read(h8500_t *cpu, int n, int sub)
+{
+	int base = cpu->var->frt_reg[n];
+	switch (sub)
+	{
+	case F_FRCH:
+		if (cpu->var->frt_temp)
+			cpu->frt_temp[n] = (uint8_t)cpu->frt_count[n];
+		return (uint8_t)(cpu->frt_count[n] >> 8);
+	case F_FRCL:
+		return cpu->var->frt_temp ? cpu->frt_temp[n] : (uint8_t)cpu->frt_count[n];
+	case F_ICRH:
+		if (cpu->var->frt_temp)
+			cpu->frt_temp[n] = 0;
+		return 0;
+	case F_ICRL:
+		return cpu->var->frt_temp ? cpu->frt_temp[n] : 0;
+	default:
+		return cpu->io[base + sub];
+	}
+}
+
+static void frt_write(h8500_t *cpu, int n, int sub, uint8_t data)
+{
+	int base = cpu->var->frt_reg[n];
+	switch (sub)
+	{
+	case F_TCSR:
+	{
+		uint8_t old = cpu->io[base + sub];
+		cpu->io[base + sub] = (uint8_t)((data & 0x0f) | (old & data & 0xf0));
+		return;
+	}
+	case F_FRCH:
+		if (cpu->var->frt_temp)
+			cpu->frt_temp[n] = data;
+		else
+			cpu->frt_count[n] = (uint16_t)((data << 8) | (cpu->frt_count[n] & 0xff));
+		return;
+	case F_FRCL:
+		if (cpu->var->frt_temp)
+			cpu->frt_count[n] = (uint16_t)((cpu->frt_temp[n] << 8) | data);
+		else
+			cpu->frt_count[n] = (uint16_t)((cpu->frt_count[n] & 0xff00) | data);
+		return;
+	case F_OCRAH: case F_OCRBH:
+		if (cpu->var->frt_temp)
+			cpu->frt_temp[n] = data;
+		else
+			cpu->io[base + sub] = data;
+		return;
+	case F_OCRAL: case F_OCRBL:
+		if (cpu->var->frt_temp)
+			cpu->io[base + sub - 1] = cpu->frt_temp[n];
+		cpu->io[base + sub] = data;
+		return;
+	case F_ICRH: case F_ICRL:
+		return;
+	default:
+		cpu->io[base + sub] = data;
+		return;
+	}
+}
+
+static uint8_t irq_enable(h8500_t *cpu)
+{
+	const h8500_variant_t *v = cpu->var;
+	return (uint8_t)((cpu->io[v->ctl_reg[v->irq_ctl]] >> v->irq_ctl_shift) &
+	                 ((1u << v->irq_pin_count) - 1u));
+}
+
+static void irq_ctl_update(h8500_t *cpu)
+{
+	uint8_t en = irq_enable(cpu);
+	int i;
+	for (i = 0; i < cpu->var->irq_pin_count; i++)
+	{
+		if (!(en & (1u << i)))
+		{
+			cpu->irq_req &= (uint8_t)~(1u << i);
+			irq_clear(cpu, cpu->var->irq_vector[i]);
+		}
+	}
+	if ((en & 1) && (cpu->irq_lines & 1))
+	{
+		cpu->irq_req |= 1;
+		irq_raise(cpu, cpu->var->irq_vector[0]);
+	}
+	else if (!(cpu->irq_lines & 1))
+	{
+		cpu->irq_req &= (uint8_t)~1u;
+		irq_clear(cpu, cpu->var->irq_vector[0]);
+	}
+}
+
 uint8_t h8500_io_read(h8500_t *cpu, uint16_t address)
 {
-	uint32_t o = (uint32_t)(address - H8500_IO_BASE);
-	if (o >= H8500_IO_SIZE)
-		return 0xff;
+	const h8500_variant_t *v = cpu->var;
+	uint32_t o = (uint32_t)(address - v->io_base);
+	int unit;
 
-	switch (o)
-	{
-	case R_P1DDR: case R_P2DDR: case R_P3DDR: case R_P4DDR:
-	case R_P5DDR: case R_P6DDR: case R_P8DDR:
+	if (o >= v->io_size)
 		return 0xff;
-	case R_P1DR: return port_read(cpu, H8500_PORT1);
-	case R_P2DR: return port_read(cpu, H8500_PORT2);
-	case R_P3DR: return port_read(cpu, H8500_PORT3);
-	case R_P4DR: return port_read(cpu, H8500_PORT4);
-	case R_P5DR: return port_read(cpu, H8500_PORT5);
-	case R_P6DR: return port_read(cpu, H8500_PORT6);
-	case R_P7DR: return port_read(cpu, H8500_PORT7);
-	case R_P8DR: return port_read(cpu, H8500_PORT8);
-	case R_FRT1 + F_FRCH: return (uint8_t)(cpu->frt_count[0] >> 8);
-	case R_FRT1 + F_FRCL: return (uint8_t)cpu->frt_count[0];
-	case R_FRT2 + F_FRCH: return (uint8_t)(cpu->frt_count[1] >> 8);
-	case R_FRT2 + F_FRCL: return (uint8_t)cpu->frt_count[1];
-	case R_TCNT: return cpu->tmr_count;
-	case R_WDT: return (uint8_t)(cpu->io[R_WDT] | 0x18);
-	case R_SCI1 + S_SSR: cpu->sci[0].ssr_read = cpu->io[o]; return cpu->io[o];
-	case R_SCI2 + S_SSR: cpu->sci[1].ssr_read = cpu->io[o]; return cpu->io[o];
-	case R_NMICR: return (uint8_t)(0xfe | cpu->io[R_NMICR]);
-	case R_IRQCR: return (uint8_t)(0xf0 | cpu->io[R_IRQCR]);
+	unit = cpu->io_unit[o];
+
+	switch (cpu->io_kind[o])
+	{
+	case IOK_PORT_DDR:
+		return 0xff;
+	case IOK_PORT_DR:
+		return port_read(cpu, unit);
+	case IOK_FRT:
+		return frt_read(cpu, unit, (int)(o - v->frt_reg[unit]));
+	case IOK_TMR:
+		if (o - v->tmr_reg == T_TCNT)
+			return cpu->tmr_count;
+		break;
+	case IOK_SCI:
+		if (o - v->sci_reg[unit] == S_SSR)
+		{
+			cpu->sci[unit].ssr_read = cpu->io[o];
+			return cpu->io[o];
+		}
+		break;
+	case IOK_WDT:
+		if (o - (uint32_t)v->wdt_reg == W_TCSR)
+			return (uint8_t)(cpu->io[o] | 0x18);
+		break;
+	case IOK_CTL:
+		return (uint8_t)(v->ctl_read[unit] | cpu->io[o]);
 	default:
 		break;
 	}
@@ -754,164 +1027,133 @@ uint8_t h8500_io_read(h8500_t *cpu, uint16_t address)
 
 void h8500_io_write(h8500_t *cpu, uint16_t address, uint8_t data)
 {
-	uint32_t o = (uint32_t)(address - H8500_IO_BASE);
-	if (o >= H8500_IO_SIZE)
-		return;
+	const h8500_variant_t *v = cpu->var;
+	uint32_t o = (uint32_t)(address - v->io_base);
+	int unit;
 
-	switch (o)
-	{
-	case R_P1DDR: cpu->io[o] = data; port_update(cpu, H8500_PORT1); return;
-	case R_P2DDR: cpu->io[o] = data; port_update(cpu, H8500_PORT2); return;
-	case R_P3DDR: cpu->io[o] = data; port_update(cpu, H8500_PORT3); return;
-	case R_P4DDR: cpu->io[o] = data; port_update(cpu, H8500_PORT4); return;
-	case R_P5DDR: cpu->io[o] = data; port_update(cpu, H8500_PORT5); return;
-	case R_P6DDR: cpu->io[o] = data; port_update(cpu, H8500_PORT6); return;
-	case R_P8DDR: cpu->io[o] = data; port_update(cpu, H8500_PORT8); return;
-	case R_P1DR: cpu->io[o] = data; port_update(cpu, H8500_PORT1); return;
-	case R_P2DR: cpu->io[o] = data; port_update(cpu, H8500_PORT2); return;
-	case R_P3DR: cpu->io[o] = data; port_update(cpu, H8500_PORT3); return;
-	case R_P4DR: cpu->io[o] = data; port_update(cpu, H8500_PORT4); return;
-	case R_P5DR: cpu->io[o] = data; port_update(cpu, H8500_PORT5); return;
-	case R_P6DR: cpu->io[o] = data; port_update(cpu, H8500_PORT6); return;
-	case R_P7DR: cpu->io[o] = data; port_update(cpu, H8500_PORT7); return;
-	case R_P8DR: cpu->io[o] = data; port_update(cpu, H8500_PORT8); return;
+	if (o >= v->io_size)
+		return;
+	unit = cpu->io_unit[o];
 
-	case R_ADCSR:
+	switch (cpu->io_kind[o])
 	{
-		uint8_t old = cpu->io[R_ADCSR];
-		uint8_t nv = (uint8_t)((data & 0x7f) | (old & data & 0x80));
-		cpu->io[R_ADCSR] = nv;
-		if ((nv & 0x20) && !(old & 0x20))
-			adc_start(cpu);
-		else if (!(nv & 0x20))
-			cpu->adc_busy = 0;
-		return;
-	}
-
-	case R_FRT1 + F_TCSR: case R_FRT2 + F_TCSR:
-	{
-		uint8_t old = cpu->io[o];
-		cpu->io[o] = (uint8_t)((data & 0x0f) | (old & data & 0xf0));
-		return;
-	}
-	case R_FRT1 + F_FRCH:
-		cpu->frt_count[0] = (uint16_t)((data << 8) | (cpu->frt_count[0] & 0xff));
-		return;
-	case R_FRT1 + F_FRCL:
-		cpu->frt_count[0] = (uint16_t)((cpu->frt_count[0] & 0xff00) | data);
-		return;
-	case R_FRT2 + F_FRCH:
-		cpu->frt_count[1] = (uint16_t)((data << 8) | (cpu->frt_count[1] & 0xff));
-		return;
-	case R_FRT2 + F_FRCL:
-		cpu->frt_count[1] = (uint16_t)((cpu->frt_count[1] & 0xff00) | data);
-		return;
-	case R_FRT1 + F_ICRH: case R_FRT1 + F_ICRL:
-	case R_FRT2 + F_ICRH: case R_FRT2 + F_ICRL:
-		return;
-
-	case R_TMRCR:
-	{
-		uint8_t old = cpu->io[o];
-		uint8_t tcsr = cpu->io[R_TMRCSR];
+	case IOK_PORT_DDR: case IOK_PORT_DR:
 		cpu->io[o] = data;
-		if ((data & 0x40) && !(old & 0x40) && (tcsr & 0x40))
-			irq_raise(cpu, 48);
-		if ((data & 0x80) && !(old & 0x80) && (tcsr & 0x80))
-			irq_raise(cpu, 49);
-		if ((data & 0x20) && !(old & 0x20) && (tcsr & 0x20))
-			irq_raise(cpu, 50);
-		return;
-	}
-	case R_TMRCSR:
-	{
-		uint8_t nv = (uint8_t)(cpu->io[o] & (data | 0x1f));
-		cpu->io[o] = (uint8_t)((nv & 0xf0) | (data & 0x0f));
-		return;
-	}
-	case R_TCNT:
-		cpu->tmr_count = data;
+		port_update(cpu, unit);
 		return;
 
-	case R_SCI1 + S_SSR: case R_SCI2 + S_SSR:
-	{
-		int ch = (o < R_SCI2) ? 0 : 1;
-		int base = ch ? R_SCI2 : R_SCI1;
-		uint8_t old = cpu->io[o];
-		uint8_t seen = cpu->sci[ch].ssr_read;
-		uint8_t nv = old;
-
-		if ((cpu->io[base + S_SCR] & 0x20) && (seen & SSR_TDRE) && !(data & SSR_TDRE))
-			nv &= (uint8_t)~(SSR_TDRE | SSR_TEND);
-		if ((seen & SSR_RDRF) && !(data & SSR_RDRF)) nv &= (uint8_t)~SSR_RDRF;
-		if ((seen & SSR_ORER) && !(data & SSR_ORER)) nv &= (uint8_t)~SSR_ORER;
-		if ((seen & SSR_FER)  && !(data & SSR_FER))  nv &= (uint8_t)~SSR_FER;
-		if ((seen & SSR_PER)  && !(data & SSR_PER))  nv &= (uint8_t)~SSR_PER;
-		nv = (uint8_t)((nv & 0xfe) | (data & 1));
-		cpu->io[o] = nv;
-		cpu->sci[ch].ssr_read &= nv;
-		if (!(nv & SSR_TDRE))
-			sci_tx_start(cpu, ch);
+	case IOK_FRT:
+		frt_write(cpu, unit, (int)(o - v->frt_reg[unit]), data);
 		return;
-	}
-	case R_SCI1 + S_SCR: case R_SCI2 + S_SCR:
-	{
-		int ch = (o < R_SCI2) ? 0 : 1;
-		int base = ch ? R_SCI2 : R_SCI1;
-		int vec = ch ? 56 : 52;
-		uint8_t old = cpu->io[o];
-		uint8_t ssr;
-		cpu->io[o] = data;
-		ssr = cpu->io[base + S_SSR];
-		if ((data & 0x80) && !(old & 0x80) && (ssr & SSR_TDRE))
-			irq_raise(cpu, vec + 2);
-		if ((data & 0x04) && !(old & 0x04) && (ssr & SSR_TEND))
-			irq_raise(cpu, vec + 3);
-		if ((data & 0x40) && !(old & 0x40))
+
+	case IOK_TMR:
+		switch (o - v->tmr_reg)
 		{
-			if (ssr & SSR_RDRF)
-				irq_raise(cpu, vec + 1);
-			if (ssr & (SSR_ORER | SSR_FER | SSR_PER))
-				irq_raise(cpu, vec);
+		case T_TCR:
+		{
+			uint8_t old = cpu->io[o];
+			uint8_t tcsr = cpu->io[v->tmr_reg + T_TCSR];
+			cpu->io[o] = data;
+			if ((data & 0x40) && !(old & 0x40) && (tcsr & 0x40))
+				irq_raise(cpu, v->tmr_vector);
+			if ((data & 0x80) && !(old & 0x80) && (tcsr & 0x80))
+				irq_raise(cpu, v->tmr_vector + 1);
+			if ((data & 0x20) && !(old & 0x20) && (tcsr & 0x20))
+				irq_raise(cpu, v->tmr_vector + 2);
+			return;
 		}
-		return;
-	}
-	case R_SCI1 + S_RDR: case R_SCI2 + S_RDR:
+		case T_TCSR:
+		{
+			uint8_t nv = (uint8_t)(cpu->io[o] & (data | 0x1f));
+			cpu->io[o] = (uint8_t)((nv & 0xf0) | (data & 0x0f));
+			return;
+		}
+		case T_TCNT:
+			cpu->tmr_count = data;
+			return;
+		default:
+			break;
+		}
+		break;
+
+	case IOK_SCI:
+		switch (o - v->sci_reg[unit])
+		{
+		case S_SSR:
+		{
+			int base = v->sci_reg[unit];
+			uint8_t old = cpu->io[o];
+			uint8_t seen = cpu->sci[unit].ssr_read;
+			uint8_t nv = old;
+
+			if ((cpu->io[base + S_SCR] & 0x20) && (seen & SSR_TDRE) && !(data & SSR_TDRE))
+				nv &= (uint8_t)~(SSR_TDRE | SSR_TEND);
+			if ((seen & SSR_RDRF) && !(data & SSR_RDRF)) nv &= (uint8_t)~SSR_RDRF;
+			if ((seen & SSR_ORER) && !(data & SSR_ORER)) nv &= (uint8_t)~SSR_ORER;
+			if ((seen & SSR_FER)  && !(data & SSR_FER))  nv &= (uint8_t)~SSR_FER;
+			if ((seen & SSR_PER)  && !(data & SSR_PER))  nv &= (uint8_t)~SSR_PER;
+			nv = (uint8_t)((nv & 0xfe) | (data & 1));
+			cpu->io[o] = nv;
+			cpu->sci[unit].ssr_read &= nv;
+			if (!(nv & SSR_TDRE))
+				sci_tx_start(cpu, unit);
+			return;
+		}
+		case S_SCR:
+		{
+			int base = v->sci_reg[unit];
+			int vec = v->sci_vector[unit];
+			uint8_t old = cpu->io[o];
+			uint8_t ssr;
+			cpu->io[o] = data;
+			ssr = cpu->io[base + S_SSR];
+			if ((data & 0x80) && !(old & 0x80) && (ssr & SSR_TDRE))
+				irq_raise(cpu, vec + 2);
+			if ((data & 0x04) && !(old & 0x04) && (ssr & SSR_TEND))
+				irq_raise(cpu, vec + 3);
+			if ((data & 0x40) && !(old & 0x40))
+			{
+				if (ssr & SSR_RDRF)
+					irq_raise(cpu, vec + 1);
+				if (ssr & (SSR_ORER | SSR_FER | SSR_PER))
+					irq_raise(cpu, vec);
+			}
+			return;
+		}
+		case S_RDR:
+			return;
+		default:
+			break;
+		}
+		break;
+
+	case IOK_ADC:
+		if (o - v->adc_reg == A_ADCSR)
+		{
+			uint8_t old = cpu->io[o];
+			uint8_t nv = (uint8_t)((data & 0x7f) | (old & data & 0x80));
+			cpu->io[o] = nv;
+			if ((nv & 0x20) && !(old & 0x20))
+				adc_start(cpu);
+			else if (!(nv & 0x20))
+				cpu->adc_busy = 0;
+			return;
+		}
+		break;
+
+	case IOK_WDT:
 		return;
 
-	case R_WDT: case R_WDT + 1:
-		return;
-
-	case R_IPRA: case R_IPRB: case R_IPRC: case R_IPRD:
+	case IOK_IPR:
 		cpu->io[o] = (uint8_t)(data & 0x77);
 		return;
-	case R_NMICR:
-		cpu->io[o] = (uint8_t)(data & 1);
+
+	case IOK_CTL:
+		cpu->io[o] = (uint8_t)(data & v->ctl_write[unit]);
+		if (unit == v->irq_ctl)
+			irq_ctl_update(cpu);
 		return;
-	case R_IRQCR:
-	{
-		int i;
-		cpu->io[o] = (uint8_t)(data & 0x0f);
-		for (i = 0; i < 4; i++)
-		{
-			if (!(cpu->io[o] & (1u << i)))
-			{
-				cpu->irq_req &= (uint8_t)~(1u << i);
-				irq_clear(cpu, irq_pin_vector[i]);
-			}
-		}
-		if ((cpu->io[o] & 1) && (cpu->irq_lines & 1))
-		{
-			cpu->irq_req |= 1;
-			irq_raise(cpu, irq_pin_vector[0]);
-		}
-		else if (!(cpu->irq_lines & 1))
-		{
-			cpu->irq_req &= (uint8_t)~1u;
-			irq_clear(cpu, irq_pin_vector[0]);
-		}
-		return;
-	}
+
 	default:
 		break;
 	}
@@ -922,18 +1164,19 @@ void h8500_io_write(h8500_t *cpu, uint16_t address, uint8_t data)
  * the high byte. */
 static void wdt_write16(h8500_t *cpu, uint16_t data)
 {
+	int base = cpu->var->wdt_reg;
 	if ((data >> 8) == 0xa5)
 	{
-		uint8_t old = cpu->io[R_WDT];
-		cpu->io[R_WDT] = (uint8_t)((old & data & 0x80) | (data & 0x7f));
-		if (!(old & 0x20) && (cpu->io[R_WDT] & 0x20))
+		uint8_t old = cpu->io[base + W_TCSR];
+		cpu->io[base + W_TCSR] = (uint8_t)((old & data & 0x80) | (data & 0x7f));
+		if (!(old & 0x20) && (cpu->io[base + W_TCSR] & 0x20))
 			cpu->wdt_prescale = 0;
 	}
 	else if ((data >> 8) == 0x5a)
 	{
-		if (cpu->io[R_WDT] & 0x20)
+		if (cpu->io[base + W_TCSR] & 0x20)
 		{
-			cpu->io[R_WDT + 1] = (uint8_t)data;
+			cpu->io[base + W_TCNT] = (uint8_t)data;
 			cpu->wdt_prescale = 0;
 		}
 	}
@@ -993,9 +1236,9 @@ void h8500_exception(h8500_t *cpu, int vector, uint16_t ret_pc, int level)
 void h8500_take_interrupt(h8500_t *cpu, int vector, int level)
 {
 	int i;
-	for (i = 0; i < 4; i++)
+	for (i = 0; i < cpu->var->irq_pin_count; i++)
 	{
-		if (vector == irq_pin_vector[i])
+		if (vector == cpu->var->irq_vector[i])
 		{
 			if (i != 0)
 				cpu->irq_req &= (uint8_t)~(1u << i);
@@ -1004,7 +1247,7 @@ void h8500_take_interrupt(h8500_t *cpu, int vector, int level)
 			break;
 		}
 	}
-	if (i == 4)
+	if (i == cpu->var->irq_pin_count)
 		irq_clear(cpu, vector);
 	cpu->sleeping = false;
 	exception(cpu, vector, cpu->pc, level);
@@ -1013,10 +1256,12 @@ void h8500_take_interrupt(h8500_t *cpu, int vector, int level)
 
 void h8500_set_irq(h8500_t *cpu, int line, bool state)
 {
-	uint8_t mask;
+	const h8500_variant_t *v = cpu->var;
+	uint8_t mask, en;
 	if (line == H8500_NMI)
 	{
-		bool trigger = (cpu->io[R_NMICR] & 1)
+		uint8_t edge = (uint8_t)((cpu->io[v->ctl_reg[v->nmi_ctl]] >> v->nmi_ctl_bit) & 1);
+		bool trigger = edge
 			? (!state && (cpu->irq_lines & 0x80) != 0)
 			: (state && (cpu->irq_lines & 0x80) == 0);
 		if (state)
@@ -1027,9 +1272,10 @@ void h8500_set_irq(h8500_t *cpu, int line, bool state)
 			irq_raise(cpu, VEC_NMI);
 		return;
 	}
-	if (line < 0 || line > 3)
+	if (line < 0 || line >= v->irq_pin_count)
 		return;
 	mask = (uint8_t)(1u << line);
+	en = irq_enable(cpu);
 	{
 		bool was = (cpu->irq_lines & mask) != 0;
 		if (state)
@@ -1038,21 +1284,21 @@ void h8500_set_irq(h8500_t *cpu, int line, bool state)
 			cpu->irq_lines &= (uint8_t)~mask;
 		if (line == 0)
 		{
-			if (state && (cpu->io[R_IRQCR] & 1))
+			if (state && (en & 1))
 			{
 				cpu->irq_req |= 1;
-				irq_raise(cpu, irq_pin_vector[0]);
+				irq_raise(cpu, v->irq_vector[0]);
 			}
 			else
 			{
 				cpu->irq_req &= (uint8_t)~1u;
-				irq_clear(cpu, irq_pin_vector[0]);
+				irq_clear(cpu, v->irq_vector[0]);
 			}
 		}
-		else if (state && !was && (cpu->io[R_IRQCR] & mask))
+		else if (state && !was && (en & mask))
 		{
 			cpu->irq_req |= mask;
-			irq_raise(cpu, irq_pin_vector[line]);
+			irq_raise(cpu, v->irq_vector[line]);
 		}
 	}
 }
@@ -2456,10 +2702,56 @@ int h8500_exec_one(h8500_t *cpu)
 /* public interface                                                   */
 /* ------------------------------------------------------------------ */
 
+static void io_map(h8500_t *cpu, int base, int len, int kind, int unit)
+{
+	int i;
+	for (i = 0; i < len; i++)
+	{
+		cpu->io_kind[base + i] = (uint8_t)kind;
+		cpu->io_unit[base + i] = (uint8_t)unit;
+	}
+}
+
+static void io_build(h8500_t *cpu)
+{
+	const h8500_variant_t *v = cpu->var;
+	int i;
+
+	memset(cpu->io_kind, IOK_PLAIN, sizeof(cpu->io_kind));
+	memset(cpu->io_unit, 0, sizeof(cpu->io_unit));
+
+	for (i = 1; i <= v->port_count; i++)
+	{
+		if (v->port_ddr[i] >= 0)
+			io_map(cpu, v->port_ddr[i], 1, IOK_PORT_DDR, i);
+		if (v->port_dr[i] >= 0)
+			io_map(cpu, v->port_dr[i], 1, IOK_PORT_DR, i);
+	}
+	for (i = 0; i < v->frt_count; i++)
+		io_map(cpu, v->frt_reg[i], 10, IOK_FRT, i);
+	io_map(cpu, v->tmr_reg, 5, IOK_TMR, 0);
+	for (i = 0; i < v->sci_count; i++)
+		io_map(cpu, v->sci_reg[i], 6, IOK_SCI, i);
+	io_map(cpu, v->adc_reg, 10, IOK_ADC, 0);
+	if (v->wdt_reg >= 0)
+		io_map(cpu, v->wdt_reg, 2, IOK_WDT, 0);
+	io_map(cpu, v->ipr_reg, 4, IOK_IPR, 0);
+	for (i = 0; i < 2; i++)
+		if (v->ctl_reg[i] >= 0)
+			io_map(cpu, v->ctl_reg[i], 1, IOK_CTL, i);
+}
+
 void h8500_init(h8500_t *cpu, const h8500_bus_t *bus)
+{
+	h8500_init_model(cpu, bus, H8500_H8510);
+}
+
+void h8500_init_model(h8500_t *cpu, const h8500_bus_t *bus, int model)
 {
 	memset(cpu, 0, sizeof(*cpu));
 	cpu->bus = *bus;
+	cpu->var = h8500_variant(model);
+	io_build(cpu);
 }
 
 void h8500_map(h8500_t *cpu, uint32_t base, uint32_t size, uint8_t *data, bool writable)
@@ -2476,6 +2768,7 @@ void h8500_map(h8500_t *cpu, uint32_t base, uint32_t size, uint8_t *data, bool w
 
 void h8500_reset(h8500_t *cpu)
 {
+	const h8500_variant_t *v = cpu->var;
 	int i;
 
 	cpu->sr = 0x0700;
@@ -2486,21 +2779,28 @@ void h8500_reset(h8500_t *cpu)
 	cpu->irq_pend[0] = cpu->irq_pend[1] = cpu->irq_pend[2] = 0;
 
 	memset(cpu->io, 0, sizeof(cpu->io));
-	cpu->io[R_P1DDR] = cpu->io[R_P2DDR] = cpu->io[R_P3DDR] = cpu->io[R_P4DDR] = 0xff;
-	cpu->io[R_P5DDR] = cpu->io[R_P6DDR] = 0xff;
-	cpu->io[R_P8DDR] = 0x00;
-	cpu->io[R_TMRCSR] = 0x10;
-	cpu->io[R_TCORA] = cpu->io[R_TCORB] = 0xff;
-	cpu->io[R_FRT1 + F_OCRAH] = cpu->io[R_FRT1 + F_OCRAL] = 0xff;
-	cpu->io[R_FRT1 + F_OCRBH] = cpu->io[R_FRT1 + F_OCRBL] = 0xff;
-	cpu->io[R_FRT2 + F_OCRAH] = cpu->io[R_FRT2 + F_OCRAL] = 0xff;
-	cpu->io[R_FRT2 + F_OCRBH] = cpu->io[R_FRT2 + F_OCRBL] = 0xff;
-	cpu->io[R_SCI1 + S_SSR] = cpu->io[R_SCI2 + S_SSR] = 0x84;
-	cpu->io[R_SCI1 + S_BRR] = cpu->io[R_SCI2 + S_BRR] = 0xff;
-	cpu->io[R_SCI1 + S_TDR] = cpu->io[R_SCI2 + S_TDR] = 0xff;
+	for (i = 1; i <= v->port_count; i++)
+		if (v->port_ddr[i] >= 0)
+			cpu->io[v->port_ddr[i]] = v->port_ddr_reset[i];
+	cpu->io[v->tmr_reg + T_TCSR] = 0x10;
+	cpu->io[v->tmr_reg + T_TCORA] = cpu->io[v->tmr_reg + T_TCORB] = 0xff;
+	for (i = 0; i < v->frt_count; i++)
+	{
+		int b = v->frt_reg[i];
+		cpu->io[b + F_OCRAH] = cpu->io[b + F_OCRAL] = 0xff;
+		cpu->io[b + F_OCRBH] = cpu->io[b + F_OCRBL] = 0xff;
+	}
+	for (i = 0; i < v->sci_count; i++)
+	{
+		int b = v->sci_reg[i];
+		cpu->io[b + S_SSR] = 0x84;
+		cpu->io[b + S_BRR] = 0xff;
+		cpu->io[b + S_TDR] = 0xff;
+	}
 
 	memset(cpu->frt_count, 0, sizeof(cpu->frt_count));
 	memset(cpu->frt_prescale, 0, sizeof(cpu->frt_prescale));
+	memset(cpu->frt_temp, 0, sizeof(cpu->frt_temp));
 	cpu->tmr_count = 0;
 	cpu->tmr_prescale = 0;
 	cpu->wdt_prescale = 0;
@@ -2508,7 +2808,7 @@ void h8500_reset(h8500_t *cpu)
 	cpu->adc_channel = 0;
 	memset(cpu->sci, 0, sizeof(cpu->sci));
 
-	for (i = 1; i <= 8; i++)
+	for (i = 1; i <= v->port_count; i++)
 	{
 		cpu->port_out[i] = 0xffff;
 		port_update(cpu, i);
