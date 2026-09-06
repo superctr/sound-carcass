@@ -302,8 +302,15 @@ void sc55mk2_release(sc55mk2_t *b)
 	b->internal_rom = NULL;
 }
 
-/* the battery holds the SRAM across a reset, so only a cold start clears the frame count */
-static void power_on(sc55mk2_t *b)
+static bool sram_blank(const sc55mk2_t *b)
+{
+	for (size_t n = 0; n < SC55MK2_SRAM_SIZE; n++)
+		if (b->sram[n])
+			return false;
+	return true;
+}
+
+void sc55mk2_reset(sc55mk2_t *b)
 {
 	b->cpu_quarter_cycles = 0;
 	b->gp_pair = 1;
@@ -312,24 +319,23 @@ static void power_on(sc55mk2_t *b)
 	b->int_trigger = 0;
 	b->gp_written = 0;
 	b->lcd_powered = false;
+	b->frame = 0;
+	midi_queue_reset(&b->midi);
 	gp_reset(&b->gp);
 	lcd_reset(&b->lcd);
 	sub55_hle_reset(&b->sub);
 	h8500_reset(&b->cpu);
-}
 
-void sc55mk2_reset(sc55mk2_t *b)
-{
-	b->frame = 0;
-	b->sram_fresh = true;
-	for (size_t n = 0; n < SC55MK2_SRAM_SIZE; n++)
-		if (b->sram[n])
-		{
-			b->sram_fresh = false;
-			break;
-		}
-	midi_queue_reset(&b->midi);
-	power_on(b);
+	/* a machine whose battery SRAM has never been written runs the panel's own factory
+	   setup: INSTRUMENT < and > held from the reset, then ALL at the prompt */
+	b->factory = SC55MK2_FACTORY_NONE;
+	b->factory_frames = 0;
+	if (sram_blank(b))
+	{
+		b->factory = SC55MK2_FACTORY_PROMPT;
+		sc55mk2_button(b, SCEMU_BUTTON_INSTRUMENT_LEFT, true);
+		sc55mk2_button(b, SCEMU_BUTTON_INSTRUMENT_RIGHT, true);
+	}
 }
 
 /* ---------------------------------------------------------------- the frame */
@@ -345,6 +351,72 @@ static bool midi_take(void *user, int port, uint8_t byte)
 		return false;
 	sub55_hle_midi_byte(&b->sub, source, byte);
 	return true;
+}
+
+/* the analog mute released and the chip left alone: the machine has finished whatever
+   it was doing */
+static bool settled(const sc55mk2_t *b)
+{
+	return !(b->sys_control & 0x02) && b->frame - b->gp_written >= SC55MK2_IDLE_FRAMES;
+}
+
+bool sc55mk2_idle(const sc55mk2_t *b)
+{
+	return b->factory == SC55MK2_FACTORY_NONE && settled(b);
+}
+
+/* a battery SRAM handed to the machine replaces the blank one the setup was for */
+static void factory_cancel(sc55mk2_t *b)
+{
+	if (b->factory == SC55MK2_FACTORY_PROMPT)
+	{
+		sc55mk2_button(b, SCEMU_BUTTON_INSTRUMENT_LEFT, false);
+		sc55mk2_button(b, SCEMU_BUTTON_INSTRUMENT_RIGHT, false);
+	}
+	if (b->factory == SC55MK2_FACTORY_CONFIRM)
+		sc55mk2_button(b, SCEMU_BUTTON_ALL, false);
+	b->factory = SC55MK2_FACTORY_NONE;
+	b->factory_frames = 0;
+}
+
+static void factory_step(sc55mk2_t *b)
+{
+	switch (b->factory)
+	{
+	case SC55MK2_FACTORY_PROMPT:
+		if (!settled(b))
+			break;
+		sc55mk2_button(b, SCEMU_BUTTON_INSTRUMENT_LEFT, false);
+		sc55mk2_button(b, SCEMU_BUTTON_INSTRUMENT_RIGHT, false);
+		sc55mk2_button(b, SCEMU_BUTTON_ALL, true);
+		b->factory_frames = SC55MK2_KEY_FRAMES;
+		b->factory = SC55MK2_FACTORY_CONFIRM;
+		break;
+	case SC55MK2_FACTORY_CONFIRM:
+		if (--b->factory_frames)
+			break;
+		sc55mk2_button(b, SCEMU_BUTTON_ALL, false);
+		b->factory_frames = SC55MK2_SAMPLE_RATE;
+		b->factory = SC55MK2_FACTORY_REBUILD;
+		break;
+	case SC55MK2_FACTORY_REBUILD:
+		if (!settled(b))
+		{
+			b->factory_frames = SC55MK2_IDLE_FRAMES;
+			b->factory = SC55MK2_FACTORY_SETTLE;
+		}
+		else if (!--b->factory_frames)
+			b->factory = SC55MK2_FACTORY_NONE;
+		break;
+	case SC55MK2_FACTORY_SETTLE:
+		if (!settled(b))
+			b->factory_frames = SC55MK2_IDLE_FRAMES;
+		else if (!--b->factory_frames)
+			b->factory = SC55MK2_FACTORY_NONE;
+		break;
+	case SC55MK2_FACTORY_NONE:
+		break;
+	}
 }
 
 void sc55mk2_run_frame(sc55mk2_t *b)
@@ -366,18 +438,8 @@ void sc55mk2_run_frame(sc55mk2_t *b)
 
 	b->frame++;
 
-	/* the firmware's own initialisation of a blank battery SRAM leaves the tuning a
-	   semitone down until the next boot reads the parameters back */
-	if (b->sram_fresh && sc55mk2_idle(b))
-	{
-		b->sram_fresh = false;
-		power_on(b);
-	}
-}
-
-bool sc55mk2_idle(const sc55mk2_t *b)
-{
-	return !(b->sys_control & 0x02) && b->frame - b->gp_written >= SC55MK2_IDLE_FRAMES;
+	if (b->factory != SC55MK2_FACTORY_NONE)
+		factory_step(b);
 }
 
 void sc55mk2_queue_midi(sc55mk2_t *b, int port, uint8_t byte, uint32_t frame_offset)
@@ -482,7 +544,7 @@ static bool ops_nvram_set(void *board, const void *buffer, size_t size)
 	if (size != SC55MK2_SRAM_SIZE)
 		return false;
 	memcpy(b->sram, buffer, SC55MK2_SRAM_SIZE);
-	b->sram_fresh = false;
+	factory_cancel(b);
 	return true;
 }
 

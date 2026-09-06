@@ -27,7 +27,8 @@ static void put_board(state_writer_t *w, const sc55mk2_t *b)
 	put8(w, b->int_enable);
 	put8(w, b->int_trigger);
 	put_bool(w, b->lcd_powered);
-	put_bool(w, b->sram_fresh);
+	put32(w, (uint32_t)b->factory);
+	put32(w, b->factory_frames);
 	put64(w, b->gp_written);
 	put32(w, (uint32_t)b->computer_switch);
 	put64(w, b->frame);
@@ -42,7 +43,8 @@ static void get_board(state_reader_t *r, sc55mk2_t *b)
 	b->int_enable = get8(r);
 	b->int_trigger = get8(r);
 	b->lcd_powered = get_bool(r);
-	b->sram_fresh = get_bool(r);
+	b->factory = (sc55mk2_factory_t)get32(r);
+	b->factory_frames = get32(r);
 	b->gp_written = get64(r);
 	b->computer_switch = (scemu_computer_switch_t)get32(r);
 	b->frame = get64(r);

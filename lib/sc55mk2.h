@@ -32,6 +32,19 @@
 /* the analog mute released and no GP-4 register write for 0.2 s */
 #define SC55MK2_IDLE_FRAMES 13200u
 
+/* how long a key the machine presses itself is held, 0.1 s */
+#define SC55MK2_KEY_FRAMES 6620u
+
+/* what the factory setup is waiting for, from the reset that started it */
+typedef enum sc55mk2_factory
+{
+	SC55MK2_FACTORY_NONE,
+	SC55MK2_FACTORY_PROMPT,   /* holding INSTRUMENT < and >, waiting for `Init All,  Sure?` */
+	SC55MK2_FACTORY_CONFIRM,  /* ALL held */
+	SC55MK2_FACTORY_REBUILD,  /* waiting for the rebuild to take the machine off idle */
+	SC55MK2_FACTORY_SETTLE    /* and for it to come back */
+} sc55mk2_factory_t;
+
 typedef struct sc55mk2
 {
 	scemu_model_t model;
@@ -59,7 +72,8 @@ typedef struct sc55mk2
 	uint8_t int_trigger;   /* 0E402 read: the source waiting, cleared by the read */
 
 	uint64_t gp_written;   /* the frame of the last write to 0E000-0E03F */
-	bool sram_fresh;       /* the battery SRAM has never been through a boot */
+	sc55mk2_factory_t factory;
+	uint32_t factory_frames;
 	scemu_computer_switch_t computer_switch;
 
 	uint64_t frame;
