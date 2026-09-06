@@ -378,7 +378,7 @@ bool sc88_init(sc88_t *b, scemu_model_t model, const scemu_roms_t *roms, const s
 {
 	memset(b, 0, sizeof(*b));
 	b->model = model;
-	midi_queue_init(&b->midi, SC88_MIDI_PORTS);
+	midi_queue_init(&b->midi, SC88_MIDI_PORTS, SC88_SAMPLE_RATE);
 	jit_alloc_init(&b->jit, config);
 
 	const bool sc88 = (model == SCEMU_MODEL_SC88 || model == SCEMU_MODEL_SC88VL);
@@ -565,6 +565,7 @@ static void ops_run_frame(void *b) { sc88_run_frame(b); }
 static bool ops_idle(const void *b) { return sc88_idle(b); }
 static uint64_t ops_frame(const void *b) { return ((const sc88_t *)b)->frame; }
 static uint64_t ops_rom_id(const void *b) { return ((const sc88_t *)b)->rom_id; }
+static uint32_t ops_sample_rate(const void *b) { (void)b; return SC88_SAMPLE_RATE; }
 static int ops_output_count(const void *b) { return ((const sc88_t *)b)->has_lsp ? 2 : 1; }
 
 /* the SC-88's one DAC on SDOC, the frame half picking left or right; the SC-88Pro's two, SDOC carrying
@@ -616,7 +617,7 @@ static bool ops_state_load(void *b, const void *buffer, size_t size) { return sc
 
 const board_ops_t sc88_board_ops =
 {
-	ops_validate_roms, ops_init, ops_release, ops_reset, ops_run_frame, ops_idle, ops_frame, ops_rom_id,
+	ops_validate_roms, ops_init, ops_release, ops_reset, ops_run_frame, ops_idle, ops_frame, ops_rom_id, ops_sample_rate,
 	ops_output_count, ops_output,
 	ops_midi, ops_set_midi_out, ops_set_rail, ops_rail,
 	ops_button, ops_set_computer_switch, ops_leds, ops_lcd, NULL, NULL,

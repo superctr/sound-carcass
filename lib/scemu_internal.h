@@ -6,6 +6,7 @@
 #include "midi_map.h"
 #include "sc88.h"
 #include "sc8850.h"
+#include "sc55mk2.h"
 
 /* What a board owes the API.  A board is one machine family's glue: its CPU, its memory map, its
  * gate array and display, wired to the chips; the API dispatches to whichever the model names. */
@@ -19,6 +20,7 @@ typedef struct board_ops
 	bool (*idle)(const void *board);
 	uint64_t (*frame)(const void *board);
 	uint64_t (*rom_id)(const void *board);
+	uint32_t (*sample_rate)(const void *board);
 
 	int (*output_count)(const void *board);
 	/* a DAC word of the frame just run, zero while the analog mute holds */
@@ -47,6 +49,7 @@ typedef struct board_ops
 
 extern const board_ops_t sc88_board_ops;
 extern const board_ops_t sc8850_board_ops;
+extern const board_ops_t sc55mk2_board_ops;
 
 struct scemu
 {
@@ -58,6 +61,7 @@ struct scemu
 	{
 		sc88_t sc88;
 		sc8850_t sc8850;
+		sc55mk2_t sc55mk2;
 	} board;
 	midi_map_t map;
 };

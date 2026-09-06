@@ -44,7 +44,7 @@ typedef struct h8500_bus
 /* Memory the core may touch directly, bypassing the bus callbacks: the
  * program ROM and the SRAM.  Any address outside every region goes through
  * the callbacks. */
-#define H8500_MAX_REGIONS 4
+#define H8500_MAX_REGIONS 8
 
 typedef struct h8500_region
 {

@@ -42,7 +42,7 @@ static void get_board(state_reader_t *r, sc88_t *b)
 	b->midi.drops = get32(r);
 }
 
-static void put_cpu(state_writer_t *w, const h8500_t *c)
+void state_put_h8500(state_writer_t *w, const h8500_t *c)
 {
 	put16(w, c->pc);
 	put16(w, c->sr);
@@ -58,8 +58,10 @@ static void put_cpu(state_writer_t *w, const h8500_t *c)
 	put_u32s(w, c->irq_pend, 3);
 	put_bool(w, c->no_irq);
 	put_bytes(w, c->io, H8500_IO_SIZE);
-	put_u16s(w, c->frt_count, 2);
-	put_u32s(w, c->frt_prescale, 2);
+	put_u16s(w, c->frt_count, (size_t)c->var->frt_count);
+	put_u32s(w, c->frt_prescale, (size_t)c->var->frt_count);
+	if (c->var->frt_temp)
+		put_bytes(w, c->frt_temp, (size_t)c->var->frt_count);
 	put8(w, c->tmr_count);
 	put32(w, c->tmr_prescale);
 	put32(w, c->wdt_prescale);
@@ -74,11 +76,13 @@ static void put_cpu(state_writer_t *w, const h8500_t *c)
 		put8(w, c->sci[n].ssr_read);
 		put_bool(w, c->sci[n].tx_busy);
 	}
-	put_u16s(w, c->port_out, 9);
+	put_u16s(w, c->port_out, (size_t)c->var->port_count + 1);
+	if (c->var->ram_size)
+		put_bytes(w, c->iram, c->var->ram_size);
 	put64(w, c->cycles);
 }
 
-static void get_cpu(state_reader_t *r, h8500_t *c)
+void state_get_h8500(state_reader_t *r, h8500_t *c)
 {
 	c->pc = get16(r);
 	c->sr = get16(r);
@@ -94,8 +98,10 @@ static void get_cpu(state_reader_t *r, h8500_t *c)
 	get_u32s(r, c->irq_pend, 3);
 	c->no_irq = get_bool(r);
 	get_bytes(r, c->io, H8500_IO_SIZE);
-	get_u16s(r, c->frt_count, 2);
-	get_u32s(r, c->frt_prescale, 2);
+	get_u16s(r, c->frt_count, (size_t)c->var->frt_count);
+	get_u32s(r, c->frt_prescale, (size_t)c->var->frt_count);
+	if (c->var->frt_temp)
+		get_bytes(r, c->frt_temp, (size_t)c->var->frt_count);
 	c->tmr_count = get8(r);
 	c->tmr_prescale = get32(r);
 	c->wdt_prescale = get32(r);
@@ -110,7 +116,9 @@ static void get_cpu(state_reader_t *r, h8500_t *c)
 		c->sci[n].ssr_read = get8(r);
 		c->sci[n].tx_busy = get_bool(r);
 	}
-	get_u16s(r, c->port_out, 9);
+	get_u16s(r, c->port_out, (size_t)c->var->port_count + 1);
+	if (c->var->ram_size)
+		get_bytes(r, c->iram, c->var->ram_size);
 	c->cycles = get64(r);
 	c->irq_ready = false;
 	c->jit_pending = 0;
@@ -487,7 +495,7 @@ static size_t write_state(const sc88_t *b, uint8_t *out)
 		{
 		case CHUNK_BOARD:      put_board(&w, b); break;
 		case CHUNK_SRAM:       put_bytes(&w, b->sram, SC88_SRAM_SIZE); break;
-		case CHUNK_CPU:        put_cpu(&w, &b->cpu); break;
+		case CHUNK_CPU:        state_put_h8500(&w, &b->cpu); break;
 		case CHUNK_XP:         state_put_xp(&w, &b->xp); break;
 		case CHUNK_XP_ERAM:    put_i32s(&w, b->xp.eram, XP_ERAM_SIZE); break;
 		case CHUNK_LSP:        state_put_lsp(&w, &b->lsp); break;
@@ -534,7 +542,7 @@ static bool read_chunk(int which, state_reader_t *r, sc88_t *b)
 	{
 	case CHUNK_BOARD:      get_board(r, b); break;
 	case CHUNK_SRAM:       get_bytes(r, b->sram, SC88_SRAM_SIZE); break;
-	case CHUNK_CPU:        get_cpu(r, &b->cpu); break;
+	case CHUNK_CPU:        state_get_h8500(r, &b->cpu); break;
 	case CHUNK_XP:         state_get_xp(r, &b->xp); break;
 	case CHUNK_XP_ERAM:    get_i32s(r, b->xp.eram, XP_ERAM_SIZE); break;
 	case CHUNK_LSP:        state_get_lsp(r, &b->lsp); break;

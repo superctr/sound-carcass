@@ -10,7 +10,6 @@
 #define MIDI_QUEUE_PORTS 4
 #define MIDI_QUEUE_SIZE 16384
 #define MIDI_QUEUE_DEFAULT_BAUD 31250
-#define MIDI_QUEUE_BYTE_UNITS (10 * 32000)
 
 typedef struct midi_queue_event
 {
@@ -26,13 +25,14 @@ typedef struct midi_queue
 	uint32_t count[MIDI_QUEUE_PORTS];
 	uint32_t credit[MIDI_QUEUE_PORTS];
 	uint32_t baud;
+	uint32_t byte_units;   /* ten bits at the board's frame rate */
 	uint32_t drops;
 } midi_queue_t;
 
 /* a byte the board can take now, or false to leave it queued */
 typedef bool (*midi_queue_take_fn)(void *user, int port, uint8_t byte);
 
-void midi_queue_init(midi_queue_t *q, int ports);
+void midi_queue_init(midi_queue_t *q, int ports, uint32_t rate);
 void midi_queue_reset(midi_queue_t *q);
 void midi_queue_push(midi_queue_t *q, int port, uint8_t byte, uint32_t frame);
 void midi_queue_deliver(midi_queue_t *q, uint32_t frame, midi_queue_take_fn take, void *user);

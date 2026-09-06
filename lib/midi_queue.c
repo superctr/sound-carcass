@@ -1,11 +1,12 @@
 #include <string.h>
 #include "midi_queue.h"
 
-void midi_queue_init(midi_queue_t *q, int ports)
+void midi_queue_init(midi_queue_t *q, int ports, uint32_t rate)
 {
 	memset(q, 0, sizeof(*q));
 	q->ports = ports;
 	q->baud = MIDI_QUEUE_DEFAULT_BAUD;
+	q->byte_units = 10 * rate;
 }
 
 void midi_queue_reset(midi_queue_t *q)
@@ -34,9 +35,9 @@ void midi_queue_deliver(midi_queue_t *q, uint32_t frame, midi_queue_take_fn take
 {
 	for (int port = 0; port < q->ports; port++)
 	{
-		if (q->credit[port] < MIDI_QUEUE_BYTE_UNITS)
+		if (q->credit[port] < q->byte_units)
 			q->credit[port] += q->baud;
-		while (q->count[port] && (!q->baud || q->credit[port] >= MIDI_QUEUE_BYTE_UNITS))
+		while (q->count[port] && (!q->baud || q->credit[port] >= q->byte_units))
 		{
 			const midi_queue_event_t *e = &q->events[port][q->head[port]];
 			if (e->frame > frame)
@@ -46,7 +47,7 @@ void midi_queue_deliver(midi_queue_t *q, uint32_t frame, midi_queue_take_fn take
 			q->head[port] = (q->head[port] + 1) % MIDI_QUEUE_SIZE;
 			q->count[port]--;
 			if (q->baud)
-				q->credit[port] -= MIDI_QUEUE_BYTE_UNITS;
+				q->credit[port] -= q->byte_units;
 		}
 	}
 }
