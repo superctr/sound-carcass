@@ -35,8 +35,10 @@ const panel_rect_t *panel_element_rect(const panel_t *p, panel_element_t e);
 
 /* State.  Each setter marks the panel dirty when something changed. */
 void panel_set_lcd(panel_t *p, const scemu_lcd_t *lcd);
+void panel_set_glcd(panel_t *p, const scemu_glcd_t *glcd); /* the models whose glass is a dot bitmap */
 void panel_set_leds(panel_t *p, uint32_t mask);          /* scemu_leds() */
 void panel_set_knob(panel_t *p, float turn);             /* 0 = fully left, 1 = fully right */
+void panel_set_dial(panel_t *p, int steps);              /* the value dial, positive clockwise; it accumulates */
 void panel_set_standby(panel_t *p, bool standby);        /* the STANDBY lamp of the soft-switched models: lit while off */
 void panel_set_pressed(panel_t *p, panel_element_t e, bool down);
 bool panel_dirty(const panel_t *p);

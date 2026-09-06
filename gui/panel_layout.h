@@ -15,9 +15,11 @@ typedef struct panel_glass
 	int16_t col[2];        /* x of the left and right text columns */
 	int16_t row[4];        /* y of the four text rows */
 	int16_t cell_pitch;    /* x from one character cell to the next */
-	int16_t dot_pitch, dot;/* the 5x7 matrix: pitch and dot size */
+	int16_t dot_pitch, dot;/* the dot matrix: pitch and dot size */
 	int16_t bar_x, bar_y;  /* the sixteen level bars: first bar, top segment */
 	int16_t bar_pitch_x, bar_pitch_y, bar_w, bar_h;
+	int16_t dot_x, dot_y;  /* a bitmap glass: the dot grid's top-left corner */
+	int16_t dot_cols, dot_rows;  /* and its size in dots; 0 where the glass is character cells */
 } panel_glass_t;
 
 /* a sprite in the atlas, and where its top-left corner goes on the panel */
@@ -26,17 +28,21 @@ typedef struct panel_sprite { panel_rect_t atlas; int16_t x, y; } panel_sprite_t
 /* the knob's pointer, one sprite per step over 270 degrees of travel */
 #define PANEL_KNOB_FRAMES 181
 
+/* the value dial's mark, one sprite per step of the endless encoder over a whole turn */
+#define PANEL_DIAL_FRAMES 36
+
 typedef enum panel_model
 {
 	PANEL_MODEL_SC88PRO,
 	PANEL_MODEL_SC88,
 	PANEL_MODEL_SC88VL,
 	PANEL_MODEL_SC55MK2,
+	PANEL_MODEL_SC8850,
 	PANEL_MODEL_COUNT
 } panel_model_t;
 
 static const char *const panel_model_name[PANEL_MODEL_COUNT] = {
-	"sc88pro", "sc88", "sc88vl", "sc55mk2"
+	"sc88pro", "sc88", "sc88vl", "sc55mk2", "sc8850"
 };
 
 typedef enum panel_element
@@ -78,6 +84,24 @@ typedef enum panel_element
 	PANEL_BUTTON_EDIT3_LEFT,
 	PANEL_BUTTON_EDIT3_RIGHT,
 	PANEL_BUTTON_PREVIEW,
+	PANEL_DIAL_VALUE,
+	PANEL_BUTTON_F1,
+	PANEL_BUTTON_F2,
+	PANEL_BUTTON_F3,
+	PANEL_BUTTON_F4,
+	PANEL_BUTTON_MAP,
+	PANEL_BUTTON_EDIT,
+	PANEL_BUTTON_DRUM,
+	PANEL_BUTTON_DOWN,
+	PANEL_BUTTON_UP,
+	PANEL_BUTTON_EFFECTS,
+	PANEL_BUTTON_EXIT,
+	PANEL_BUTTON_ENTER,
+	PANEL_BUTTON_SHIFT,
+	PANEL_BUTTON_SOLO,
+	PANEL_BUTTON_DEC,
+	PANEL_BUTTON_INC,
+	PANEL_BUTTON_VALUE,
 	PANEL_ELEMENT_COUNT
 } panel_element_t;
 
@@ -125,12 +149,33 @@ typedef enum panel_sprite_id
 	PANEL_SPRITE_BUTTON_EDIT3_RIGHT,
 	PANEL_SPRITE_BUTTON_PREVIEW,
 	PANEL_SPRITE_LED_STANDBY,
+	PANEL_SPRITE_LED_SOLO,
+	PANEL_SPRITE_LED_EDIT,
+	PANEL_SPRITE_LED_DRUM,
+	PANEL_SPRITE_LED_EFFECTS,
+	PANEL_SPRITE_BUTTON_F1,
+	PANEL_SPRITE_BUTTON_F2,
+	PANEL_SPRITE_BUTTON_F3,
+	PANEL_SPRITE_BUTTON_F4,
+	PANEL_SPRITE_BUTTON_MAP,
+	PANEL_SPRITE_BUTTON_EDIT,
+	PANEL_SPRITE_BUTTON_DRUM,
+	PANEL_SPRITE_BUTTON_DOWN,
+	PANEL_SPRITE_BUTTON_UP,
+	PANEL_SPRITE_BUTTON_EFFECTS,
+	PANEL_SPRITE_BUTTON_EXIT,
+	PANEL_SPRITE_BUTTON_ENTER,
+	PANEL_SPRITE_BUTTON_SHIFT,
+	PANEL_SPRITE_BUTTON_SOLO,
+	PANEL_SPRITE_BUTTON_DEC,
+	PANEL_SPRITE_BUTTON_INC,
+	PANEL_SPRITE_BUTTON_VALUE,
 	PANEL_SPRITE_COUNT
 } panel_sprite_id_t;
 
 /* the sprite that is an element's key, for drawing it pressed; -1 for the rest */
 static const int16_t panel_element_sprite[PANEL_ELEMENT_COUNT] = {
-	-1, -1, -1, -1, -1, -1, -1, -1, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40
+	-1, -1, -1, -1, -1, -1, -1, -1, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, -1, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62
 };
 
 typedef struct panel_size
@@ -141,14 +186,15 @@ typedef struct panel_size
 	panel_rect_t element[PANEL_ELEMENT_COUNT];
 	panel_sprite_t sprite[PANEL_SPRITE_COUNT];
 	panel_sprite_t knob[PANEL_KNOB_FRAMES];
+	panel_sprite_t dial[PANEL_DIAL_FRAMES];
 } panel_size_t;
 
 static const char *const panel_element_name[PANEL_ELEMENT_COUNT] = {
-	"switch-power", "knob-volume", "jack-midi-in-b", "jack-phones", "lcd-glass", "lens-user-inst", "logo", "logo-model", "button-all", "button-mute", "button-sc55-map", "button-sc88-map", "button-part-left", "button-part-right", "button-instrument-left", "button-instrument-right", "button-level-left", "button-level-right", "button-pan-left", "button-pan-right", "button-reverb-left", "button-reverb-right", "button-chorus-left", "button-chorus-right", "button-key-shift-left", "button-key-shift-right", "button-midi-ch-left", "button-midi-ch-right", "button-user-inst", "button-select", "button-edit1-left", "button-edit1-right", "button-edit2-left", "button-edit2-right", "button-edit3-left", "button-edit3-right", "button-preview"
+	"switch-power", "knob-volume", "jack-midi-in-b", "jack-phones", "lcd-glass", "lens-user-inst", "logo", "logo-model", "button-all", "button-mute", "button-sc55-map", "button-sc88-map", "button-part-left", "button-part-right", "button-instrument-left", "button-instrument-right", "button-level-left", "button-level-right", "button-pan-left", "button-pan-right", "button-reverb-left", "button-reverb-right", "button-chorus-left", "button-chorus-right", "button-key-shift-left", "button-key-shift-right", "button-midi-ch-left", "button-midi-ch-right", "button-user-inst", "button-select", "button-edit1-left", "button-edit1-right", "button-edit2-left", "button-edit2-right", "button-edit3-left", "button-edit3-right", "button-preview", "dial-value", "button-f1", "button-f2", "button-f3", "button-f4", "button-map", "button-edit", "button-drum", "button-down", "button-up", "button-effects", "button-exit", "button-enter", "button-shift", "button-solo", "button-dec", "button-inc", "button-value"
 };
 
 static const char *const panel_sprite_name[PANEL_SPRITE_COUNT] = {
-	"led-all", "led-mute", "led-sc55-map", "led-sc88-map", "led-user-inst", "led-user-inst-red", "led-user-inst-efx", "led-edit1", "led-edit2", "led-edit3", "lcd-mark-l", "lcd-mark-r", "button-all", "button-mute", "button-sc55-map", "button-sc88-map", "button-part-left", "button-part-right", "button-instrument-left", "button-instrument-right", "button-level-left", "button-level-right", "button-pan-left", "button-pan-right", "button-reverb-left", "button-reverb-right", "button-chorus-left", "button-chorus-right", "button-key-shift-left", "button-key-shift-right", "button-midi-ch-left", "button-midi-ch-right", "button-user-inst", "button-select", "button-edit1-left", "button-edit1-right", "button-edit2-left", "button-edit2-right", "button-edit3-left", "button-edit3-right", "button-preview", "led-standby"
+	"led-all", "led-mute", "led-sc55-map", "led-sc88-map", "led-user-inst", "led-user-inst-red", "led-user-inst-efx", "led-edit1", "led-edit2", "led-edit3", "lcd-mark-l", "lcd-mark-r", "button-all", "button-mute", "button-sc55-map", "button-sc88-map", "button-part-left", "button-part-right", "button-instrument-left", "button-instrument-right", "button-level-left", "button-level-right", "button-pan-left", "button-pan-right", "button-reverb-left", "button-reverb-right", "button-chorus-left", "button-chorus-right", "button-key-shift-left", "button-key-shift-right", "button-midi-ch-left", "button-midi-ch-right", "button-user-inst", "button-select", "button-edit1-left", "button-edit1-right", "button-edit2-left", "button-edit2-right", "button-edit3-left", "button-edit3-right", "button-preview", "led-standby", "led-solo", "led-edit", "led-drum", "led-effects", "button-f1", "button-f2", "button-f3", "button-f4", "button-map", "button-edit", "button-drum", "button-down", "button-up", "button-effects", "button-exit", "button-enter", "button-shift", "button-solo", "button-dec", "button-inc", "button-value"
 };
 
 #define PANEL_SIZE_COUNT 2
@@ -158,7 +204,7 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 	{
 		4, 1399, 440,
 		"panel_sc88pro_base_p4.png", "panel_sc88pro_atlas_p4.png",
-		{ { 366, 446 }, { 61, 103, 146, 189 }, 23, 4, 3, 539, 101, 17, 7, 16, 6 },
+		{ { 366, 446 }, { 61, 103, 146, 189 }, 23, 4, 3, 539, 101, 17, 7, 16, 6, 0, 0, 0, 0 },
 		{
 			{ 8, 35, 176, 41 },  /* switch-power */
 			{ 193, 42, 85, 85 },  /* knob-volume */
@@ -197,6 +243,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 1207, 375, 67, 29 },  /* button-edit3-left */
 			{ 1275, 375, 68, 29 },  /* button-edit3-right */
 			{ 200, 49, 70, 71 },  /* button-preview */
+			{ 0, 0, 0, 0 },  /* dial-value */
+			{ 0, 0, 0, 0 },  /* button-f1 */
+			{ 0, 0, 0, 0 },  /* button-f2 */
+			{ 0, 0, 0, 0 },  /* button-f3 */
+			{ 0, 0, 0, 0 },  /* button-f4 */
+			{ 0, 0, 0, 0 },  /* button-map */
+			{ 0, 0, 0, 0 },  /* button-edit */
+			{ 0, 0, 0, 0 },  /* button-drum */
+			{ 0, 0, 0, 0 },  /* button-down */
+			{ 0, 0, 0, 0 },  /* button-up */
+			{ 0, 0, 0, 0 },  /* button-effects */
+			{ 0, 0, 0, 0 },  /* button-exit */
+			{ 0, 0, 0, 0 },  /* button-enter */
+			{ 0, 0, 0, 0 },  /* button-shift */
+			{ 0, 0, 0, 0 },  /* button-solo */
+			{ 0, 0, 0, 0 },  /* button-dec */
+			{ 0, 0, 0, 0 },  /* button-inc */
+			{ 0, 0, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 0, 0, 74, 73 }, 926, 20 },  /* led-all */
@@ -241,6 +305,27 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 306, 74, 76, 38 }, 1271, 373 },  /* button-edit3-right */
 			{ { 300, 0, 72, 71 }, 199, 49 },  /* button-preview */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-standby */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-down */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-up */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-exit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-enter */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-shift */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-dec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-inc */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 256, 151, 16, 17 }, 209, 95 }, { { 273, 151, 17, 17 }, 208, 95 }, { { 432, 151, 18, 16 }, 207, 95 },
@@ -305,11 +390,25 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 638, 151, 18, 16 }, 247, 93 }, { { 657, 151, 17, 16 }, 247, 94 }, { { 675, 151, 17, 16 }, 246, 94 },
 			{ { 414, 151, 17, 17 }, 246, 94 },
 		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+		},
 	},
 	{
 		8, 2798, 879,
 		"panel_sc88pro_base_p8.png", "panel_sc88pro_atlas_p8.png",
-		{ { 733, 891 }, { 122, 207, 292, 378 }, 47, 8, 7, 1078, 202, 35, 15, 32, 12 },
+		{ { 733, 891 }, { 122, 207, 292, 378 }, 47, 8, 7, 1078, 202, 35, 15, 32, 12, 0, 0, 0, 0 },
 		{
 			{ 17, 71, 350, 80 },  /* switch-power */
 			{ 385, 83, 171, 171 },  /* knob-volume */
@@ -348,6 +447,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 2414, 749, 135, 60 },  /* button-edit3-left */
 			{ 2550, 749, 135, 60 },  /* button-edit3-right */
 			{ 400, 98, 141, 141 },  /* button-preview */
+			{ 0, 0, 0, 0 },  /* dial-value */
+			{ 0, 0, 0, 0 },  /* button-f1 */
+			{ 0, 0, 0, 0 },  /* button-f2 */
+			{ 0, 0, 0, 0 },  /* button-f3 */
+			{ 0, 0, 0, 0 },  /* button-f4 */
+			{ 0, 0, 0, 0 },  /* button-map */
+			{ 0, 0, 0, 0 },  /* button-edit */
+			{ 0, 0, 0, 0 },  /* button-drum */
+			{ 0, 0, 0, 0 },  /* button-down */
+			{ 0, 0, 0, 0 },  /* button-up */
+			{ 0, 0, 0, 0 },  /* button-effects */
+			{ 0, 0, 0, 0 },  /* button-exit */
+			{ 0, 0, 0, 0 },  /* button-enter */
+			{ 0, 0, 0, 0 },  /* button-shift */
+			{ 0, 0, 0, 0 },  /* button-solo */
+			{ 0, 0, 0, 0 },  /* button-dec */
+			{ 0, 0, 0, 0 },  /* button-inc */
+			{ 0, 0, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 300, 0, 149, 146 }, 1852, 40 },  /* led-all */
@@ -392,6 +509,27 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 455, 224, 151, 75 }, 2542, 746 },  /* button-edit3-right */
 			{ { 600, 0, 142, 142 }, 400, 98 },  /* button-preview */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-standby */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-down */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-up */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-exit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-enter */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-shift */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-dec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-inc */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 628, 300, 32, 32 }, 418, 191 }, { { 661, 300, 33, 32 }, 417, 190 }, { { 695, 300, 33, 32 }, 416, 189 },
@@ -456,13 +594,27 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 1330, 300, 35, 30 }, 494, 187 }, { { 798, 300, 34, 32 }, 494, 187 }, { { 833, 300, 34, 32 }, 493, 188 },
 			{ { 868, 300, 33, 32 }, 492, 189 },
 		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+		},
 	},
 	},
 	{  /* sc88 */
 	{
 		4, 1399, 440,
 		"panel_sc88_base_p4.png", "panel_sc88_atlas_p4.png",
-		{ { 366, 446 }, { 61, 103, 146, 189 }, 23, 4, 3, 539, 101, 17, 7, 16, 6 },
+		{ { 366, 446 }, { 61, 103, 146, 189 }, 23, 4, 3, 539, 101, 17, 7, 16, 6, 0, 0, 0, 0 },
 		{
 			{ 8, 35, 176, 41 },  /* switch-power */
 			{ 193, 42, 85, 85 },  /* knob-volume */
@@ -501,6 +653,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 1207, 375, 67, 29 },  /* button-edit3-left */
 			{ 1275, 375, 68, 29 },  /* button-edit3-right */
 			{ 200, 49, 70, 71 },  /* button-preview */
+			{ 0, 0, 0, 0 },  /* dial-value */
+			{ 0, 0, 0, 0 },  /* button-f1 */
+			{ 0, 0, 0, 0 },  /* button-f2 */
+			{ 0, 0, 0, 0 },  /* button-f3 */
+			{ 0, 0, 0, 0 },  /* button-f4 */
+			{ 0, 0, 0, 0 },  /* button-map */
+			{ 0, 0, 0, 0 },  /* button-edit */
+			{ 0, 0, 0, 0 },  /* button-drum */
+			{ 0, 0, 0, 0 },  /* button-down */
+			{ 0, 0, 0, 0 },  /* button-up */
+			{ 0, 0, 0, 0 },  /* button-effects */
+			{ 0, 0, 0, 0 },  /* button-exit */
+			{ 0, 0, 0, 0 },  /* button-enter */
+			{ 0, 0, 0, 0 },  /* button-shift */
+			{ 0, 0, 0, 0 },  /* button-solo */
+			{ 0, 0, 0, 0 },  /* button-dec */
+			{ 0, 0, 0, 0 },  /* button-inc */
+			{ 0, 0, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 0, 0, 74, 73 }, 926, 20 },  /* led-all */
@@ -545,6 +715,27 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 229, 74, 76, 38 }, 1271, 373 },  /* button-edit3-right */
 			{ { 300, 0, 72, 71 }, 199, 49 },  /* button-preview */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-standby */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-down */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-up */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-exit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-enter */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-shift */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-dec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-inc */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 177, 151, 16, 17 }, 209, 95 }, { { 194, 151, 17, 17 }, 208, 95 }, { { 353, 151, 18, 16 }, 207, 95 },
@@ -609,11 +800,25 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 559, 151, 18, 16 }, 247, 93 }, { { 578, 151, 17, 16 }, 247, 94 }, { { 596, 151, 17, 16 }, 246, 94 },
 			{ { 335, 151, 17, 17 }, 246, 94 },
 		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+		},
 	},
 	{
 		8, 2798, 879,
 		"panel_sc88_base_p8.png", "panel_sc88_atlas_p8.png",
-		{ { 733, 891 }, { 122, 207, 292, 378 }, 47, 8, 7, 1078, 202, 35, 15, 32, 12 },
+		{ { 733, 891 }, { 122, 207, 292, 378 }, 47, 8, 7, 1078, 202, 35, 15, 32, 12, 0, 0, 0, 0 },
 		{
 			{ 17, 71, 350, 80 },  /* switch-power */
 			{ 385, 83, 171, 171 },  /* knob-volume */
@@ -652,6 +857,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 2414, 749, 135, 60 },  /* button-edit3-left */
 			{ 2550, 749, 135, 60 },  /* button-edit3-right */
 			{ 400, 98, 141, 141 },  /* button-preview */
+			{ 0, 0, 0, 0 },  /* dial-value */
+			{ 0, 0, 0, 0 },  /* button-f1 */
+			{ 0, 0, 0, 0 },  /* button-f2 */
+			{ 0, 0, 0, 0 },  /* button-f3 */
+			{ 0, 0, 0, 0 },  /* button-f4 */
+			{ 0, 0, 0, 0 },  /* button-map */
+			{ 0, 0, 0, 0 },  /* button-edit */
+			{ 0, 0, 0, 0 },  /* button-drum */
+			{ 0, 0, 0, 0 },  /* button-down */
+			{ 0, 0, 0, 0 },  /* button-up */
+			{ 0, 0, 0, 0 },  /* button-effects */
+			{ 0, 0, 0, 0 },  /* button-exit */
+			{ 0, 0, 0, 0 },  /* button-enter */
+			{ 0, 0, 0, 0 },  /* button-shift */
+			{ 0, 0, 0, 0 },  /* button-solo */
+			{ 0, 0, 0, 0 },  /* button-dec */
+			{ 0, 0, 0, 0 },  /* button-inc */
+			{ 0, 0, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 300, 0, 149, 146 }, 1852, 40 },  /* led-all */
@@ -696,6 +919,27 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 303, 224, 151, 75 }, 2542, 746 },  /* button-edit3-right */
 			{ { 600, 0, 142, 142 }, 400, 98 },  /* button-preview */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-standby */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-down */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-up */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-exit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-enter */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-shift */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-dec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-inc */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 481, 300, 32, 32 }, 418, 191 }, { { 514, 300, 33, 32 }, 417, 190 }, { { 548, 300, 33, 32 }, 416, 189 },
@@ -760,13 +1004,27 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 1183, 300, 35, 30 }, 494, 187 }, { { 651, 300, 34, 32 }, 494, 187 }, { { 686, 300, 34, 32 }, 493, 188 },
 			{ { 721, 300, 33, 32 }, 492, 189 },
 		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+		},
 	},
 	},
 	{  /* sc88vl */
 	{
 		4, 1399, 282,
 		"panel_sc88vl_base_p4.png", "panel_sc88vl_atlas_p4.png",
-		{ { 366, 446 }, { 61, 103, 146, 189 }, 23, 4, 3, 539, 101, 17, 7, 16, 6 },
+		{ { 366, 446 }, { 61, 103, 146, 189 }, 23, 4, 3, 539, 101, 17, 7, 16, 6, 0, 0, 0, 0 },
 		{
 			{ 8, 39, 151, 40 },  /* switch-power */
 			{ 177, 44, 86, 85 },  /* knob-volume */
@@ -805,6 +1063,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-edit3-left */
 			{ 0, 0, 0, 0 },  /* button-edit3-right */
 			{ 0, 0, 0, 0 },  /* button-preview */
+			{ 0, 0, 0, 0 },  /* dial-value */
+			{ 0, 0, 0, 0 },  /* button-f1 */
+			{ 0, 0, 0, 0 },  /* button-f2 */
+			{ 0, 0, 0, 0 },  /* button-f3 */
+			{ 0, 0, 0, 0 },  /* button-f4 */
+			{ 0, 0, 0, 0 },  /* button-map */
+			{ 0, 0, 0, 0 },  /* button-edit */
+			{ 0, 0, 0, 0 },  /* button-drum */
+			{ 0, 0, 0, 0 },  /* button-down */
+			{ 0, 0, 0, 0 },  /* button-up */
+			{ 0, 0, 0, 0 },  /* button-effects */
+			{ 0, 0, 0, 0 },  /* button-exit */
+			{ 0, 0, 0, 0 },  /* button-enter */
+			{ 0, 0, 0, 0 },  /* button-shift */
+			{ 0, 0, 0, 0 },  /* button-solo */
+			{ 0, 0, 0, 0 },  /* button-dec */
+			{ 0, 0, 0, 0 },  /* button-inc */
+			{ 0, 0, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 0, 0, 74, 73 }, 926, 20 },  /* led-all */
@@ -849,6 +1125,27 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit3-right */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-preview */
 			{ { 612, 74, 37, 36 }, 123, 42 },  /* led-standby */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-down */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-up */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-exit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-enter */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-shift */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-dec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-inc */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 307, 112, 17, 17 }, 194, 97 }, { { 501, 112, 17, 16 }, 194, 97 }, { { 325, 112, 17, 17 }, 193, 96 },
@@ -913,11 +1210,25 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 723, 112, 18, 16 }, 232, 95 }, { { 742, 112, 18, 16 }, 232, 96 }, { { 761, 112, 17, 16 }, 232, 96 },
 			{ { 483, 112, 17, 17 }, 231, 96 },
 		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+		},
 	},
 	{
 		8, 2798, 565,
 		"panel_sc88vl_base_p8.png", "panel_sc88vl_atlas_p8.png",
-		{ { 733, 891 }, { 122, 207, 292, 378 }, 47, 8, 7, 1078, 202, 35, 15, 32, 12 },
+		{ { 733, 891 }, { 122, 207, 292, 378 }, 47, 8, 7, 1078, 202, 35, 15, 32, 12, 0, 0, 0, 0 },
 		{
 			{ 17, 77, 301, 81 },  /* switch-power */
 			{ 355, 88, 171, 171 },  /* knob-volume */
@@ -956,6 +1267,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-edit3-left */
 			{ 0, 0, 0, 0 },  /* button-edit3-right */
 			{ 0, 0, 0, 0 },  /* button-preview */
+			{ 0, 0, 0, 0 },  /* dial-value */
+			{ 0, 0, 0, 0 },  /* button-f1 */
+			{ 0, 0, 0, 0 },  /* button-f2 */
+			{ 0, 0, 0, 0 },  /* button-f3 */
+			{ 0, 0, 0, 0 },  /* button-f4 */
+			{ 0, 0, 0, 0 },  /* button-map */
+			{ 0, 0, 0, 0 },  /* button-edit */
+			{ 0, 0, 0, 0 },  /* button-drum */
+			{ 0, 0, 0, 0 },  /* button-down */
+			{ 0, 0, 0, 0 },  /* button-up */
+			{ 0, 0, 0, 0 },  /* button-effects */
+			{ 0, 0, 0, 0 },  /* button-exit */
+			{ 0, 0, 0, 0 },  /* button-enter */
+			{ 0, 0, 0, 0 },  /* button-shift */
+			{ 0, 0, 0, 0 },  /* button-solo */
+			{ 0, 0, 0, 0 },  /* button-dec */
+			{ 0, 0, 0, 0 },  /* button-inc */
+			{ 0, 0, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 300, 0, 149, 146 }, 1852, 40 },  /* led-all */
@@ -1000,6 +1329,27 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit3-right */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-preview */
 			{ { 1216, 148, 75, 73 }, 245, 84 },  /* led-standby */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-down */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-up */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-exit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-enter */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-shift */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-dec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-inc */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 633, 224, 32, 33 }, 388, 195 }, { { 700, 224, 33, 32 }, 386, 195 }, { { 734, 224, 34, 32 }, 385, 194 },
@@ -1064,13 +1414,27 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 1146, 224, 35, 31 }, 464, 191 }, { { 1182, 224, 34, 31 }, 463, 192 }, { { 1008, 224, 33, 32 }, 463, 193 },
 			{ { 1042, 224, 33, 32 }, 462, 194 },
 		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+		},
 	},
 	},
 	{  /* sc55mk2 */
 	{
 		4, 1399, 282,
 		"panel_sc55mk2_base_p4.png", "panel_sc55mk2_atlas_p4.png",
-		{ { 366, 446 }, { 61, 103, 146, 189 }, 23, 4, 3, 539, 101, 17, 7, 16, 6 },
+		{ { 366, 446 }, { 61, 103, 146, 189 }, 23, 4, 3, 539, 101, 17, 7, 16, 6, 0, 0, 0, 0 },
 		{
 			{ 8, 38, 165, 41 },  /* switch-power */
 			{ 204, 40, 86, 85 },  /* knob-volume */
@@ -1109,6 +1473,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-edit3-left */
 			{ 0, 0, 0, 0 },  /* button-edit3-right */
 			{ 0, 0, 0, 0 },  /* button-preview */
+			{ 0, 0, 0, 0 },  /* dial-value */
+			{ 0, 0, 0, 0 },  /* button-f1 */
+			{ 0, 0, 0, 0 },  /* button-f2 */
+			{ 0, 0, 0, 0 },  /* button-f3 */
+			{ 0, 0, 0, 0 },  /* button-f4 */
+			{ 0, 0, 0, 0 },  /* button-map */
+			{ 0, 0, 0, 0 },  /* button-edit */
+			{ 0, 0, 0, 0 },  /* button-drum */
+			{ 0, 0, 0, 0 },  /* button-down */
+			{ 0, 0, 0, 0 },  /* button-up */
+			{ 0, 0, 0, 0 },  /* button-effects */
+			{ 0, 0, 0, 0 },  /* button-exit */
+			{ 0, 0, 0, 0 },  /* button-enter */
+			{ 0, 0, 0, 0 },  /* button-shift */
+			{ 0, 0, 0, 0 },  /* button-solo */
+			{ 0, 0, 0, 0 },  /* button-dec */
+			{ 0, 0, 0, 0 },  /* button-inc */
+			{ 0, 0, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 0, 0, 74, 73 }, 926, 20 },  /* led-all */
@@ -1153,6 +1535,27 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit3-right */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-preview */
 			{ { 382, 74, 37, 36 }, 143, 40 },  /* led-standby */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-down */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-up */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-exit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-enter */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-shift */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-dec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-inc */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 82, 112, 17, 17 }, 221, 93 }, { { 100, 112, 16, 17 }, 221, 93 }, { { 276, 112, 17, 16 }, 220, 93 },
@@ -1217,11 +1620,25 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 460, 112, 18, 16 }, 259, 91 }, { { 479, 112, 17, 16 }, 259, 92 }, { { 258, 112, 17, 17 }, 259, 92 },
 			{ { 497, 112, 17, 16 }, 258, 93 },
 		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+		},
 	},
 	{
 		8, 2798, 565,
 		"panel_sc55mk2_base_p8.png", "panel_sc55mk2_atlas_p8.png",
-		{ { 733, 891 }, { 122, 207, 292, 378 }, 47, 8, 7, 1078, 202, 35, 15, 32, 12 },
+		{ { 733, 891 }, { 122, 207, 292, 378 }, 47, 8, 7, 1078, 202, 35, 15, 32, 12, 0, 0, 0, 0 },
 		{
 			{ 17, 76, 330, 82 },  /* switch-power */
 			{ 409, 80, 170, 171 },  /* knob-volume */
@@ -1260,6 +1677,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-edit3-left */
 			{ 0, 0, 0, 0 },  /* button-edit3-right */
 			{ 0, 0, 0, 0 },  /* button-preview */
+			{ 0, 0, 0, 0 },  /* dial-value */
+			{ 0, 0, 0, 0 },  /* button-f1 */
+			{ 0, 0, 0, 0 },  /* button-f2 */
+			{ 0, 0, 0, 0 },  /* button-f3 */
+			{ 0, 0, 0, 0 },  /* button-f4 */
+			{ 0, 0, 0, 0 },  /* button-map */
+			{ 0, 0, 0, 0 },  /* button-edit */
+			{ 0, 0, 0, 0 },  /* button-drum */
+			{ 0, 0, 0, 0 },  /* button-down */
+			{ 0, 0, 0, 0 },  /* button-up */
+			{ 0, 0, 0, 0 },  /* button-effects */
+			{ 0, 0, 0, 0 },  /* button-exit */
+			{ 0, 0, 0, 0 },  /* button-enter */
+			{ 0, 0, 0, 0 },  /* button-shift */
+			{ 0, 0, 0, 0 },  /* button-solo */
+			{ 0, 0, 0, 0 },  /* button-dec */
+			{ 0, 0, 0, 0 },  /* button-inc */
+			{ 0, 0, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 150, 0, 149, 146 }, 1852, 40 },  /* led-all */
@@ -1304,6 +1739,27 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit3-right */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-preview */
 			{ { 760, 148, 74, 74 }, 284, 80 },  /* led-standby */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-down */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-up */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-exit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-enter */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-shift */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-dec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-inc */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-value */
 		},
 		{
 			{ { 389, 224, 32, 32 }, 442, 188 }, { { 422, 224, 33, 32 }, 440, 187 }, { { 456, 224, 34, 32 }, 439, 186 },
@@ -1367,6 +1823,430 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 1381, 224, 36, 29 }, 520, 181 }, { { 1016, 224, 36, 30 }, 519, 182 }, { { 1053, 224, 35, 30 }, 519, 183 },
 			{ { 1089, 224, 34, 30 }, 518, 184 }, { { 595, 224, 34, 32 }, 517, 184 }, { { 630, 224, 33, 32 }, 517, 185 },
 			{ { 664, 224, 33, 32 }, 516, 186 },
+		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+		},
+	},
+	},
+	{  /* sc8850 */
+	{
+		3, 1696, 692,
+		"panel_sc8850_base_p3.png", "panel_sc8850_atlas_p3.png",
+		{ { 0, 0 }, { 0, 0, 0, 0 }, 0, 3, 3, 0, 0, 0, 0, 0, 0, 305, 121, 160, 64 },
+		{
+			{ 12, 105, 188, 50 },  /* switch-power */
+			{ 69, 215, 111, 111 },  /* knob-volume */
+			{ 0, 0, 0, 0 },  /* jack-midi-in-b */
+			{ 90, 519, 69, 69 },  /* jack-phones */
+			{ 302, 118, 485, 199 },  /* lcd-glass */
+			{ 0, 0, 0, 0 },  /* lens-user-inst */
+			{ 1165, 23, 497, 45 },  /* logo */
+			{ 1508, 30, 154, 36 },  /* logo-model */
+			{ 0, 0, 0, 0 },  /* button-all */
+			{ 1275, 355, 48, 48 },  /* button-mute */
+			{ 0, 0, 0, 0 },  /* button-sc55-map */
+			{ 0, 0, 0, 0 },  /* button-sc88-map */
+			{ 1147, 110, 40, 41 },  /* button-part-left */
+			{ 1279, 110, 40, 41 },  /* button-part-right */
+			{ 0, 0, 0, 0 },  /* button-instrument-left */
+			{ 0, 0, 0, 0 },  /* button-instrument-right */
+			{ 0, 0, 0, 0 },  /* button-level-left */
+			{ 0, 0, 0, 0 },  /* button-level-right */
+			{ 0, 0, 0, 0 },  /* button-pan-left */
+			{ 0, 0, 0, 0 },  /* button-pan-right */
+			{ 0, 0, 0, 0 },  /* button-reverb-left */
+			{ 0, 0, 0, 0 },  /* button-reverb-right */
+			{ 0, 0, 0, 0 },  /* button-chorus-left */
+			{ 0, 0, 0, 0 },  /* button-chorus-right */
+			{ 0, 0, 0, 0 },  /* button-key-shift-left */
+			{ 0, 0, 0, 0 },  /* button-key-shift-right */
+			{ 0, 0, 0, 0 },  /* button-midi-ch-left */
+			{ 0, 0, 0, 0 },  /* button-midi-ch-right */
+			{ 0, 0, 0, 0 },  /* button-user-inst */
+			{ 0, 0, 0, 0 },  /* button-select */
+			{ 0, 0, 0, 0 },  /* button-edit1-left */
+			{ 0, 0, 0, 0 },  /* button-edit1-right */
+			{ 0, 0, 0, 0 },  /* button-edit2-left */
+			{ 0, 0, 0, 0 },  /* button-edit2-right */
+			{ 0, 0, 0, 0 },  /* button-edit3-left */
+			{ 0, 0, 0, 0 },  /* button-edit3-right */
+			{ 81, 227, 87, 87 },  /* button-preview */
+			{ 1399, 98, 205, 205 },  /* dial-value */
+			{ 356, 429, 40, 40 },  /* button-f1 */
+			{ 471, 433, 40, 40 },  /* button-f2 */
+			{ 586, 434, 40, 41 },  /* button-f3 */
+			{ 701, 432, 40, 41 },  /* button-f4 */
+			{ 816, 426, 40, 41 },  /* button-map */
+			{ 1015, 110, 40, 41 },  /* button-edit */
+			{ 1015, 180, 40, 41 },  /* button-drum */
+			{ 1147, 180, 40, 41 },  /* button-down */
+			{ 1279, 180, 40, 41 },  /* button-up */
+			{ 1015, 250, 40, 40 },  /* button-effects */
+			{ 1147, 250, 40, 40 },  /* button-exit */
+			{ 1279, 250, 40, 40 },  /* button-enter */
+			{ 1011, 355, 48, 48 },  /* button-shift */
+			{ 1143, 355, 48, 48 },  /* button-solo */
+			{ 1411, 355, 48, 48 },  /* button-dec */
+			{ 1543, 355, 48, 48 },  /* button-inc */
+			{ 1413, 112, 177, 177 },  /* button-value */
+		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-all */
+			{ { 270, 0, 81, 79 }, 1259, 340 },  /* led-mute */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-sc55-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-sc88-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-user-inst */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-user-inst-red */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-user-inst-efx */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* lcd-mark-l */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* lcd-mark-r */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-all */
+			{ { 57, 179, 57, 56 }, 1271, 354 },  /* button-mute */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-sc55-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-sc88-map */
+			{ { 526, 179, 49, 48 }, 1143, 109 },  /* button-part-left */
+			{ { 576, 179, 49, 48 }, 1275, 109 },  /* button-part-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-instrument-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-instrument-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-level-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-level-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pan-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pan-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-reverb-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-reverb-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-chorus-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-chorus-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-key-shift-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-key-shift-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-midi-ch-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-midi-ch-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-user-inst */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-select */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit1-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit1-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit2-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit2-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit3-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit3-right */
+			{ { 180, 0, 89, 88 }, 80, 227 },  /* button-preview */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-standby */
+			{ { 352, 0, 80, 79 }, 1127, 340 },  /* led-solo */
+			{ { 508, 0, 74, 72 }, 998, 95 },  /* led-edit */
+			{ { 583, 0, 74, 72 }, 998, 165 },  /* led-drum */
+			{ { 433, 0, 74, 73 }, 998, 234 },  /* led-effects */
+			{ { 230, 179, 49, 48 }, 352, 428 },  /* button-f1 */
+			{ { 280, 179, 49, 48 }, 467, 432 },  /* button-f2 */
+			{ { 330, 179, 48, 48 }, 583, 433 },  /* button-f3 */
+			{ { 379, 179, 48, 48 }, 698, 431 },  /* button-f4 */
+			{ { 428, 179, 48, 48 }, 813, 425 },  /* button-map */
+			{ { 477, 179, 48, 48 }, 1011, 109 },  /* button-edit */
+			{ { 626, 179, 48, 48 }, 1011, 179 },  /* button-drum */
+			{ { 675, 179, 49, 48 }, 1143, 179 },  /* button-down */
+			{ { 0, 236, 49, 48 }, 1275, 179 },  /* button-up */
+			{ { 50, 236, 48, 48 }, 1011, 249 },  /* button-effects */
+			{ { 99, 236, 49, 48 }, 1143, 249 },  /* button-exit */
+			{ { 149, 236, 49, 48 }, 1275, 249 },  /* button-enter */
+			{ { 658, 0, 56, 56 }, 1007, 354 },  /* button-shift */
+			{ { 0, 179, 56, 56 }, 1139, 354 },  /* button-solo */
+			{ { 115, 179, 57, 56 }, 1407, 354 },  /* button-dec */
+			{ { 173, 179, 56, 56 }, 1540, 354 },  /* button-inc */
+			{ { 0, 0, 179, 178 }, 1412, 112 },  /* button-value */
+		},
+		{
+			{ { 80, 349, 20, 20 }, 92, 284 }, { { 709, 323, 21, 21 }, 91, 283 }, { { 101, 349, 20, 20 }, 91, 283 },
+			{ { 358, 349, 21, 19 }, 90, 283 }, { { 380, 349, 21, 19 }, 89, 282 }, { { 582, 349, 21, 18 }, 89, 282 },
+			{ { 604, 349, 22, 18 }, 88, 281 }, { { 627, 349, 22, 18 }, 87, 281 }, { { 650, 349, 22, 18 }, 87, 280 },
+			{ { 94, 371, 23, 17 }, 86, 280 }, { { 118, 371, 22, 17 }, 86, 279 }, { { 306, 371, 23, 16 }, 85, 279 },
+			{ { 330, 371, 24, 16 }, 84, 278 }, { { 355, 371, 23, 16 }, 84, 277 }, { { 575, 371, 24, 15 }, 83, 277 },
+			{ { 600, 371, 24, 15 }, 83, 276 }, { { 74, 390, 23, 14 }, 83, 276 }, { { 98, 390, 24, 14 }, 82, 275 },
+			{ { 342, 390, 24, 13 }, 82, 275 }, { { 367, 390, 25, 13 }, 81, 274 }, { { 393, 390, 25, 13 }, 81, 273 },
+			{ { 615, 390, 24, 12 }, 81, 273 }, { { 640, 390, 24, 12 }, 81, 272 }, { { 77, 406, 25, 11 }, 80, 272 },
+			{ { 103, 406, 25, 11 }, 80, 271 }, { { 129, 406, 25, 11 }, 80, 270 }, { { 311, 406, 25, 10 }, 80, 270 },
+			{ { 337, 406, 25, 10 }, 80, 269 }, { { 731, 406, 25, 8 }, 80, 269 }, { { 0, 419, 26, 8 }, 79, 268 },
+			{ { 27, 419, 26, 8 }, 79, 267 }, { { 519, 406, 26, 9 }, 79, 266 }, { { 546, 406, 25, 9 }, 79, 265 },
+			{ { 572, 406, 26, 9 }, 79, 264 }, { { 363, 406, 25, 10 }, 80, 263 }, { { 389, 406, 25, 10 }, 80, 262 },
+			{ { 155, 406, 25, 11 }, 80, 261 }, { { 181, 406, 25, 11 }, 80, 260 }, { { 207, 406, 25, 11 }, 80, 259 },
+			{ { 665, 390, 25, 12 }, 80, 258 }, { { 691, 390, 24, 12 }, 81, 257 }, { { 419, 390, 24, 13 }, 81, 256 },
+			{ { 444, 390, 24, 13 }, 81, 255 }, { { 469, 390, 25, 13 }, 81, 254 }, { { 123, 390, 24, 14 }, 82, 253 },
+			{ { 148, 390, 24, 14 }, 82, 252 }, { { 625, 371, 23, 15 }, 83, 251 }, { { 649, 371, 24, 15 }, 83, 250 },
+			{ { 674, 371, 24, 15 }, 83, 249 }, { { 379, 371, 23, 16 }, 84, 248 }, { { 403, 371, 23, 16 }, 84, 247 },
+			{ { 141, 371, 23, 17 }, 85, 246 }, { { 165, 371, 23, 17 }, 85, 245 }, { { 673, 349, 22, 18 }, 86, 244 },
+			{ { 696, 349, 22, 18 }, 87, 243 }, { { 402, 349, 22, 19 }, 87, 242 }, { { 425, 349, 22, 19 }, 88, 241 },
+			{ { 448, 349, 21, 19 }, 89, 241 }, { { 470, 349, 21, 19 }, 89, 240 }, { { 122, 349, 21, 20 }, 90, 239 },
+			{ { 144, 349, 20, 20 }, 91, 238 }, { { 165, 349, 20, 20 }, 92, 238 }, { { 186, 349, 20, 20 }, 92, 237 },
+			{ { 731, 323, 20, 21 }, 93, 236 }, { { 537, 323, 19, 22 }, 94, 235 }, { { 0, 349, 18, 21 }, 95, 235 },
+			{ { 557, 323, 18, 22 }, 96, 234 }, { { 576, 323, 18, 22 }, 96, 233 }, { { 595, 323, 18, 22 }, 97, 233 },
+			{ { 348, 323, 17, 23 }, 98, 232 }, { { 614, 323, 17, 22 }, 99, 232 }, { { 366, 323, 17, 23 }, 100, 231 },
+			{ { 384, 323, 16, 23 }, 101, 231 }, { { 401, 323, 16, 23 }, 102, 230 }, { { 418, 323, 15, 23 }, 103, 230 },
+			{ { 175, 323, 15, 24 }, 104, 229 }, { { 191, 323, 14, 24 }, 105, 229 }, { { 206, 323, 14, 24 }, 106, 228 },
+			{ { 221, 323, 13, 24 }, 107, 228 }, { { 235, 323, 13, 24 }, 108, 228 }, { { 625, 285, 13, 25 }, 109, 227 },
+			{ { 639, 285, 12, 25 }, 110, 227 }, { { 249, 323, 12, 24 }, 111, 227 }, { { 652, 285, 11, 25 }, 112, 226 },
+			{ { 664, 285, 11, 25 }, 113, 226 }, { { 676, 285, 11, 25 }, 114, 226 }, { { 688, 285, 10, 25 }, 115, 226 },
+			{ { 699, 285, 9, 25 }, 117, 226 }, { { 709, 285, 8, 25 }, 118, 226 }, { { 718, 285, 8, 25 }, 119, 226 },
+			{ { 727, 285, 8, 25 }, 120, 226 }, { { 736, 285, 9, 25 }, 120, 226 }, { { 746, 285, 9, 25 }, 121, 226 },
+			{ { 756, 285, 9, 25 }, 122, 226 }, { { 0, 323, 10, 25 }, 122, 226 }, { { 11, 323, 10, 25 }, 123, 226 },
+			{ { 22, 323, 11, 25 }, 123, 226 }, { { 34, 323, 11, 25 }, 124, 226 }, { { 46, 323, 11, 25 }, 125, 226 },
+			{ { 58, 323, 12, 25 }, 125, 226 }, { { 262, 323, 12, 24 }, 126, 227 }, { { 275, 323, 12, 24 }, 127, 227 },
+			{ { 71, 323, 13, 25 }, 127, 227 }, { { 288, 323, 13, 24 }, 128, 228 }, { { 302, 323, 14, 24 }, 128, 228 },
+			{ { 317, 323, 14, 24 }, 129, 228 }, { { 434, 323, 15, 23 }, 129, 229 }, { { 332, 323, 15, 24 }, 130, 229 },
+			{ { 450, 323, 15, 23 }, 131, 230 }, { { 466, 323, 16, 23 }, 131, 230 }, { { 483, 323, 16, 23 }, 132, 231 },
+			{ { 500, 323, 17, 23 }, 132, 231 }, { { 632, 323, 17, 22 }, 133, 232 }, { { 518, 323, 18, 23 }, 133, 232 },
+			{ { 650, 323, 18, 22 }, 134, 233 }, { { 669, 323, 19, 22 }, 134, 233 }, { { 689, 323, 19, 22 }, 135, 234 },
+			{ { 19, 349, 19, 21 }, 135, 235 }, { { 39, 349, 19, 21 }, 136, 235 }, { { 59, 349, 20, 21 }, 136, 236 },
+			{ { 207, 349, 20, 20 }, 137, 237 }, { { 228, 349, 21, 20 }, 137, 238 }, { { 250, 349, 20, 20 }, 138, 238 },
+			{ { 271, 349, 21, 20 }, 138, 239 }, { { 492, 349, 22, 19 }, 138, 240 }, { { 515, 349, 21, 19 }, 139, 241 },
+			{ { 719, 349, 22, 18 }, 139, 242 }, { { 742, 349, 22, 18 }, 140, 243 }, { { 189, 371, 22, 17 }, 140, 244 },
+			{ { 0, 371, 23, 18 }, 140, 244 }, { { 212, 371, 22, 17 }, 141, 245 }, { { 235, 371, 23, 17 }, 141, 246 },
+			{ { 427, 371, 24, 16 }, 141, 247 }, { { 452, 371, 23, 16 }, 142, 248 }, { { 699, 371, 24, 15 }, 142, 249 },
+			{ { 724, 371, 24, 15 }, 142, 250 }, { { 173, 390, 24, 14 }, 142, 251 }, { { 198, 390, 24, 14 }, 143, 252 },
+			{ { 223, 390, 24, 14 }, 143, 253 }, { { 495, 390, 25, 13 }, 143, 254 }, { { 521, 390, 25, 13 }, 143, 255 },
+			{ { 716, 390, 24, 12 }, 144, 256 }, { { 741, 390, 24, 12 }, 144, 257 }, { { 0, 406, 25, 12 }, 144, 258 },
+			{ { 233, 406, 25, 11 }, 144, 259 }, { { 415, 406, 25, 10 }, 144, 261 }, { { 599, 406, 25, 9 }, 144, 262 },
+			{ { 625, 406, 25, 9 }, 144, 263 }, { { 651, 406, 25, 9 }, 144, 264 }, { { 54, 419, 26, 8 }, 144, 265 },
+			{ { 81, 419, 26, 8 }, 144, 266 }, { { 108, 419, 26, 8 }, 144, 267 }, { { 677, 406, 26, 9 }, 144, 267 },
+			{ { 704, 406, 26, 9 }, 144, 268 }, { { 441, 406, 25, 10 }, 144, 268 }, { { 467, 406, 25, 10 }, 144, 269 },
+			{ { 493, 406, 25, 10 }, 144, 270 }, { { 259, 406, 25, 11 }, 144, 270 }, { { 285, 406, 25, 11 }, 144, 271 },
+			{ { 26, 406, 25, 12 }, 144, 271 }, { { 52, 406, 24, 12 }, 144, 272 }, { { 547, 390, 24, 13 }, 144, 273 },
+			{ { 248, 390, 25, 14 }, 143, 273 }, { { 274, 390, 25, 14 }, 143, 274 }, { { 0, 390, 24, 15 }, 143, 274 },
+			{ { 25, 390, 24, 15 }, 143, 275 }, { { 50, 390, 23, 15 }, 143, 276 }, { { 476, 371, 24, 16 }, 142, 276 },
+			{ { 501, 371, 24, 16 }, 142, 277 }, { { 526, 371, 23, 16 }, 142, 277 }, { { 550, 371, 24, 16 }, 141, 278 },
+			{ { 259, 371, 23, 17 }, 141, 278 }, { { 283, 371, 22, 17 }, 141, 279 }, { { 24, 371, 23, 18 }, 140, 279 },
+			{ { 48, 371, 22, 18 }, 140, 280 }, { { 71, 371, 22, 18 }, 140, 281 }, { { 537, 349, 22, 19 }, 139, 281 },
+			{ { 293, 349, 21, 20 }, 139, 281 }, { { 560, 349, 21, 19 }, 139, 282 }, { { 315, 349, 21, 20 }, 138, 282 },
+			{ { 337, 349, 20, 20 }, 138, 283 },
+		},
+		{
+			{ { 572, 390, 42, 13 }, 1480, 98 }, { { 388, 285, 41, 28 }, 1499, 88 }, { { 0, 285, 38, 37 }, 1517, 88 },
+			{ { 497, 236, 35, 41 }, 1535, 93 }, { { 463, 236, 33, 43 }, 1550, 102 }, { { 314, 236, 31, 46 }, 1563, 113 },
+			{ { 199, 236, 29, 48 }, 1574, 126 }, { { 257, 236, 27, 47 }, 1582, 142 }, { { 377, 236, 25, 44 }, 1588, 161 },
+			{ { 533, 236, 13, 41 }, 1591, 180 }, { { 547, 236, 29, 41 }, 1586, 198 }, { { 657, 236, 37, 38 }, 1577, 217 },
+			{ { 79, 285, 41, 35 }, 1568, 234 }, { { 163, 285, 43, 32 }, 1557, 250 }, { { 299, 285, 46, 30 }, 1543, 263 },
+			{ { 430, 285, 48, 28 }, 1528, 274 }, { { 576, 285, 48, 26 }, 1512, 282 }, { { 85, 323, 44, 25 }, 1497, 287 },
+			{ { 300, 390, 41, 14 }, 1481, 290 }, { { 346, 285, 41, 29 }, 1463, 285 }, { { 39, 285, 39, 36 }, 1447, 277 },
+			{ { 591, 236, 35, 40 }, 1433, 268 }, { { 403, 236, 33, 44 }, 1420, 256 }, { { 346, 236, 30, 46 }, 1409, 243 },
+			{ { 285, 236, 28, 47 }, 1400, 228 }, { { 229, 236, 27, 48 }, 1393, 212 }, { { 437, 236, 25, 44 }, 1390, 197 },
+			{ { 577, 236, 13, 41 }, 1399, 180 }, { { 627, 236, 29, 40 }, 1388, 163 }, { { 695, 236, 36, 38 }, 1389, 147 },
+			{ { 121, 285, 41, 34 }, 1394, 133 }, { { 207, 285, 44, 32 }, 1402, 120 }, { { 252, 285, 46, 31 }, 1413, 108 },
+			{ { 479, 285, 47, 28 }, 1427, 100 }, { { 527, 285, 48, 27 }, 1442, 93 }, { { 130, 323, 44, 25 }, 1461, 89 },
+		},
+	},
+	{
+		6, 3392, 1383,
+		"panel_sc8850_base_p6.png", "panel_sc8850_atlas_p6.png",
+		{ { 0, 0 }, { 0, 0, 0, 0 }, 0, 6, 6, 0, 0, 0, 0, 0, 0, 609, 243, 160, 64 },
+		{
+			{ 24, 211, 376, 100 },  /* switch-power */
+			{ 138, 430, 222, 222 },  /* knob-volume */
+			{ 0, 0, 0, 0 },  /* jack-midi-in-b */
+			{ 180, 1038, 139, 139 },  /* jack-phones */
+			{ 604, 236, 970, 398 },  /* lcd-glass */
+			{ 0, 0, 0, 0 },  /* lens-user-inst */
+			{ 2331, 45, 992, 91 },  /* logo */
+			{ 3016, 60, 307, 72 },  /* logo-model */
+			{ 0, 0, 0, 0 },  /* button-all */
+			{ 2550, 710, 97, 97 },  /* button-mute */
+			{ 0, 0, 0, 0 },  /* button-sc55-map */
+			{ 0, 0, 0, 0 },  /* button-sc88-map */
+			{ 2294, 220, 80, 81 },  /* button-part-left */
+			{ 2558, 220, 80, 81 },  /* button-part-right */
+			{ 0, 0, 0, 0 },  /* button-instrument-left */
+			{ 0, 0, 0, 0 },  /* button-instrument-right */
+			{ 0, 0, 0, 0 },  /* button-level-left */
+			{ 0, 0, 0, 0 },  /* button-level-right */
+			{ 0, 0, 0, 0 },  /* button-pan-left */
+			{ 0, 0, 0, 0 },  /* button-pan-right */
+			{ 0, 0, 0, 0 },  /* button-reverb-left */
+			{ 0, 0, 0, 0 },  /* button-reverb-right */
+			{ 0, 0, 0, 0 },  /* button-chorus-left */
+			{ 0, 0, 0, 0 },  /* button-chorus-right */
+			{ 0, 0, 0, 0 },  /* button-key-shift-left */
+			{ 0, 0, 0, 0 },  /* button-key-shift-right */
+			{ 0, 0, 0, 0 },  /* button-midi-ch-left */
+			{ 0, 0, 0, 0 },  /* button-midi-ch-right */
+			{ 0, 0, 0, 0 },  /* button-user-inst */
+			{ 0, 0, 0, 0 },  /* button-select */
+			{ 0, 0, 0, 0 },  /* button-edit1-left */
+			{ 0, 0, 0, 0 },  /* button-edit1-right */
+			{ 0, 0, 0, 0 },  /* button-edit2-left */
+			{ 0, 0, 0, 0 },  /* button-edit2-right */
+			{ 0, 0, 0, 0 },  /* button-edit3-left */
+			{ 0, 0, 0, 0 },  /* button-edit3-right */
+			{ 162, 454, 174, 174 },  /* button-preview */
+			{ 2797, 196, 411, 410 },  /* dial-value */
+			{ 712, 858, 81, 80 },  /* button-f1 */
+			{ 942, 866, 81, 81 },  /* button-f2 */
+			{ 1172, 869, 81, 80 },  /* button-f3 */
+			{ 1402, 864, 81, 81 },  /* button-f4 */
+			{ 1632, 853, 81, 81 },  /* button-map */
+			{ 2029, 220, 81, 81 },  /* button-edit */
+			{ 2029, 361, 81, 80 },  /* button-drum */
+			{ 2294, 361, 80, 80 },  /* button-down */
+			{ 2558, 361, 80, 80 },  /* button-up */
+			{ 2029, 500, 81, 81 },  /* button-effects */
+			{ 2294, 500, 80, 81 },  /* button-exit */
+			{ 2558, 500, 80, 81 },  /* button-enter */
+			{ 2021, 710, 97, 97 },  /* button-shift */
+			{ 2286, 710, 96, 97 },  /* button-solo */
+			{ 2822, 710, 96, 97 },  /* button-dec */
+			{ 3086, 710, 97, 97 },  /* button-inc */
+			{ 2825, 224, 355, 354 },  /* button-value */
+		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-all */
+			{ { 532, 0, 160, 157 }, 2518, 680 },  /* led-mute */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-sc55-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-sc88-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-user-inst */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-user-inst-red */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-user-inst-efx */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* lcd-mark-l */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* lcd-mark-r */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-all */
+			{ { 0, 357, 112, 112 }, 2543, 707 },  /* button-mute */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-sc55-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-sc88-map */
+			{ { 0, 470, 96, 95 }, 2287, 218 },  /* button-part-left */
+			{ { 97, 470, 96, 95 }, 2551, 218 },  /* button-part-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-instrument-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-instrument-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-level-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-level-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pan-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pan-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-reverb-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-reverb-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-chorus-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-chorus-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-key-shift-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-key-shift-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-midi-ch-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-midi-ch-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-user-inst */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-select */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit1-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit1-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit2-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit2-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit3-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit3-right */
+			{ { 356, 0, 175, 175 }, 162, 453 },  /* button-preview */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-standby */
+			{ { 693, 0, 160, 157 }, 2254, 680 },  /* led-solo */
+			{ { 854, 0, 145, 143 }, 1997, 189 },  /* led-edit */
+			{ { 1146, 0, 145, 142 }, 1997, 330 },  /* led-drum */
+			{ { 1000, 0, 145, 143 }, 1997, 469 },  /* led-effects */
+			{ { 1212, 357, 96, 95 }, 705, 855 },  /* button-f1 */
+			{ { 339, 357, 96, 96 }, 935, 863 },  /* button-f2 */
+			{ { 1309, 357, 96, 95 }, 1165, 866 },  /* button-f3 */
+			{ { 436, 357, 96, 96 }, 1395, 861 },  /* button-f4 */
+			{ { 533, 357, 96, 96 }, 1625, 850 },  /* button-map */
+			{ { 1406, 357, 96, 95 }, 2022, 218 },  /* button-edit */
+			{ { 630, 357, 96, 96 }, 2022, 358 },  /* button-drum */
+			{ { 727, 357, 96, 96 }, 2287, 358 },  /* button-down */
+			{ { 824, 357, 96, 96 }, 2551, 358 },  /* button-up */
+			{ { 921, 357, 96, 96 }, 2022, 497 },  /* button-effects */
+			{ { 1018, 357, 96, 96 }, 2287, 497 },  /* button-exit */
+			{ { 1115, 357, 96, 96 }, 2551, 497 },  /* button-enter */
+			{ { 1292, 0, 112, 112 }, 2014, 707 },  /* button-shift */
+			{ { 1405, 0, 111, 112 }, 2279, 707 },  /* button-solo */
+			{ { 113, 357, 112, 112 }, 2815, 707 },  /* button-dec */
+			{ { 226, 357, 112, 112 }, 3079, 707 },  /* button-inc */
+			{ { 0, 0, 355, 356 }, 2825, 223 },  /* button-value */
+		},
+		{
+			{ { 1256, 636, 39, 40 }, 185, 568 }, { { 1457, 636, 40, 39 }, 183, 567 }, { { 0, 685, 40, 39 }, 182, 566 },
+			{ { 164, 685, 41, 38 }, 181, 565 }, { { 416, 685, 42, 37 }, 179, 564 }, { { 459, 685, 42, 37 }, 178, 563 },
+			{ { 714, 685, 42, 36 }, 177, 562 }, { { 932, 685, 43, 35 }, 175, 561 }, { { 1153, 685, 44, 34 }, 174, 560 },
+			{ { 1198, 685, 44, 34 }, 173, 559 }, { { 1423, 685, 44, 33 }, 172, 558 }, { { 90, 725, 45, 32 }, 171, 557 },
+			{ { 320, 725, 45, 31 }, 170, 556 }, { { 647, 725, 45, 30 }, 169, 555 }, { { 835, 725, 46, 29 }, 168, 554 },
+			{ { 1026, 725, 46, 28 }, 167, 553 }, { { 1266, 725, 47, 27 }, 166, 552 }, { { 1314, 725, 47, 27 }, 165, 550 },
+			{ { 0, 759, 48, 26 }, 164, 549 }, { { 363, 759, 47, 25 }, 164, 548 }, { { 655, 759, 48, 24 }, 163, 547 },
+			{ { 803, 759, 49, 23 }, 162, 546 }, { { 1001, 759, 48, 22 }, 162, 545 }, { { 1050, 759, 49, 22 }, 161, 543 },
+			{ { 1250, 759, 49, 21 }, 161, 542 }, { { 149, 786, 49, 19 }, 161, 541 }, { { 399, 786, 49, 18 }, 160, 540 },
+			{ { 599, 786, 49, 17 }, 160, 539 }, { { 649, 786, 49, 17 }, 160, 537 }, { { 799, 786, 49, 16 }, 160, 536 },
+			{ { 1000, 786, 49, 15 }, 160, 535 }, { { 1050, 786, 49, 15 }, 160, 533 }, { { 849, 786, 49, 16 }, 160, 531 },
+			{ { 449, 786, 49, 18 }, 160, 528 }, { { 199, 786, 49, 19 }, 160, 526 }, { { 249, 786, 49, 19 }, 160, 524 },
+			{ { 0, 786, 49, 20 }, 160, 522 }, { { 1300, 759, 48, 21 }, 161, 520 }, { { 1100, 759, 49, 22 }, 161, 518 },
+			{ { 853, 759, 49, 23 }, 161, 516 }, { { 704, 759, 48, 24 }, 162, 513 }, { { 411, 759, 48, 25 }, 162, 511 },
+			{ { 49, 759, 48, 26 }, 163, 509 }, { { 1362, 725, 47, 27 }, 164, 507 }, { { 1073, 725, 48, 28 }, 164, 505 },
+			{ { 1122, 725, 47, 28 }, 165, 503 }, { { 882, 725, 47, 29 }, 166, 501 }, { { 693, 725, 46, 30 }, 167, 499 },
+			{ { 366, 725, 46, 31 }, 168, 497 }, { { 136, 725, 45, 32 }, 169, 495 }, { { 182, 725, 45, 32 }, 170, 494 },
+			{ { 1468, 685, 44, 33 }, 171, 492 }, { { 1243, 685, 44, 34 }, 172, 490 }, { { 976, 685, 44, 35 }, 173, 488 },
+			{ { 757, 685, 43, 36 }, 174, 486 }, { { 801, 685, 43, 36 }, 175, 485 }, { { 502, 685, 42, 37 }, 177, 483 },
+			{ { 206, 685, 42, 38 }, 178, 481 }, { { 249, 685, 41, 38 }, 179, 480 }, { { 41, 685, 40, 39 }, 181, 478 },
+			{ { 82, 685, 40, 39 }, 182, 477 }, { { 1296, 636, 39, 40 }, 184, 475 }, { { 1336, 636, 39, 40 }, 185, 474 },
+			{ { 1061, 636, 38, 41 }, 187, 472 }, { { 1100, 636, 37, 41 }, 189, 471 }, { { 985, 636, 37, 42 }, 190, 469 },
+			{ { 767, 636, 36, 43 }, 192, 468 }, { { 804, 636, 35, 43 }, 194, 467 }, { { 840, 636, 35, 43 }, 195, 466 },
+			{ { 876, 636, 34, 43 }, 197, 465 }, { { 530, 636, 33, 45 }, 199, 463 }, { { 564, 636, 32, 45 }, 201, 462 },
+			{ { 597, 636, 31, 45 }, 203, 461 }, { { 404, 636, 30, 46 }, 205, 460 }, { { 435, 636, 29, 46 }, 207, 459 },
+			{ { 145, 636, 28, 47 }, 209, 458 }, { { 174, 636, 27, 47 }, 211, 457 }, { { 202, 636, 27, 47 }, 213, 457 },
+			{ { 230, 636, 26, 47 }, 215, 456 }, { { 1480, 566, 25, 48 }, 217, 455 }, { { 1506, 566, 24, 48 }, 219, 455 },
+			{ { 0, 636, 23, 48 }, 221, 454 }, { { 1182, 566, 22, 49 }, 223, 453 }, { { 1205, 566, 22, 49 }, 225, 453 },
+			{ { 24, 636, 21, 48 }, 227, 453 }, { { 1228, 566, 19, 49 }, 230, 452 }, { { 1248, 566, 18, 49 }, 232, 452 },
+			{ { 1267, 566, 17, 49 }, 234, 452 }, { { 984, 566, 17, 50 }, 236, 451 }, { { 1285, 566, 16, 49 }, 238, 451 },
+			{ { 1302, 566, 15, 49 }, 240, 451 }, { { 1318, 566, 15, 49 }, 242, 451 }, { { 1334, 566, 16, 49 }, 243, 451 },
+			{ { 1351, 566, 18, 49 }, 244, 451 }, { { 1370, 566, 19, 49 }, 245, 451 }, { { 46, 636, 20, 48 }, 246, 452 },
+			{ { 1390, 566, 20, 49 }, 248, 452 }, { { 1411, 566, 21, 49 }, 249, 452 }, { { 1433, 566, 22, 49 }, 250, 452 },
+			{ { 67, 636, 23, 48 }, 251, 453 }, { { 1456, 566, 23, 49 }, 253, 453 }, { { 91, 636, 25, 48 }, 254, 454 },
+			{ { 257, 636, 26, 47 }, 255, 455 }, { { 117, 636, 27, 48 }, 256, 455 }, { { 284, 636, 28, 47 }, 257, 456 },
+			{ { 313, 636, 29, 47 }, 258, 457 }, { { 343, 636, 29, 47 }, 260, 457 }, { { 373, 636, 30, 47 }, 261, 458 },
+			{ { 465, 636, 31, 46 }, 262, 459 }, { { 497, 636, 32, 46 }, 263, 460 }, { { 629, 636, 32, 45 }, 264, 461 },
+			{ { 662, 636, 33, 45 }, 265, 462 }, { { 696, 636, 34, 45 }, 266, 463 }, { { 731, 636, 35, 44 }, 267, 464 },
+			{ { 911, 636, 36, 43 }, 268, 466 }, { { 948, 636, 36, 43 }, 269, 467 }, { { 1023, 636, 37, 42 }, 270, 468 },
+			{ { 1138, 636, 38, 41 }, 271, 470 }, { { 1177, 636, 38, 41 }, 272, 471 }, { { 1216, 636, 39, 41 }, 273, 472 },
+			{ { 1376, 636, 39, 40 }, 274, 474 }, { { 1416, 636, 40, 40 }, 275, 475 }, { { 291, 685, 40, 38 }, 276, 477 },
+			{ { 545, 685, 41, 37 }, 277, 479 }, { { 587, 685, 41, 37 }, 278, 480 }, { { 845, 685, 42, 36 }, 279, 482 },
+			{ { 1021, 685, 43, 35 }, 279, 484 }, { { 1065, 685, 43, 35 }, 280, 485 }, { { 1288, 685, 43, 34 }, 281, 487 },
+			{ { 0, 725, 43, 33 }, 282, 489 }, { { 228, 725, 45, 32 }, 282, 491 }, { { 413, 725, 45, 31 }, 283, 493 },
+			{ { 459, 725, 46, 31 }, 283, 494 }, { { 506, 725, 46, 31 }, 284, 496 }, { { 740, 725, 46, 30 }, 285, 498 },
+			{ { 930, 725, 47, 29 }, 285, 500 }, { { 1170, 725, 47, 28 }, 286, 502 }, { { 1410, 725, 47, 27 }, 286, 504 },
+			{ { 98, 759, 47, 26 }, 287, 506 }, { { 460, 759, 48, 25 }, 287, 508 }, { { 509, 759, 48, 25 }, 287, 510 },
+			{ { 903, 759, 48, 23 }, 288, 513 }, { { 1150, 759, 49, 22 }, 288, 515 }, { { 1349, 759, 49, 21 }, 288, 517 },
+			{ { 50, 786, 48, 20 }, 289, 519 }, { { 99, 786, 49, 20 }, 289, 521 }, { { 299, 786, 49, 19 }, 289, 523 },
+			{ { 499, 786, 49, 18 }, 289, 525 }, { { 899, 786, 50, 16 }, 289, 528 }, { { 1100, 786, 49, 15 }, 290, 530 },
+			{ { 1150, 786, 49, 15 }, 290, 532 }, { { 950, 786, 49, 16 }, 290, 533 }, { { 699, 786, 49, 17 }, 290, 534 },
+			{ { 749, 786, 49, 17 }, 290, 536 }, { { 549, 786, 49, 18 }, 290, 537 }, { { 349, 786, 49, 19 }, 289, 538 },
+			{ { 1399, 759, 49, 21 }, 289, 539 }, { { 1449, 759, 49, 21 }, 289, 541 }, { { 1200, 759, 49, 22 }, 289, 542 },
+			{ { 952, 759, 48, 23 }, 289, 543 }, { { 753, 759, 49, 24 }, 288, 544 }, { { 558, 759, 48, 25 }, 288, 545 },
+			{ { 607, 759, 47, 25 }, 288, 547 }, { { 146, 759, 48, 26 }, 287, 548 }, { { 1458, 725, 47, 27 }, 287, 549 },
+			{ { 1218, 725, 47, 28 }, 286, 550 }, { { 978, 725, 47, 29 }, 286, 551 }, { { 787, 725, 47, 30 }, 285, 552 },
+			{ { 553, 725, 46, 31 }, 285, 553 }, { { 600, 725, 46, 31 }, 284, 555 }, { { 274, 725, 45, 32 }, 284, 556 },
+			{ { 44, 725, 45, 33 }, 283, 557 }, { { 1332, 685, 45, 34 }, 282, 558 }, { { 1378, 685, 44, 34 }, 282, 559 },
+			{ { 1109, 685, 43, 35 }, 281, 560 }, { { 888, 685, 43, 36 }, 280, 561 }, { { 629, 685, 42, 37 }, 280, 562 },
+			{ { 672, 685, 41, 37 }, 279, 563 }, { { 332, 685, 41, 38 }, 278, 564 }, { { 374, 685, 41, 38 }, 277, 565 },
+			{ { 123, 685, 40, 39 }, 276, 566 },
+		},
+		{
+			{ { 195, 759, 83, 26 }, 2961, 196 }, { { 444, 566, 81, 58 }, 2998, 174 }, { { 1397, 470, 77, 69 }, 3034, 178 },
+			{ { 829, 470, 72, 80 }, 3068, 187 }, { { 542, 470, 64, 88 }, 3100, 203 }, { { 310, 470, 60, 92 }, 3127, 225 },
+			{ { 194, 470, 57, 95 }, 3148, 252 }, { { 487, 470, 54, 91 }, 3164, 286 }, { { 607, 470, 50, 88 }, 3175, 321 },
+			{ { 775, 470, 26, 82 }, 3182, 360 }, { { 902, 470, 58, 80 }, 3171, 397 }, { { 1093, 470, 69, 76 }, 3157, 433 },
+			{ { 1233, 470, 81, 71 }, 3136, 467 }, { { 78, 566, 88, 64 }, 3113, 499 }, { { 256, 566, 93, 59 }, 3086, 526 },
+			{ { 608, 566, 94, 57 }, 3057, 547 }, { { 799, 566, 92, 54 }, 3026, 563 }, { { 1002, 566, 89, 50 }, 2994, 574 },
+			{ { 279, 759, 83, 26 }, 2961, 580 }, { { 526, 566, 81, 58 }, 2926, 570 }, { { 0, 566, 77, 69 }, 2894, 555 },
+			{ { 961, 470, 72, 80 }, 2865, 535 }, { { 658, 470, 65, 88 }, 2840, 511 }, { { 371, 470, 60, 92 }, 2818, 485 },
+			{ { 252, 470, 57, 95 }, 2800, 455 }, { { 432, 470, 54, 92 }, 2787, 425 }, { { 724, 470, 50, 88 }, 2780, 393 },
+			{ { 802, 470, 26, 81 }, 2797, 361 }, { { 1034, 470, 58, 80 }, 2776, 325 }, { { 1163, 470, 69, 76 }, 2779, 293 },
+			{ { 1315, 470, 81, 71 }, 2788, 264 }, { { 167, 566, 88, 64 }, 2804, 239 }, { { 350, 566, 93, 59 }, 2826, 217 },
+			{ { 703, 566, 95, 57 }, 2853, 198 }, { { 892, 566, 91, 53 }, 2887, 186 }, { { 1092, 566, 89, 50 }, 2922, 178 },
 		},
 	},
 	},

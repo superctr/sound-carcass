@@ -17,6 +17,7 @@
 	extern const size_t panel_##m##_atlas_p##p##_png_size;
 #define ART_MODEL(m) ART_DECLARE(m, 4) ART_DECLARE(m, 8)
 ART_MODEL(sc88pro) ART_MODEL(sc88) ART_MODEL(sc88vl) ART_MODEL(sc55mk2)
+ART_DECLARE(sc8850, 3) ART_DECLARE(sc8850, 6)
 
 #define ART_ROW(m, p) { p, panel_##m##_base_p##p##_png, panel_##m##_atlas_p##p##_png, \
                         &panel_##m##_base_p##p##_png_size, &panel_##m##_atlas_p##p##_png_size }
@@ -30,9 +31,12 @@ static const struct
 	[PANEL_MODEL_SC88] = { ART_ROW(sc88, 4), ART_ROW(sc88, 8) },
 	[PANEL_MODEL_SC88VL] = { ART_ROW(sc88vl, 4), ART_ROW(sc88vl, 8) },
 	[PANEL_MODEL_SC55MK2] = { ART_ROW(sc55mk2, 4), ART_ROW(sc55mk2, 8) },
+	[PANEL_MODEL_SC8850] = { ART_ROW(sc8850, 3), ART_ROW(sc8850, 6) },
 };
 
 #define SEG_COLOR 0xff201000u
+#define GLCD_STRIDE 27
+#define GLCD_DOTS_PER_BYTE 6
 
 struct panel
 {
@@ -41,8 +45,10 @@ struct panel
 	png_image_t base;
 	png_image_t atlas;      /* premultiplied */
 	scemu_lcd_t lcd;
+	scemu_glcd_t glcd;
 	uint32_t leds;
 	float knob;
+	int dial;
 	uint64_t pressed;
 	bool standby;
 	bool dirty;
@@ -63,6 +69,7 @@ panel_model_t panel_model_for(scemu_model_t model)
 	{
 	case SCEMU_MODEL_SC88: return PANEL_MODEL_SC88;
 	case SCEMU_MODEL_SC88VL: return PANEL_MODEL_SC88VL;
+	case SCEMU_MODEL_SC8850: return PANEL_MODEL_SC8850;
 	default: return PANEL_MODEL_SC88PRO;
 	}
 }
@@ -128,6 +135,15 @@ void panel_set_lcd(panel_t *p, const scemu_lcd_t *lcd)
 	p->dirty = true;
 }
 
+void panel_set_glcd(panel_t *p, const scemu_glcd_t *glcd)
+{
+	if (memcmp(p->glcd.bitmap, glcd->bitmap, sizeof(glcd->bitmap)) == 0 && p->glcd.display_on == glcd->display_on)
+		return;
+	memcpy(p->glcd.bitmap, glcd->bitmap, sizeof(glcd->bitmap));
+	p->glcd.display_on = glcd->display_on;
+	p->dirty = true;
+}
+
 void panel_set_leds(panel_t *p, uint32_t mask)
 {
 	if (p->leds != mask)
@@ -143,6 +159,18 @@ void panel_set_knob(panel_t *p, float turn)
 	if (p->knob != turn)
 	{
 		p->knob = turn;
+		p->dirty = true;
+	}
+}
+
+void panel_set_dial(panel_t *p, int steps)
+{
+	int at = (p->dial + steps) % PANEL_DIAL_FRAMES;
+	if (at < 0)
+		at += PANEL_DIAL_FRAMES;
+	if (p->dial != at)
+	{
+		p->dial = at;
 		p->dirty = true;
 	}
 }
@@ -219,6 +247,7 @@ static void draw_knob(panel_t *p, uint32_t *pixels, size_t stride)
 {
 	int frame = (int)(p->knob * (PANEL_KNOB_FRAMES - 1) + 0.5f);
 	blit(p, pixels, stride, &p->size->knob[frame], (p->pressed >> PANEL_BUTTON_PREVIEW) & 1);
+	blit(p, pixels, stride, &p->size->dial[p->dial], (p->pressed >> PANEL_BUTTON_VALUE) & 1);
 }
 
 static const uint8_t *cell_pattern(const panel_t *p, uint8_t code, uint8_t *rows)
@@ -284,17 +313,36 @@ static void draw_glass(panel_t *p, uint32_t *pixels, size_t stride)
 	}
 }
 
+static void draw_glcd(panel_t *p, uint32_t *pixels, size_t stride)
+{
+	const panel_glass_t *g = &p->size->glass;
+	if (!p->glcd.display_on)
+		return;
+	for (int row = 0; row < g->dot_rows; row++)
+	{
+		const uint8_t *line = p->glcd.bitmap + (size_t)row * GLCD_STRIDE;
+		for (int col = 0; col < g->dot_cols; col++)
+			if (line[col / GLCD_DOTS_PER_BYTE] & (0x80 >> (col % GLCD_DOTS_PER_BYTE)))
+				fill(pixels, stride, g->dot_x + col * g->dot_pitch, g->dot_y + row * g->dot_pitch,
+				     g->dot, g->dot, SEG_COLOR);
+	}
+}
+
 static const panel_sprite_id_t led_sprite[SCEMU_LED_COUNT] = {
 	PANEL_SPRITE_LED_ALL, PANEL_SPRITE_LED_MUTE, PANEL_SPRITE_LED_SC55_MAP, PANEL_SPRITE_LED_SC88_MAP,
 	PANEL_SPRITE_LED_EDIT1, PANEL_SPRITE_LED_EDIT2, PANEL_SPRITE_LED_EDIT3,
 	PANEL_SPRITE_LED_USER_INST, PANEL_SPRITE_LED_USER_INST_RED,
+	PANEL_SPRITE_LED_SOLO, PANEL_SPRITE_LED_EDIT, PANEL_SPRITE_LED_DRUM, PANEL_SPRITE_LED_EFFECTS,
 };
 
 void panel_render(panel_t *p, uint32_t *pixels, size_t stride)
 {
 	for (int y = 0; y < p->base.height; y++)
 		memcpy(pixels + (size_t)y * stride, p->base.pixels + (size_t)y * p->base.width, (size_t)p->base.width * sizeof(uint32_t));
-	draw_glass(p, pixels, stride);
+	if (p->size->glass.dot_cols)
+		draw_glcd(p, pixels, stride);
+	else
+		draw_glass(p, pixels, stride);
 	uint32_t both = (1u << SCEMU_LED_USER_INST) | (1u << SCEMU_LED_USER_INST_RED);
 	for (int n = 0; n < SCEMU_LED_COUNT; n++)
 		if ((p->leds & (1u << n)) && ((p->leds & both) != both || !((1u << n) & both)))
@@ -342,7 +390,16 @@ int panel_element_button(panel_element_t e)
 		[PANEL_BUTTON_EDIT1_LEFT] = SCEMU_BUTTON_EDIT1_LEFT, [PANEL_BUTTON_EDIT1_RIGHT] = SCEMU_BUTTON_EDIT1_RIGHT,
 		[PANEL_BUTTON_EDIT2_LEFT] = SCEMU_BUTTON_EDIT2_LEFT, [PANEL_BUTTON_EDIT2_RIGHT] = SCEMU_BUTTON_EDIT2_RIGHT,
 		[PANEL_BUTTON_EDIT3_LEFT] = SCEMU_BUTTON_EDIT3_LEFT, [PANEL_BUTTON_EDIT3_RIGHT] = SCEMU_BUTTON_EDIT3_RIGHT,
-		[PANEL_BUTTON_PREVIEW] = SCEMU_BUTTON_PREVIEW,
+		[PANEL_BUTTON_PREVIEW] = SCEMU_BUTTON_PREVIEW, [PANEL_DIAL_VALUE] = -1,
+		[PANEL_BUTTON_F1] = SCEMU_BUTTON_F1, [PANEL_BUTTON_F2] = SCEMU_BUTTON_F2,
+		[PANEL_BUTTON_F3] = SCEMU_BUTTON_F3, [PANEL_BUTTON_F4] = SCEMU_BUTTON_F4,
+		[PANEL_BUTTON_MAP] = SCEMU_BUTTON_MAP, [PANEL_BUTTON_VALUE] = SCEMU_BUTTON_VALUE,
+		[PANEL_BUTTON_EDIT] = SCEMU_BUTTON_EDIT, [PANEL_BUTTON_DRUM] = SCEMU_BUTTON_DRUM,
+		[PANEL_BUTTON_EFFECTS] = SCEMU_BUTTON_EFFECTS, [PANEL_BUTTON_SHIFT] = SCEMU_BUTTON_SHIFT,
+		[PANEL_BUTTON_DOWN] = SCEMU_BUTTON_DOWN, [PANEL_BUTTON_UP] = SCEMU_BUTTON_UP,
+		[PANEL_BUTTON_EXIT] = SCEMU_BUTTON_EXIT, [PANEL_BUTTON_ENTER] = SCEMU_BUTTON_ENTER,
+		[PANEL_BUTTON_SOLO] = SCEMU_BUTTON_SOLO, [PANEL_BUTTON_DEC] = SCEMU_BUTTON_DEC,
+		[PANEL_BUTTON_INC] = SCEMU_BUTTON_INC,
 	};
 	return e >= 0 && e < PANEL_ELEMENT_COUNT ? button[e] : -1;
 }
