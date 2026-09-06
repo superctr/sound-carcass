@@ -14,8 +14,9 @@
  *     # the rear COMPUTER switch, one position per system
  *     computer_sc88pro = midi
  *
- *     # audio: the output device, its buffer, the knob and the DSP rail
+ *     # audio: the output device, its rate and buffer, the knob and the DSP rail
  *     audio_device = "HDA Intel PCH: ALC295 Analog"
+ *     audio_rate = 0
  *     audio_block = 256
  *     volume = 0.75
  *     dac_rail = 24
@@ -34,8 +35,8 @@
  * program reads a file written by a newer one.  A value a key cannot take
  * leaves that key alone, except that a number outside its range (audio_block,
  * volume, tail) is clamped to the range: a range has a nearest usable value, a
- * fixed set of words or numbers (model, size, reset, map, midi_rate, dac_rail,
- * the computer switches) has none.  A string longer than its field is truncated, and said
+ * fixed set of words or numbers (model, size, reset, map, audio_rate, midi_rate,
+ * dac_rail, the computer switches) has none.  A string longer than its field is truncated, and said
  * to be.
  *
  * Copyright (c) 2026 ian karlsson
@@ -51,10 +52,15 @@
 extern "C" {
 #endif
 
-/* The systems whose rear COMPUTER switch the file remembers, in the order of
- * the computer[] rows: the keys are computer_sc88, computer_sc88vl,
- * computer_sc88pro, computer_sc8850 and computer_sc55mk2. */
-#define CONFIG_SYSTEMS 5
+/* The systems whose rear COMPUTER switch the file remembers, one row each,
+ * oldest machine first -- the keys are computer_sc55mk2, computer_sc88,
+ * computer_sc88vl, computer_sc88pro and computer_sc8850, and app/machine.h's
+ * machine_systems[] is the same order. */
+enum
+{
+	CONFIG_ROW_SC55MK2, CONFIG_ROW_SC88, CONFIG_ROW_SC88VL, CONFIG_ROW_SC88PRO,
+	CONFIG_ROW_SC8850, CONFIG_SYSTEMS
+};
 
 typedef struct scgui_config
 {
@@ -62,6 +68,7 @@ typedef struct scgui_config
 	char rom[1024];          /* --rom: a zip or directory; "" = search the usual places */
 	int size;                /* the window size: 4 the small panel, 8 twice as large */
 	char audio_device[128];  /* PortAudio device name; "" = the default */
+	int audio_rate;          /* the rate to ask the device for: 0 the machine's own, or 32000, 44100, 48000 */
 	int audio_block;         /* frames per device buffer: 64..1024 */
 	char midi[9][80];        /* host MIDI device names tied to MIDI IN A-D, MIDI OUT, Song to A-D; "" = none */
 	char reset[24];          /* what precedes each song: "none", "gm", "gs", "gm2", "sc88-single", "sc88-double" */

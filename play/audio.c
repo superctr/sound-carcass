@@ -1,14 +1,14 @@
 /* scplay, scgui: PortAudio output.  The emulation runs on its own thread
  * and fills a single-producer ring two device blocks deep; PortAudio's
- * callback drains it, through a windowed-sinc resampler when the device
- * would not open at the machine's rate.
+ * callback drains it, through libsamplerate when the device is not running
+ * at the machine's rate.
  *
  * Copyright (c) 2026 ian karlsson
  * SPDX-License-Identifier: BSD-3-Clause
  */
 #define _POSIX_C_SOURCE 200809L
-#include <math.h>
 #include <portaudio.h>
+#include <samplerate.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,20 +19,19 @@
 #define RING_FRAMES 32768u          /* power of two */
 #define RING_MASK (RING_FRAMES - 1u)
 
-#define TAPS 32                     /* power of two */
-#define TAP_MASK (TAPS - 1)
-#define PHASES 256
-#define PHASE_BITS 8
-#define FRAC_BITS 32
+/* The callback converts in the host's real-time thread, so the medium sinc
+ * rather than the best one; its stopband is already under the 16 bits the
+ * device takes, at a fraction of the cost. */
+#define CONVERTER SRC_SINC_MEDIUM_QUALITY
+#define CONVERT_MAX_OUT (RING_FRAMES / 2)   /* device frames one callback may ask for */
+#define CONVERT_SPARE 16                    /* frames beyond the ratio's share, for the filter */
 
 typedef struct resampler
 {
-	float table[PHASES + 1][TAPS];
-	float hist[TAPS][2];
-	unsigned hist_pos;              /* where the next frame goes */
-	uint64_t step;                  /* input frames per output frame, FRAC_BITS fractional */
-	uint64_t phase;                 /* fractional position, below one frame */
-	unsigned owed;                  /* input frames to take before the next output */
+	SRC_STATE *src;
+	double ratio;                   /* device frames per machine frame */
+	float *in, *out;                /* interleaved stereo, staged for src_process */
+	size_t in_cap, out_cap;
 } resampler_t;
 
 struct scplay_audio
@@ -53,17 +52,15 @@ struct scplay_audio
 
 /* ---------------------------------------------------------------- the resampler */
 
-static double bessel_i0(double x)
+static void resampler_free(resampler_t *rs)
 {
-	double sum = 1, term = 1;
-	for (int k = 1; k < 50; k++)
-	{
-		term *= (x / (2 * k)) * (x / (2 * k));
-		sum += term;
-		if (term < sum * 1e-12)
-			break;
-	}
-	return sum;
+	if (!rs)
+		return;
+	if (rs->src)
+		src_delete(rs->src);
+	free(rs->in);
+	free(rs->out);
+	free(rs);
 }
 
 static resampler_t *resampler_new(uint32_t in_rate, uint32_t out_rate)
@@ -71,73 +68,55 @@ static resampler_t *resampler_new(uint32_t in_rate, uint32_t out_rate)
 	resampler_t *rs = calloc(1, sizeof(*rs));
 	if (!rs)
 		return NULL;
-	double ratio = (double)in_rate / out_rate;
-	double cutoff = ratio > 1 ? 1 / ratio : 1;
-	const double beta = 9;
-	const double half = TAPS / 2.0;
-	for (int p = 0; p <= PHASES; p++)
+	int error = 0;
+	rs->src = src_new(CONVERTER, 2, &error);
+	rs->ratio = (double)out_rate / in_rate;
+	rs->out_cap = CONVERT_MAX_OUT;
+	rs->in_cap = (size_t)((double)rs->out_cap / rs->ratio) + CONVERT_SPARE;
+	rs->in = malloc(rs->in_cap * 2 * sizeof(float));
+	rs->out = malloc(rs->out_cap * 2 * sizeof(float));
+	if (!rs->src || !rs->in || !rs->out || src_set_ratio(rs->src, rs->ratio) != 0)
 	{
-		double frac = (double)p / PHASES;
-		double sum = 0;
-		for (int n = 0; n < TAPS; n++)
-		{
-			double t = (n + 1 - half) - frac;
-			double x = 3.14159265358979323846 * cutoff * t;
-			double sinc = t == 0 ? 1 : sin(x) / x;
-			double w = t / half;
-			double window = fabs(w) < 1 ? bessel_i0(beta * sqrt(1 - w * w)) / bessel_i0(beta) : 0;
-			rs->table[p][n] = (float)(cutoff * sinc * window);
-			sum += rs->table[p][n];
-		}
-		for (int n = 0; n < TAPS; n++)
-			rs->table[p][n] = (float)(rs->table[p][n] / sum);
+		resampler_free(rs);
+		return NULL;
 	}
-	rs->step = (uint64_t)(ratio * 4294967296.0 + 0.5);
-	rs->owed = TAPS;
 	return rs;
 }
 
-/* Takes ring frames from `tail` (not past `head`), makes `want` device
+/* Takes ring frames from `tail` (not past `head`), makes at most `want` device
  * frames; returns how many ring frames it took and how many it made. */
 static size_t resample(resampler_t *rs, const int16_t *ring, size_t tail, size_t head, int16_t *out, size_t want,
                        size_t *made)
 {
-	size_t taken = 0;
-	size_t n;
-	for (n = 0; n < want; n++)
+	SRC_DATA data;
+	size_t have = head - tail;
+	if (want > rs->out_cap)
+		want = rs->out_cap;
+	size_t take = (size_t)((double)want / rs->ratio) + CONVERT_SPARE;
+	if (take > rs->in_cap)
+		take = rs->in_cap;
+	if (take > have)
+		take = have;
+	for (size_t n = 0; n < take; n++)
 	{
-		while (rs->owed)
-		{
-			if (tail + taken >= head)
-				goto done;
-			size_t slot = (tail + taken) & RING_MASK;
-			rs->hist[rs->hist_pos & TAP_MASK][0] = ring[2 * slot];
-			rs->hist[rs->hist_pos & TAP_MASK][1] = ring[2 * slot + 1];
-			rs->hist_pos++;
-			taken++;
-			rs->owed--;
-		}
-		unsigned p = (unsigned)(rs->phase >> (FRAC_BITS - PHASE_BITS));
-		float t = (float)(rs->phase & ((1ull << (FRAC_BITS - PHASE_BITS)) - 1)) / (float)(1ull << (FRAC_BITS - PHASE_BITS));
-		const float *c0 = rs->table[p], *c1 = rs->table[p + 1];
-		float l = 0, r = 0;
-		unsigned start = rs->hist_pos;   /* the oldest of the TAPS frames */
-		for (int k = 0; k < TAPS; k++)
-		{
-			float c = c0[k] + (c1[k] - c0[k]) * t;
-			const float *h = rs->hist[(start + k) & TAP_MASK];
-			l += h[0] * c;
-			r += h[1] * c;
-		}
-		out[2 * n] = (int16_t)(l > 32767 ? 32767 : l < -32768 ? -32768 : lrintf(l));
-		out[2 * n + 1] = (int16_t)(r > 32767 ? 32767 : r < -32768 ? -32768 : lrintf(r));
-		rs->phase += rs->step;
-		rs->owed += (unsigned)(rs->phase >> FRAC_BITS);
-		rs->phase &= (1ull << FRAC_BITS) - 1;
+		size_t slot = (tail + n) & RING_MASK;
+		rs->in[2 * n] = ring[2 * slot] * (1.0f / 32768);
+		rs->in[2 * n + 1] = ring[2 * slot + 1] * (1.0f / 32768);
 	}
-done:
-	*made = n;
-	return taken;
+	memset(&data, 0, sizeof(data));
+	data.data_in = rs->in;
+	data.input_frames = (long)take;
+	data.data_out = rs->out;
+	data.output_frames = (long)want;
+	data.src_ratio = rs->ratio;
+	if (src_process(rs->src, &data) != 0)
+	{
+		*made = 0;
+		return 0;
+	}
+	src_float_to_short_array(rs->out, out, (int)data.output_frames_gen * 2);
+	*made = (size_t)data.output_frames_gen;
+	return (size_t)data.input_frames_used;
 }
 
 /* ---------------------------------------------------------------- the callback */
@@ -152,7 +131,7 @@ static int audio_callback(const void *input, void *output, unsigned long frames,
 	int16_t *out = output;
 	size_t made, taken;
 
-	size_t need = a->rs ? (size_t)((double)want * a->rate / a->device_rate) + TAPS + 2 : want;
+	size_t need = a->rs ? (size_t)((double)want * a->rate / a->device_rate) + CONVERT_SPARE : want;
 	if (need * 2 > atomic_load_explicit(&a->target, memory_order_relaxed))
 	{
 		size_t target = need * 2 > RING_FRAMES / 2 ? RING_FRAMES / 2 : need * 2;
@@ -217,7 +196,7 @@ static bool try_rate(const PaStreamParameters *p, double rate)
 	return Pa_IsFormatSupported(NULL, p, rate) == paFormatIsSupported;
 }
 
-scplay_audio_t *audio_open(uint32_t rate, int device, size_t block, char *err, size_t err_size)
+scplay_audio_t *audio_open(uint32_t rate, uint32_t want_rate, int device, size_t block, char *err, size_t err_size)
 {
 	PaError e = Pa_Initialize();
 	if (e != paNoError)
@@ -266,11 +245,13 @@ scplay_audio_t *audio_open(uint32_t rate, int device, size_t block, char *err, s
 	if (p.suggestedLatency < info->defaultLowOutputLatency)
 		p.suggestedLatency = info->defaultLowOutputLatency;
 
-	double device_rate = rate;
+	double device_rate = want_rate ? want_rate : rate;
 	if (!try_rate(&p, device_rate))
 	{
+		/* not that rate, then: the machine's own next, so that nothing is
+		 * converted when the device happens to take it, then the usual ones */
 		static const double candidates[] = { 0, 48000, 44100, 96000, 88200, 32000, 22050 };
-		device_rate = 0;
+		device_rate = try_rate(&p, rate) ? rate : 0;
 		for (size_t n = 0; n < sizeof(candidates) / sizeof(candidates[0]) && device_rate == 0; n++)
 		{
 			double r = n == 0 ? info->defaultSampleRate : candidates[n];
@@ -311,7 +292,7 @@ scplay_audio_t *audio_open(uint32_t rate, int device, size_t block, char *err, s
 	return a;   /* left stopped; the caller starts it once the queue has filled */
 
 fail:
-	free(a->rs);
+	resampler_free(a->rs);
 	free(a->ring);
 	free(a);
 	Pa_Terminate();
@@ -326,7 +307,7 @@ void audio_close(scplay_audio_t *a)
 		Pa_AbortStream(a->stream);
 	Pa_CloseStream(a->stream);
 	Pa_Terminate();
-	free(a->rs);
+	resampler_free(a->rs);
 	free(a->ring);
 	free(a);
 }
@@ -410,4 +391,105 @@ uint32_t audio_device_rate(const scplay_audio_t *a)
 double audio_latency(const scplay_audio_t *a)
 {
 	return (double)atomic_load_explicit(&a->target, memory_order_relaxed) / a->rate + a->stream_latency;
+}
+
+/* ---------------------------------------------------------------- off the device */
+
+struct audio_convert
+{
+	SRC_STATE *src;
+	double ratio;
+	float *in, *out;
+	int16_t *pcm;                   /* what the caller reads back */
+	size_t in_cap, out_cap;
+};
+
+audio_convert_t *audio_convert_open(uint32_t in_rate, uint32_t out_rate)
+{
+	audio_convert_t *c = calloc(1, sizeof(*c));
+	if (!c)
+		return NULL;
+	int error = 0;
+	c->src = src_new(CONVERTER, 2, &error);
+	c->ratio = (double)out_rate / in_rate;
+	if (!c->src || src_set_ratio(c->src, c->ratio) != 0)
+	{
+		audio_convert_close(c);
+		return NULL;
+	}
+	return c;
+}
+
+void audio_convert_close(audio_convert_t *c)
+{
+	if (!c)
+		return;
+	if (c->src)
+		src_delete(c->src);
+	free(c->in);
+	free(c->out);
+	free(c->pcm);
+	free(c);
+}
+
+static bool convert_room(audio_convert_t *c, size_t in_frames, size_t out_frames)
+{
+	if (in_frames > c->in_cap)
+	{
+		float *in = realloc(c->in, in_frames * 2 * sizeof(float));
+		if (!in)
+			return false;
+		c->in = in;
+		c->in_cap = in_frames;
+	}
+	if (out_frames > c->out_cap)
+	{
+		float *out = realloc(c->out, out_frames * 2 * sizeof(float));
+		if (!out)
+			return false;
+		c->out = out;
+		int16_t *pcm = realloc(c->pcm, out_frames * 2 * sizeof(int16_t));
+		if (!pcm)
+			return false;
+		c->pcm = pcm;
+		c->out_cap = out_frames;
+	}
+	return true;
+}
+
+const int16_t *audio_convert_run(audio_convert_t *c, const int16_t *stereo, size_t frames, bool last, size_t *made)
+{
+	size_t room = (size_t)((double)frames * c->ratio) + CONVERT_SPARE;
+	size_t used = 0, total = 0;
+	*made = 0;
+	if (!convert_room(c, frames, room))
+		return NULL;
+	for (size_t n = 0; n < frames * 2; n++)
+		c->in[n] = stereo[n] * (1.0f / 32768);
+	for (;;)
+	{
+		SRC_DATA data;
+		if (total == room)          /* the converter had more to give than the ratio asked for */
+		{
+			room = room * 2 + CONVERT_SPARE;
+			if (!convert_room(c, frames, room))
+				return NULL;
+		}
+		memset(&data, 0, sizeof(data));
+		data.data_in = c->in + used * 2;
+		data.input_frames = (long)(frames - used);
+		data.data_out = c->out + total * 2;
+		data.output_frames = (long)(room - total);
+		data.src_ratio = c->ratio;
+		data.end_of_input = last;
+		if (src_process(c->src, &data) != 0)
+			return NULL;
+		used += (size_t)data.input_frames_used;
+		total += (size_t)data.output_frames_gen;
+		if (used >= frames && total < room)
+			break;
+	}
+	src_float_to_short_array(c->out, c->pcm, (int)total * 2);
+	*made = total;
+	return c->pcm;
 }

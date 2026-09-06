@@ -209,6 +209,7 @@ typedef struct options
 	const char *rom;
 	const char *audio_device;
 	unsigned audio_block;
+	uint32_t audio_rate;
 	double tail;
 	int port;
 	bool no_audio;
@@ -234,6 +235,20 @@ static int computer_switch_for(const char *name, scemu_computer_switch_t *out)
 	return 0;
 }
 
+/* the output rate, as --rate spells it; 0 is the machine's own */
+static int output_rate_for(const char *name, uint32_t *out)
+{
+	static const char *const words[] = { "native", "32000", "44100", "48000", NULL };
+	static const uint32_t rates[] = { 0, 32000, 44100, 48000 };
+	for (int n = 0; words[n]; n++)
+		if (!strcmp(words[n], name))
+		{
+			*out = rates[n];
+			return 1;
+		}
+	return 0;
+}
+
 static void usage(FILE *fp)
 {
 	fprintf(fp,
@@ -243,11 +258,14 @@ static void usage(FILE *fp)
 	        "                                machine to emulate (default sc88pro)\n"
 	        "  --rom PATH                    a zip or a directory holding the ROM images (any names)\n"
 	        "  --wav FILE                    also write what is played, 16-bit stereo at the\n"
-	        "                                machine's own sample rate\n"
+	        "                                rate --rate chose\n"
 	        "  --no-audio                    render as fast as the host allows, no sound card\n"
 	        "  --audio-device NAME           play on the output device whose name holds NAME\n"
 	        "                                (--audio-device list prints them) instead of the default\n"
 	        "  --audio-block N               the device's buffer in frames (default 256, 8 ms)\n"
+	        "  --rate native|32000|44100|48000\n"
+	        "                                the rate to ask the device, and to write the wav, for;\n"
+	        "                                native (the default) is the machine's own\n"
 	        "  --no-cache                    boot the firmware instead of loading a cached state\n"
 	        "  --keep-settings               start from, and save, the settings memory of the\n"
 	        "                                last --keep-settings run instead of factory settings\n"
@@ -320,6 +338,14 @@ static int parse_options(int argc, char **argv, options_t *o)
 			o->audio_device = argv[++n];
 		else if (!strcmp(a, "--audio-block") && n + 1 < argc)
 			o->audio_block = (unsigned)atoi(argv[++n]);
+		else if (!strcmp(a, "--rate") && n + 1 < argc)
+		{
+			if (!output_rate_for(argv[++n], &o->audio_rate))
+			{
+				fprintf(stderr, "scplay: --rate takes native, 32000, 44100 or 48000\n");
+				return -1;
+			}
+		}
 		else if (!strcmp(a, "--no-audio"))
 			o->no_audio = true;
 		else if (!strcmp(a, "--no-cache"))
@@ -494,10 +520,17 @@ int main(int argc, char **argv)
 	/* ------------------------------------------------------------ play */
 
 	wav_t wav;
+	uint32_t wav_rate = opt.audio_rate ? opt.audio_rate : rate;
+	audio_convert_t *wav_convert = NULL;
 	memset(&wav, 0, sizeof(wav));
-	if (opt.wav && !wav_open(&wav, opt.wav, rate))
+	if (opt.wav && !wav_open(&wav, opt.wav, wav_rate))
 	{
 		fprintf(stderr, "scplay: cannot write %s\n", opt.wav);
+		g_quit = 1;
+	}
+	if (wav.fp && wav_rate != rate && !(wav_convert = audio_convert_open(rate, wav_rate)))
+	{
+		fprintf(stderr, "scplay: cannot convert %u Hz to %u Hz\n", rate, wav_rate);
 		g_quit = 1;
 	}
 
@@ -514,7 +547,7 @@ int main(int argc, char **argv)
 			if (device < 0)
 				fprintf(stderr, "scplay: no output device named like %s, using the default\n", opt.audio_device);
 		}
-		audio = audio_open(rate, device, opt.audio_block, err, sizeof(err));
+		audio = audio_open(rate, opt.audio_rate, device, opt.audio_block, err, sizeof(err));
 		if (!audio)
 			fprintf(stderr, "scplay: no audio (%s), rendering silently\n", err);
 	}
@@ -598,7 +631,15 @@ int main(int argc, char **argv)
 			to_s16(raw, pcm, n * 2);
 			if (audio)
 				audio_push(audio, pcm, n);
-			wav_write(&wav, pcm, n);
+			if (wav_convert)
+			{
+				size_t made;
+				const int16_t *made_pcm = audio_convert_run(wav_convert, pcm, n, false, &made);
+				if (made_pcm)
+					wav_write(&wav, made_pcm, made);
+			}
+			else
+				wav_write(&wav, pcm, n);
 			pos += n;
 			rendered += n;
 			if (audio && !started && audio_space(audio) == 0)
@@ -649,6 +690,14 @@ int main(int argc, char **argv)
 
 	tui_close(tui);
 	audio_close(audio);
+	if (wav_convert)
+	{
+		size_t made;
+		const int16_t *made_pcm = audio_convert_run(wav_convert, NULL, 0, true, &made);
+		if (made_pcm)
+			wav_write(&wav, made_pcm, made);
+		audio_convert_close(wav_convert);
+	}
 	wav_close(&wav);
 
 	bool nvram_written = session_save_settings(&session);

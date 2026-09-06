@@ -37,7 +37,7 @@ typedef struct app
 	int size, scale;           /* the window size setting (4 or 8) and the screen's scale factor */
 	uint32_t *frame;
 	GtkWidget *window, *area, *playlist_window, *list;
-	GtkWidget *settings_window, *notebook, *audio_label, *audio_drop, *block_drop;
+	GtkWidget *settings_window, *notebook, *audio_label, *audio_drop, *rate_drop, *block_drop;
 	GtkWidget *system_label, *model_check[MACHINE_SYSTEMS], *computer_check[COMPUTER_POSITIONS], *rail_check;
 	GtkWidget *logo_popover, *system_popover;
 	GSimpleAction *system_model_action;   /* the system menu's radio state */
@@ -68,6 +68,7 @@ typedef struct app
 	audio_device_info_t devices[AUDIO_DEVICES_MAX];
 	int device_count;
 	int audio_choice;              /* index into devices, or -1 for the default */
+	int rate_choice;               /* index into output_rates */
 	int block_choice;
 	bool rail_wide;                /* the output rail: 29 bits instead of the unit's 24 */
 	bool system_updating;          /* the radio group is being set from the machine */
@@ -101,7 +102,23 @@ typedef struct options
 	scemu_computer_switch_t computer[MACHINE_SYSTEMS];
 	bool keep_settings, no_cache, no_audio;
 	double tail;
+	unsigned audio_rate;
 } options_t;
+
+/* what the output is asked of the device: 0 is the machine's own rate, the
+ * words are --rate's and the settings file's, the labels the Settings tab's */
+static const int output_rates[] = { 0, 32000, 44100, 48000 };
+static const char *const output_rate_words[] = { "native", "32000", "44100", "48000" };
+static const char *const output_rate_labels[] = { "the machine's own", "32000 Hz", "44100 Hz", "48000 Hz" };
+#define RATE_CHOICES ((int)(sizeof(output_rates) / sizeof(output_rates[0])))
+
+static int output_rate_index(const char *word)
+{
+	for (int n = 0; n < RATE_CHOICES; n++)
+		if (!strcmp(output_rate_words[n], word))
+			return n;
+	return -1;
+}
 
 static void usage(FILE *fp)
 {
@@ -113,6 +130,9 @@ static void usage(FILE *fp)
 	        "  --map sc55|sc88|sc88pro|sc8850\n"
 	        "                      play every part from that instrument map\n"
 	        "  --midi-rate BAUD    31250 (default), 38400, 0\n"
+	        "  --rate native|32000|44100|48000\n"
+	        "                      the rate to ask the output device for; native (the default) is\n"
+	        "                      the machine's own\n"
 	        "  --size 4|8          the window size: 4 the small panel, 8 twice as large\n"
 	        "  --keep-settings     keep the machine's settings memory across sessions\n"
 	        "  --no-cache          boot the firmware every time\n"
@@ -143,6 +163,17 @@ static int parse_options(int argc, char **argv, options_t *o, GPtrArray *songs)
 		}
 		else if (!strcmp(a, "--midi-rate") && n + 1 < argc)
 			o->midi_rate = (uint32_t)atoi(argv[++n]);
+		else if (!strcmp(a, "--rate") && n + 1 < argc)
+		{
+			int choice = output_rate_index(argv[++n]);
+			if (choice < 0)
+			{
+				fprintf(stderr, "scgui: --rate takes native, 32000, 44100 or 48000\n");
+				usage(stderr);
+				return -1;
+			}
+			o->audio_rate = (unsigned)output_rates[choice];
+		}
 		else if (!strcmp(a, "--size") && n + 1 < argc)
 			o->size = atoi(argv[++n]);
 		else if (!strcmp(a, "--tail") && n + 1 < argc)
@@ -221,6 +252,7 @@ static void options_from_config(const scgui_config_t *c, options_t *o)
 		o->computer[n] = computer_position(c->computer[n]);
 	o->map = (scemu_map_t)word_index(map_words, MAP_WORDS, c->map, SCEMU_MAP_NATIVE);
 	o->midi_rate = (uint32_t)c->midi_rate;
+	o->audio_rate = (unsigned)c->audio_rate;
 	o->keep_settings = c->keep_settings;
 	o->tail = c->tail;
 }
@@ -672,9 +704,11 @@ static void audio_readout(app_t *app)
 static void audio_apply(app_t *app)
 {
 	int device = app->audio_choice >= 0 ? app->devices[app->audio_choice].index : -1;
-	machine_set_audio(app->mc, device, (unsigned)block_sizes[app->block_choice]);
+	machine_set_audio(app->mc, device, (unsigned)block_sizes[app->block_choice],
+	                  (unsigned)output_rates[app->rate_choice]);
 	snprintf(app->cfg.audio_device, sizeof(app->cfg.audio_device), "%s",
 	         app->audio_choice >= 0 ? app->devices[app->audio_choice].name : "");
+	app->cfg.audio_rate = output_rates[app->rate_choice];
 	app->cfg.audio_block = block_sizes[app->block_choice];
 	config_touch(app);
 }
@@ -687,6 +721,17 @@ static void on_audio_selected(GObject *drop, GParamSpec *spec, gpointer user)
 	if (choice != app->audio_choice)
 	{
 		app->audio_choice = choice;
+		audio_apply(app);
+	}
+}
+
+static void on_rate_selected(GObject *drop, GParamSpec *spec, gpointer user)
+{
+	app_t *app = user;
+	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(drop));
+	if (sel < (guint)RATE_CHOICES && (int)sel != app->rate_choice)
+	{
+		app->rate_choice = (int)sel;
 		audio_apply(app);
 	}
 }
@@ -759,6 +804,16 @@ static GtkWidget *audio_page(app_t *app)
 	g_signal_connect(refresh, "clicked", G_CALLBACK(on_audio_refresh), app);
 	gtk_grid_attach(GTK_GRID(grid), refresh, 2, 0, 1, 1);
 
+	GtkStringList *rates = gtk_string_list_new(NULL);
+	for (int n = 0; n < RATE_CHOICES; n++)
+		gtk_string_list_append(rates, output_rate_labels[n]);
+	app->rate_drop = gtk_drop_down_new(G_LIST_MODEL(rates), NULL);
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(app->rate_drop), app->rate_choice);
+	gtk_widget_set_tooltip_text(app->rate_drop, "The rate the device is asked for; the machine's output is"
+	                                            " converted to whatever it opens at");
+	g_signal_connect(app->rate_drop, "notify::selected", G_CALLBACK(on_rate_selected), app);
+	grid_row(grid, 1, "Output rate", app->rate_drop);
+
 	GtkStringList *blocks = gtk_string_list_new(NULL);
 	for (int n = 0; n < BLOCK_CHOICES; n++)
 	{
@@ -769,18 +824,18 @@ static GtkWidget *audio_page(app_t *app)
 	app->block_drop = gtk_drop_down_new(G_LIST_MODEL(blocks), NULL);
 	gtk_drop_down_set_selected(GTK_DROP_DOWN(app->block_drop), app->block_choice);
 	g_signal_connect(app->block_drop, "notify::selected", G_CALLBACK(on_block_selected), app);
-	grid_row(grid, 1, "Buffer", app->block_drop);
+	grid_row(grid, 2, "Buffer", app->block_drop);
 
 	GtkWidget *notches = gtk_spin_button_new_with_range(5, 200, 5);
 	gtk_spin_button_set_value(GTK_SPIN_BUTTON(notches), app->cfg.knob_notches);
 	gtk_widget_set_tooltip_text(notches, "Notches of the scroll wheel that take the volume knob from silent to full");
 	g_signal_connect(notches, "value-changed", G_CALLBACK(on_notches_changed), app);
-	grid_row(grid, 2, "Knob travel, in notches", notches);
+	grid_row(grid, 3, "Knob travel, in notches", notches);
 
 	app->audio_label = gtk_label_new("");
 	gtk_label_set_xalign(GTK_LABEL(app->audio_label), 0);
 	gtk_widget_set_margin_top(app->audio_label, 8);
-	gtk_grid_attach(GTK_GRID(grid), app->audio_label, 0, 3, 3, 1);
+	gtk_grid_attach(GTK_GRID(grid), app->audio_label, 0, 4, 3, 1);
 	audio_fill(app);
 	audio_readout(app);
 	return grid;
@@ -1770,6 +1825,7 @@ int main(int argc, char **argv)
 
 	app.knob = app.cfg.volume;
 	app.reset = (machine_reset_t)word_index(reset_words, MACHINE_RESET_COUNT, app.cfg.reset, MACHINE_RESET_GS);
+	app.rate_choice = nearest_index(output_rates, RATE_CHOICES, (int)opt.audio_rate);
 	app.block_choice = nearest_index(block_sizes, BLOCK_CHOICES, app.cfg.audio_block);
 	app.rail_wide = app.cfg.dac_rail >= RAIL_WIDE;
 	app.device_count = audio_list(app.devices, AUDIO_DEVICES_MAX);
@@ -1782,10 +1838,13 @@ int main(int argc, char **argv)
 	char exe_dir[PATH_MAX];
 	session_exe_directory(argv[0], exe_dir, sizeof(exe_dir));
 	machine_options_t mo = { opt.model, opt.rom, exe_dir, opt.map, opt.midi_rate,
-	                         { opt.computer[0], opt.computer[1], opt.computer[2], opt.computer[3] },
+	                         { 0 },
 	                         opt.tail, opt.keep_settings, opt.no_cache, opt.no_audio,
 	                         app.audio_choice >= 0 ? app.devices[app.audio_choice].index : -1,
-	                         (unsigned)block_sizes[app.block_choice] };
+	                         (unsigned)block_sizes[app.block_choice],
+	                         (unsigned)output_rates[app.rate_choice] };
+	for (int n = 0; n < MACHINE_SYSTEMS; n++)
+		mo.computer[n] = opt.computer[n];
 	char err[512];
 	app.mc = machine_start(&mo, err, sizeof(err));
 	if (!app.mc)

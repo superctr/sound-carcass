@@ -81,8 +81,8 @@ struct machine
 };
 
 const scemu_model_t machine_systems[MACHINE_SYSTEMS] = {
-	SCEMU_MODEL_SC88, SCEMU_MODEL_SC88VL, SCEMU_MODEL_SC88PRO, SCEMU_MODEL_SC8850,
-	SCEMU_MODEL_SC55MK2
+	SCEMU_MODEL_SC55MK2, SCEMU_MODEL_SC88, SCEMU_MODEL_SC88VL, SCEMU_MODEL_SC88PRO,
+	SCEMU_MODEL_SC8850
 };
 
 int machine_system_index(scemu_model_t model)
@@ -418,7 +418,7 @@ static void open_audio(machine_t *mc)
 	mc->started = false;
 	if (mc->opt.no_audio)
 		return;
-	mc->audio = audio_open(mc->rate, mc->opt.audio_device, block, err, sizeof(err));
+	mc->audio = audio_open(mc->rate, mc->opt.audio_rate, mc->opt.audio_device, block, err, sizeof(err));
 	if (!mc->audio)
 		fprintf(stderr, "scgui: no audio (%s), running silently\n", err);
 }
@@ -471,7 +471,14 @@ static void switch_machine(machine_t *mc, scemu_model_t model)
 	mc->m = m;
 	mc->computer = computer;
 	midi_io_set_groups(mc->midi, midi_ports(mc));
+	uint32_t was_rate = mc->rate;
 	mc->rate = scemu_sample_rate(m);
+	if (mc->rate != was_rate)   /* the stream was opened around the old machine's rate */
+	{
+		audio_close(mc->audio);
+		mc->audio = NULL;
+		open_audio(mc);
+	}
 	snprintf(mc->model_name, sizeof(mc->model_name), "%s", name);
 	mc->opt.model = mc->model_name;
 	session_init(&mc->session, mc->m, mc->roms.model_name, mc->roms.hash, mc->computer,
@@ -544,6 +551,7 @@ static void handle(machine_t *mc, const command_t *c)
 		mc->opt.audio_device = c->a;
 		if (c->b > 0)
 			mc->opt.audio_block = (unsigned)c->b;
+		mc->opt.audio_rate = (unsigned)c->c;
 		open_audio(mc);
 		mc->clock_start = now_seconds();
 		mc->clock_frames = 0;
@@ -947,9 +955,9 @@ void machine_set_map(machine_t *mc, scemu_map_t map)
 	post(mc, c);
 }
 
-void machine_set_audio(machine_t *mc, int device, unsigned block)
+void machine_set_audio(machine_t *mc, int device, unsigned block, unsigned rate)
 {
-	command_t c = { CMD_AUDIO, device, (int)block, 0, 0, NULL };
+	command_t c = { CMD_AUDIO, device, (int)block, (int)rate, 0, NULL };
 	post(mc, c);
 }
 

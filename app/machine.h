@@ -17,8 +17,10 @@
 
 typedef struct machine machine_t;
 
-/* The systems the players keep a rear COMPUTER switch for, in the order of
- * machine_options_t's computer[] (the settings file's rows). */
+/* The systems the players keep a rear COMPUTER switch for, oldest first, which
+ * is also the order they are listed in.  It is the order of machine_options_t's
+ * computer[] and of the settings file's rows (play/config.h's CONFIG_ROW_*), and
+ * the three have to agree. */
 #define MACHINE_SYSTEMS 5
 extern const scemu_model_t machine_systems[MACHINE_SYSTEMS];
 /* the row a model's switch lives in, or -1 for a model without one */
@@ -36,6 +38,7 @@ typedef struct machine_options
 	bool keep_settings, no_cache, no_audio;
 	int audio_device;         /* an index from audio_list (audio.h), or -1 for the default */
 	unsigned audio_block;     /* the device's buffer in frames; 0 for the default */
+	unsigned audio_rate;      /* the rate the device is asked for; 0 the machine's own */
 } machine_options_t;
 
 typedef struct machine_state
@@ -99,9 +102,9 @@ void machine_set_model(machine_t *mc, scemu_model_t model);
  * ladder once at boot, so this replaces the machine the way a model change
  * does; the position is remembered for that system. */
 void machine_set_computer_switch(machine_t *mc, scemu_computer_switch_t sw);
-/* Reopen the output on another device (audio.h's index, -1 the default)
- * with another buffer; 0 keeps the block. */
-void machine_set_audio(machine_t *mc, int device, unsigned block);
+/* Reopen the output on another device (audio.h's index, -1 the default) with
+ * another buffer -- 0 keeps the block -- at another rate, 0 the machine's own. */
+void machine_set_audio(machine_t *mc, int device, unsigned block, unsigned rate);
 
 /* What goes to the machine before every song, on both ports. */
 typedef enum machine_reset
