@@ -2,8 +2,6 @@
 #include <string.h>
 #include "scemu_internal.h"
 
-#define SAMPLE_RATE 32000u
-
 static const char *g_create_error;
 
 static const board_ops_t *board_ops_for(scemu_model_t model)
@@ -17,6 +15,8 @@ static const board_ops_t *board_ops_for(scemu_model_t model)
 		return &sc88_board_ops;
 	case SCEMU_MODEL_SC8850:
 		return &sc8850_board_ops;
+	case SCEMU_MODEL_SC55MK2:
+		return &sc55mk2_board_ops;
 	default:
 		return NULL;
 	}
@@ -76,8 +76,7 @@ scemu_model_t scemu_model(const scemu_t *m)
 
 uint32_t scemu_sample_rate(const scemu_t *m)
 {
-	(void)m;
-	return SAMPLE_RATE;
+	return m->ops->sample_rate(&m->board);
 }
 
 int scemu_output_count(const scemu_t *m)
@@ -93,7 +92,7 @@ void scemu_reset(scemu_t *m)
 uint64_t scemu_boot(scemu_t *m)
 {
 	const uint64_t start = m->ops->frame(&m->board);
-	const uint64_t limit = start + 20 * SAMPLE_RATE;
+	const uint64_t limit = start + 20 * m->ops->sample_rate(&m->board);
 	do
 		m->ops->run_frame(&m->board);
 	while (!m->ops->idle(&m->board) && m->ops->frame(&m->board) < limit);

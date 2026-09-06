@@ -27,6 +27,7 @@ typedef enum scemu_model
 	SCEMU_MODEL_SC88PRO,
 	SCEMU_MODEL_VEGSPRO,
 	SCEMU_MODEL_SC8850,
+	SCEMU_MODEL_SC55MK2,
 	SCEMU_MODEL_COUNT
 } scemu_model_t;
 
@@ -117,6 +118,7 @@ typedef enum scemu_button
 	SCEMU_BUTTON_SOLO,
 	SCEMU_BUTTON_DEC,
 	SCEMU_BUTTON_INC,
+	SCEMU_BUTTON_POWER,           /* SC-55mkII: the standby key, a position in the matrix */
 	SCEMU_BUTTON_COUNT
 } scemu_button_t;
 
@@ -155,6 +157,7 @@ typedef enum scemu_led
 	SCEMU_LED_EDIT,
 	SCEMU_LED_DRUM,
 	SCEMU_LED_EFFECTS,
+	SCEMU_LED_STANDBY,            /* SC-55mkII: lit while the machine is in standby */
 	SCEMU_LED_COUNT
 } scemu_led_t;
 
@@ -201,7 +204,11 @@ void scemu_destroy(scemu_t *m);
 const char *scemu_error(const scemu_t *m);
 scemu_model_t scemu_model(const scemu_t *m);
 
-/* The machine's own sample rate in Hz, 24.576 MHz / 768.  The host resamples. */
+/* The machine's own sample rate in Hz: 32000 on the SC-88 family and the
+ * SC-8850 (24.576 MHz / 768), 66206 on the SC-55mkII (24 MHz / 725, two DAC
+ * words a chip frame).  One frame is one sample of it everywhere, so a
+ * render's frame count, a MIDI offset and a state's frame stamp all mean the
+ * same thing on every model.  The host resamples. */
 uint32_t scemu_sample_rate(const scemu_t *m);
 int scemu_output_count(const scemu_t *m);
 
