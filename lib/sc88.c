@@ -175,7 +175,7 @@ static void sub_midi_out(void *user, uint8_t byte)
 {
 	sc88_t *b = user;
 	if (b->midi_out)
-		b->midi_out(&byte, 1, b->midi_out_user);
+		b->midi_out(SCEMU_MIDI_IN_A, &byte, 1, b->midi_out_user);
 }
 
 /* Port B's SDOB carries the EFX send to the LSP's TRR: the XP's port carries the top 18 bits of its word,
@@ -355,7 +355,7 @@ static void bus_sci_tx(void *user, int channel, uint8_t byte)
 {
 	sc88_t *b = user;
 	if (!b->has_panel && channel == H8500_SCI1 && b->midi_out)
-		b->midi_out(&byte, 1, b->midi_out_user);
+		b->midi_out(SCEMU_MIDI_IN_A, &byte, 1, b->midi_out_user);
 }
 
 /* ---------------------------------------------------------------- lifetime */

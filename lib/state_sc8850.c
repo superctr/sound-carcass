@@ -8,7 +8,8 @@
 enum
 {
 	CHUNK_BOARD, CHUNK_CPU, CHUNK_DRAM, CHUNK_XP1, CHUNK_XP1_ERAM, CHUNK_XP2, CHUNK_XP2_ERAM,
-	CHUNK_LSP, CHUNK_LSP_ERAM, CHUNK_GATE_ARRAY, CHUNK_GLCD, CHUNK_MIDI, CHUNK_FLASH, CHUNK_COUNT
+	CHUNK_LSP, CHUNK_LSP_ERAM, CHUNK_GATE_ARRAY, CHUNK_GLCD, CHUNK_MIDI, CHUNK_FLASH, CHUNK_UIPC,
+	CHUNK_COUNT
 };
 
 static const uint32_t CHUNK_TAG[CHUNK_COUNT] =
@@ -16,7 +17,7 @@ static const uint32_t CHUNK_TAG[CHUNK_COUNT] =
 	TAG('B', 'R', 'D', '2'), TAG('S', 'H', '2', ' '), TAG('D', 'R', 'A', 'M'),
 	TAG('X', 'P', '1', ' '), TAG('X', 'E', 'R', '1'), TAG('X', 'P', '2', ' '), TAG('X', 'E', 'R', '2'),
 	TAG('L', 'S', 'P', ' '), TAG('L', 'E', 'R', 'M'), TAG('G', 'A', '2', ' '), TAG('G', 'L', 'C', 'D'),
-	TAG('M', 'I', 'D', 'I'), TAG('F', 'L', 'S', 'H')
+	TAG('M', 'I', 'D', 'I'), TAG('F', 'L', 'S', 'H'), TAG('U', 'I', 'P', 'C')
 };
 
 /* ---------------------------------------------------------------- the chunks */
@@ -29,7 +30,32 @@ static void put_board(state_writer_t *w, const sc8850_t *b)
 	put64(w, b->frame);
 	put64(w, b->tg_written);
 	put32(w, b->midi.drops);
-	put32(w, b->uipc_step);
+}
+
+static void put_uipc(state_writer_t *w, const sc8850_uipc_t *u)
+{
+	put16(w, u->rx_head);
+	put16(w, u->rx_count);
+	for (uint16_t n = 0; n < u->rx_count; n++)
+		put16(w, u->rx[(u->rx_head + n) % SC8850_UIPC_RX]);
+	put_bytes(w, u->tx, sizeof(u->tx));
+	put8(w, u->tx_count);
+	put8(w, u->boot);
+	put_bool(w, u->running);
+	put_bool(w, u->host);
+	put_bool(w, u->online);
+	for (int n = 0; n < SC8850_MIDI_PORTS; n++)
+	{
+		const sc8850_usb_in_t *in = &u->in[n];
+		put_bytes(w, in->msg, sizeof(in->msg));
+		put8(w, in->count);
+		put8(w, in->need);
+		put8(w, in->cin);
+		put8(w, in->status);
+		put_bool(w, in->sysex);
+	}
+	put32(w, u->announce);
+	put32(w, u->poll);
 }
 
 static void get_board(state_reader_t *r, sc8850_t *b)
@@ -40,7 +66,38 @@ static void get_board(state_reader_t *r, sc8850_t *b)
 	b->frame = get64(r);
 	b->tg_written = get64(r);
 	b->midi.drops = get32(r);
-	b->uipc_step = get32(r);
+}
+
+static void get_uipc(state_reader_t *r, sc8850_uipc_t *u)
+{
+	memset(u, 0, sizeof(*u));
+	u->rx_head = get16(r);
+	u->rx_count = get16(r);
+	if (u->rx_count > SC8850_UIPC_RX || u->rx_head >= SC8850_UIPC_RX)
+	{
+		r->ok = false;
+		return;
+	}
+	for (uint16_t n = 0; n < u->rx_count; n++)
+		u->rx[(u->rx_head + n) % SC8850_UIPC_RX] = get16(r);
+	get_bytes(r, u->tx, sizeof(u->tx));
+	u->tx_count = get8(r);
+	u->boot = get8(r);
+	u->running = get_bool(r);
+	u->host = get_bool(r);
+	u->online = get_bool(r);
+	for (int n = 0; n < SC8850_MIDI_PORTS; n++)
+	{
+		sc8850_usb_in_t *in = &u->in[n];
+		get_bytes(r, in->msg, sizeof(in->msg));
+		in->count = get8(r);
+		in->need = get8(r);
+		in->cin = get8(r);
+		in->status = get8(r);
+		in->sysex = get_bool(r);
+	}
+	u->announce = get32(r);
+	u->poll = get32(r);
 }
 
 static void put_cpu(state_writer_t *w, const sh2_t *c)
@@ -444,6 +501,7 @@ static size_t write_state(const sc8850_t *b, uint8_t *out)
 		case CHUNK_GATE_ARRAY: put_gate_array(&w, &b->ga); break;
 		case CHUNK_GLCD:       put_glcd(&w, &b->glcd); break;
 		case CHUNK_MIDI:       state_put_midi(&w, &b->midi); break;
+		case CHUNK_UIPC:       put_uipc(&w, &b->uipc); break;
 		case CHUNK_FLASH:
 			put_flash(&w, &b->program_flash);
 			put_flash(&w, &b->tone_flash);
@@ -492,6 +550,7 @@ static bool read_chunk(int which, state_reader_t *r, sc8850_t *b, uint8_t *flash
 	case CHUNK_GATE_ARRAY: get_gate_array(r, &b->ga); break;
 	case CHUNK_GLCD:       get_glcd(r, &b->glcd); break;
 	case CHUNK_MIDI:       state_get_midi(r, &b->midi); break;
+	case CHUNK_UIPC:       get_uipc(r, &b->uipc); break;
 	case CHUNK_FLASH:
 		get_flash(r, &b->program_flash);
 		get_flash(r, &b->tone_flash);

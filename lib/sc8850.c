@@ -9,8 +9,22 @@
 
 #define GA_SOURCE_SWITCHES 0
 #define GA_SOURCE_ENCODER 1
+#define GA_SOURCE_UIPC_TX 2
+#define GA_SOURCE_UIPC_RX 3
 #define GA_SOURCE_TICK 10
 #define GA_SOURCE_SEQUENCER 11
+
+#define UIPC_STATUS_RX 0x01
+#define UIPC_PACKET_START 0x04
+#define UIPC_TAG_MIDI 0x50
+#define UIPC_CIN_SINGLE 0x0f
+#define UIPC_CIN_SYSEX 0x04
+#define UIPC_CIN_SYSEX_END 0x05
+#define UIPC_CIN_COMMON2 0x02
+#define UIPC_CIN_COMMON3 0x03
+#define UIPC_HOST_ONLINE 0x00
+#define UIPC_ANNOUNCE_FRAMES 3200
+#define UIPC_POLL_FRAMES 32
 
 #define GA_LEDS_LOW 0x38
 #define GA_LEDS_HIGH 0x39
@@ -207,20 +221,233 @@ static void ga_frame(sc8850_t *b)
 
 /* ---------------------------------------------------------------- the USB controller's mailboxes */
 
-static const uint8_t UIPC_BOOT[6][2] =
+static const uint8_t UIPC_BOOT[][2] =
 {
-	{ 0x01, 0xfa }, { 0xf1, 0x00 }, { 0x01, 0xfb }, { 0x01, 0xfc }, { 0x01, 0xfd }, { 0x01, 0xff }
+	{ 0xe0, 0x00 }, { 0xf0, 0x00 }, { 0x00, 0xfb }, { 0x00, 0xfc }, { 0x00, 0xfd }, { 0x00, 0xff }
 };
+
+#define UIPC_BOOT_STEPS ((uint8_t)(sizeof UIPC_BOOT / sizeof UIPC_BOOT[0]))
+
+static const uint8_t UIPC_CIN_LENGTH[16] = { 0, 0, 2, 3, 3, 1, 2, 3, 3, 3, 3, 3, 2, 2, 3, 1 };
+
+static bool uipc_peek(const sc8850_t *b, uint16_t *value)
+{
+	const sc8850_uipc_t *u = &b->uipc;
+	if (u->boot < UIPC_BOOT_STEPS)
+	{
+		*value = (uint16_t)((UIPC_BOOT[u->boot][0] << 8) | UIPC_BOOT[u->boot][1]);
+		return true;
+	}
+	if (!u->rx_count)
+		return false;
+	*value = u->rx[u->rx_head];
+	return true;
+}
+
+static void uipc_push(sc8850_t *b, uint8_t status, uint8_t byte)
+{
+	sc8850_uipc_t *u = &b->uipc;
+	if (u->rx_count >= SC8850_UIPC_RX)
+		return;
+	u->rx[(u->rx_head + u->rx_count) % SC8850_UIPC_RX] = (uint16_t)((status << 8) | byte);
+	u->rx_count++;
+	ga_raise(b, GA_SOURCE_UIPC_RX);
+}
+
+static void uipc_push_packet(sc8850_t *b, uint8_t header, uint8_t a, uint8_t c, uint8_t d)
+{
+	uipc_push(b, UIPC_TAG_MIDI | UIPC_PACKET_START, header);
+	uipc_push(b, UIPC_TAG_MIDI, a);
+	uipc_push(b, UIPC_TAG_MIDI, c);
+	uipc_push(b, UIPC_TAG_MIDI, d);
+}
+
+static void uipc_send(sc8850_t *b, int port, uint8_t cin, const uint8_t *msg)
+{
+	uipc_push_packet(b, (uint8_t)((port << 4) | cin), msg[0], msg[1], msg[2]);
+}
+
+static void uipc_take_midi(sc8850_t *b, int port, uint8_t byte)
+{
+	sc8850_usb_in_t *in = &b->uipc.in[port];
+	if (byte >= 0xf8)
+	{
+		const uint8_t one[3] = { byte, 0, 0 };
+		uipc_send(b, port, UIPC_CIN_SINGLE, one);
+		return;
+	}
+	if (byte == 0xf7)
+	{
+		if (!in->sysex)
+			return;
+		const uint8_t cin = (uint8_t)(UIPC_CIN_SYSEX_END + in->count);
+		in->msg[in->count++] = byte;
+		while (in->count < 3)
+			in->msg[in->count++] = 0;
+		uipc_send(b, port, cin, in->msg);
+		in->sysex = false;
+		in->count = 0;
+		return;
+	}
+	if (byte >= 0x80)
+	{
+		in->sysex = false;
+		in->count = 0;
+		in->msg[0] = byte;
+		in->msg[1] = 0;
+		in->msg[2] = 0;
+		switch (byte)
+		{
+		case 0xf0:
+			in->sysex = true;
+			in->status = 0;
+			in->count = 1;
+			break;
+		case 0xf1:
+		case 0xf3:
+			in->status = 0;
+			in->count = 1;
+			in->need = 2;
+			in->cin = UIPC_CIN_COMMON2;
+			break;
+		case 0xf2:
+			in->status = 0;
+			in->count = 1;
+			in->need = 3;
+			in->cin = UIPC_CIN_COMMON3;
+			break;
+		case 0xf6:
+			in->status = 0;
+			uipc_send(b, port, UIPC_CIN_SYSEX_END, in->msg);
+			break;
+		default:
+			if (byte >= 0xf4)
+			{
+				in->status = 0;
+				break;
+			}
+			in->status = byte;
+			in->count = 1;
+			in->need = (byte & 0xe0) == 0xc0 ? 2 : 3;
+			in->cin = (uint8_t)(byte >> 4);
+			break;
+		}
+		return;
+	}
+	if (in->sysex)
+	{
+		in->msg[in->count++] = byte;
+		if (in->count == 3)
+		{
+			uipc_send(b, port, UIPC_CIN_SYSEX, in->msg);
+			in->count = 0;
+		}
+		return;
+	}
+	if (in->count == 0)
+	{
+		if (!in->status)
+			return;
+		in->msg[0] = in->status;
+		in->msg[1] = 0;
+		in->msg[2] = 0;
+		in->count = 1;
+	}
+	in->msg[in->count++] = byte;
+	if (in->count == in->need)
+	{
+		uipc_send(b, port, in->cin, in->msg);
+		in->count = 0;
+	}
+}
+
+static void uipc_deliver(sc8850_t *b)
+{
+	const sc8850_uipc_t *u = &b->uipc;
+	const int port = u->tx[0] >> 4, length = UIPC_CIN_LENGTH[u->tx[0] & 0x0f];
+	if (!length || port >= SC8850_MIDI_PORTS || !b->midi_out)
+		return;
+	b->midi_out(port, u->tx + 1, (size_t)length, b->midi_out_user);
+}
 
 static uint8_t uipc_read(sc8850_t *b, int channel, uint32_t offset)
 {
+	sc8850_uipc_t *u = &b->uipc;
+	uint16_t head;
 	if (channel == 0)
-		return offset ? 0x02 : 0x00;
-	if (b->uipc_step >= 6)
 		return 0x00;
-	if (offset == 0)
-		return UIPC_BOOT[b->uipc_step++][1];
-	return UIPC_BOOT[b->uipc_step][0];
+	if (!uipc_peek(b, &head))
+		return 0x00;
+	if (offset)
+		return (uint8_t)((head >> 8) | UIPC_STATUS_RX);
+	if (u->boot < UIPC_BOOT_STEPS)
+	{
+		if (++u->boot == UIPC_BOOT_STEPS)
+		{
+			u->running = true;
+			u->host = b->computer_switch == SCEMU_COMPUTER_MAC;
+			u->announce = UIPC_ANNOUNCE_FRAMES;
+		}
+	}
+	else
+	{
+		u->rx_head = (uint16_t)((u->rx_head + 1) % SC8850_UIPC_RX);
+		u->rx_count--;
+	}
+	return (uint8_t)head;
+}
+
+static void uipc_write(sc8850_t *b, int channel, uint32_t offset, uint8_t data)
+{
+	sc8850_uipc_t *u = &b->uipc;
+	if (channel != 0 || !u->running)
+		return;
+	if (offset)
+	{
+		u->tx[0] = data;
+		u->tx_count = 1;
+	}
+	else if (u->tx_count > 0 && u->tx_count < 4)
+	{
+		u->tx[u->tx_count++] = data;
+		if (u->tx_count == 4)
+		{
+			uipc_deliver(b);
+			u->tx_count = 0;
+		}
+	}
+	if (u->online)
+		ga_raise(b, GA_SOURCE_UIPC_TX);
+}
+
+static void uipc_reset(sc8850_t *b)
+{
+	memset(&b->uipc, 0, sizeof(b->uipc));
+}
+
+static void uipc_frame(sc8850_t *b)
+{
+	sc8850_uipc_t *u = &b->uipc;
+	if (!u->running || !u->host)
+		return;
+	if (!u->online)
+	{
+		if (u->announce)
+		{
+			u->announce--;
+			return;
+		}
+		u->online = true;
+		uipc_push(b, 0x00, UIPC_HOST_ONLINE);
+		return;
+	}
+	if (u->rx_count)
+		ga_raise(b, GA_SOURCE_UIPC_RX);
+	if (++u->poll >= UIPC_POLL_FRAMES)
+	{
+		u->poll = 0;
+		ga_raise(b, GA_SOURCE_UIPC_TX);
+	}
 }
 
 /* ---------------------------------------------------------------- the chips' wiring */
@@ -388,6 +615,8 @@ static void bus_write8(void *user, uint32_t address, uint8_t data)
 	case DEV_DRAM:   b->dram[offset] = data; break;
 	case DEV_GLCD:   glcd_write(&b->glcd, offset, data); break;
 	case DEV_LSP:    lsp_host_write(&b->lsp, offset, data); b->tg_written = b->frame; break;
+	case DEV_UIPC0:  uipc_write(b, 0, offset, data); break;
+	case DEV_UIPC1:  uipc_write(b, 1, offset, data); break;
 	case DEV_GA:     ga_write(b, offset, data); break;
 	case DEV_SLAVE:  xp_write(&b->slave, offset >> 1, (uint16_t)(data * 0x101), (address & 1) ? 0x00ff : 0xff00); b->tg_written = b->frame; break;
 	case DEV_MASTER: xp_write(&b->master, offset >> 1, (uint16_t)(data * 0x101), (address & 1) ? 0x00ff : 0xff00); b->tg_written = b->frame; break;
@@ -463,7 +692,7 @@ static void bus_sci_tx(void *user, int channel, uint8_t byte)
 {
 	sc8850_t *b = user;
 	if (channel == SH2_SCI0 && b->midi_out)
-		b->midi_out(&byte, 1, b->midi_out_user);
+		b->midi_out(SCEMU_MIDI_IN_A, &byte, 1, b->midi_out_user);
 }
 
 /* ---------------------------------------------------------------- lifetime */
@@ -567,7 +796,7 @@ void sc8850_reset(sc8850_t *b)
 	b->frame = 0;
 	b->tg_written = 0;
 	b->code_flush_pending = false;
-	b->uipc_step = 0;
+	uipc_reset(b);
 	midi_queue_reset(&b->midi);
 	xp_reset(&b->master);
 	xp_reset(&b->slave);
@@ -587,6 +816,15 @@ void sc8850_reset(sc8850_t *b)
 static bool midi_take(void *user, int port, uint8_t byte)
 {
 	sc8850_t *b = user;
+	if (b->uipc.host)
+	{
+		if (!b->uipc.online)
+			return true;
+		if (b->uipc.rx_count + 4 > SC8850_UIPC_RX)
+			return false;
+		uipc_take_midi(b, port, byte);
+		return true;
+	}
 	if (port >= 2)
 		return true;
 	if (b->cpu.sci[port].rx_pending)
@@ -614,6 +852,7 @@ void sc8850_run_frame(sc8850_t *b)
 	b->cpu_overshoot = ran > cycles ? (uint32_t)(ran - cycles) : 0;
 
 	ga_frame(b);
+	uipc_frame(b);
 	xp_run_frame(&b->master);
 	xp_run_frame(&b->slave);
 	glcd_frame(&b->glcd);

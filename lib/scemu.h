@@ -135,7 +135,8 @@ typedef enum scemu_map
 	SCEMU_MAP_NATIVE = 0,   /* whatever the song and the machine choose */
 	SCEMU_MAP_SC55 = 1,
 	SCEMU_MAP_SC88 = 2,
-	SCEMU_MAP_SC88PRO = 3   /* the SC-88 has no such map and plays its own */
+	SCEMU_MAP_SC88PRO = 3,  /* the SC-88 has no such map and plays its own */
+	SCEMU_MAP_SC8850 = 4    /* the SC-8850's; the others play their own for it */
 } scemu_map_t;
 
 /* LED bit positions in the mask returned by scemu_leds(). */
@@ -182,13 +183,16 @@ typedef struct scemu_glcd
 	bool changed;
 } scemu_glcd_t;
 
-/* MIDI IN ports.  The Pro's front panel jack is a switch onto port B. */
-enum { SCEMU_MIDI_IN_A = 0, SCEMU_MIDI_IN_B = 1 };
+/* MIDI ports.  The Pro's front panel jack is a switch onto port B.  The
+ * SC-8850 adds C and D, which only its USB port carries. */
+enum { SCEMU_MIDI_IN_A = 0, SCEMU_MIDI_IN_B = 1, SCEMU_MIDI_IN_C = 2, SCEMU_MIDI_IN_D = 3 };
 
 /* Output pairs.  The SC-88 has one; the Pro adds OUTPUT 2. */
 enum { SCEMU_OUTPUT_1 = 0, SCEMU_OUTPUT_2 = 1 };
 
-typedef void (*scemu_midi_out_fn)(const uint8_t *bytes, size_t count, void *user);
+/* A message the machine sends, with the port it left by: the MIDI OUT jack is
+ * port A, and the SC-8850's USB carries all four. */
+typedef void (*scemu_midi_out_fn)(int port, const uint8_t *bytes, size_t count, void *user);
 
 /* Lifetime.  scemu_create validates the ROM set for the model and returns NULL
  * if it does not fit; scemu_error(NULL) then says why. */
