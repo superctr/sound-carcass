@@ -35,7 +35,7 @@ typedef struct key
 	const char *group;
 } config_key_t;
 
-static const char *const model_words[] = { "", "sc88pro", "sc88", "sc88vl", "sc8850", NULL };
+static const char *const model_words[] = { "", "sc88pro", "sc88", "sc88vl", "sc8850", "sc55mk2", NULL };
 static const char *const reset_words[] = { "none", "gm", "gs", "gm2", "sc88-single", "sc88-double", NULL };
 static const char *const map_words[] = { "native", "sc55", "sc88", "sc88pro", "sc8850", NULL };
 static const int size_numbers[] = { 4, 8, -1 };
@@ -61,6 +61,7 @@ static const config_key_t keys[] = {
 	{ "computer_sc88vl",  SLOT_TEXT, FIELD(computer[1]),   0, 0,     computer_words, NULL,         group_computer },
 	{ "computer_sc88pro", SLOT_TEXT, FIELD(computer[2]),   0, 0,     computer_words, NULL,         group_computer },
 	{ "computer_sc8850",  SLOT_TEXT, FIELD(computer[3]),   0, 0,     computer_words, NULL,         group_computer },
+	{ "computer_sc55mk2", SLOT_TEXT, FIELD(computer[4]),   0, 0,     computer_words, NULL,         group_computer },
 	{ "size",             SLOT_INT,  FIELD(size),          0, 0,     NULL,           size_numbers, group_window },
 	{ "audio_device",     SLOT_TEXT, FIELD(audio_device),  0, 0,     NULL,           NULL,         group_audio },
 	{ "audio_block",      SLOT_INT,  FIELD(audio_block),   64, 1024, NULL,           NULL,         group_audio },

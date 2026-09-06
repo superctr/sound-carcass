@@ -53,12 +53,12 @@ extern "C" {
 
 /* The systems whose rear COMPUTER switch the file remembers, in the order of
  * the computer[] rows: the keys are computer_sc88, computer_sc88vl,
- * computer_sc88pro and computer_sc8850. */
-#define CONFIG_SYSTEMS 4
+ * computer_sc88pro, computer_sc8850 and computer_sc55mk2. */
+#define CONFIG_SYSTEMS 5
 
 typedef struct scgui_config
 {
-	char model[16];          /* "sc88pro", "sc88", "sc88vl", "sc8850"; "" = the best set found */
+	char model[16];          /* "sc88pro", "sc88", "sc88vl", "sc8850", "sc55mk2"; "" = the best set found */
 	char rom[1024];          /* --rom: a zip or directory; "" = search the usual places */
 	int size;                /* the window size: 4 the small panel, 8 twice as large */
 	char audio_device[128];  /* PortAudio device name; "" = the default */
@@ -77,7 +77,8 @@ typedef struct scgui_config
 
 /* The keys are the field names, the five MIDI ports being midi_in_a,
  * midi_in_b, midi_out, song_a and song_b and the four computer switches
- * computer_sc88, computer_sc88vl, computer_sc88pro and computer_sc8850. */
+ * computer_sc88, computer_sc88vl, computer_sc88pro, computer_sc8850 and
+ * computer_sc55mk2. */
 
 void config_defaults(scgui_config_t *c);
 

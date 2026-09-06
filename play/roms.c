@@ -23,9 +23,9 @@
 
 enum
 {
-	SET_SC88_CTL, SET_SC88VL_CTL, SET_PRO_CTL, SET_8850_CTL,
-	SET_SC88_WAVE, SET_PRO_WAVE, SET_8850_WAVE,
-	SET_8850_BOOT, SET_8850_TONE,
+	SET_SC88_CTL, SET_SC88VL_CTL, SET_PRO_CTL, SET_8850_CTL, SET_MK2_CTL,
+	SET_SC88_WAVE, SET_PRO_WAVE, SET_8850_WAVE, SET_MK2_WAVE,
+	SET_8850_BOOT, SET_8850_TONE, SET_MK2_BOOT, SET_MK2_SUB,
 	SET_NONE = -1
 };
 
@@ -68,6 +68,12 @@ static const rom_image_t IMAGES[] =
 	{ 0x390faa62, 0x200000, SET_8850_TONE,  0, 0, NULL, 0, "tone flash ic10" },
 	{ 0x2cfe5aa2, 0x1000000, SET_8850_WAVE, 0, 0, NULL, 0, "wave ROM ic53" },
 	{ 0x623015b6, 0x1000000, SET_8850_WAVE, 1, 0, NULL, 0, "wave ROM ic54" },
+
+	{ 0xfcee1e8e, 0x080000, SET_MK2_CTL,    0, 101, "1.01", 0, "control ROM" },
+	{ 0x9b66631f, 0x008000, SET_MK2_BOOT,   0, 0, NULL, 0, "CPU ROM" },
+	{ 0x702c0a82, 0x001000, SET_MK2_SUB,    0, 0, NULL, 0, "sub-CPU ROM" },
+	{ 0x1519d3b3, 0x200000, SET_MK2_WAVE,   0, 0, NULL, 0, "wave ROM ic15" },
+	{ 0x0f826c7f, 0x100000, SET_MK2_WAVE,   1, 0, NULL, 0, "wave ROM ic16" },
 };
 
 #define IMAGE_COUNT ((int)(sizeof(IMAGES) / sizeof(IMAGES[0])))
@@ -80,16 +86,17 @@ typedef struct model_def
 	int control_set;
 	int wave_set;
 	int wave_count;
-	int boot_set;         /* the SC-8850's CPU ROM and tone flash; SET_NONE elsewhere */
-	int tone_set;
+	int boot_set;         /* the CPU's own ROM on the machines that have one; SET_NONE elsewhere */
+	int tone_set;         /* the SC-8850's tone flash */
 } model_def_t;
 
 static const model_def_t MODELS[] =
 {
-	{ "sc88pro", "SC-88Pro", SCEMU_MODEL_SC88PRO, SET_PRO_CTL,    SET_PRO_WAVE,  5, SET_NONE, SET_NONE },
-	{ "sc88",    "SC-88",    SCEMU_MODEL_SC88,    SET_SC88_CTL,   SET_SC88_WAVE, 4, SET_NONE, SET_NONE },
-	{ "sc88vl",  "SC-88VL",  SCEMU_MODEL_SC88VL,  SET_SC88VL_CTL, SET_SC88_WAVE, 4, SET_NONE, SET_NONE },
-	{ "sc8850",  "SC-8850",  SCEMU_MODEL_SC8850,  SET_8850_CTL,   SET_8850_WAVE, 2, SET_8850_BOOT, SET_8850_TONE },
+	{ "sc88pro", "SC-88Pro",  SCEMU_MODEL_SC88PRO, SET_PRO_CTL,    SET_PRO_WAVE,  5, SET_NONE,      SET_NONE },
+	{ "sc88",    "SC-88",     SCEMU_MODEL_SC88,    SET_SC88_CTL,   SET_SC88_WAVE, 4, SET_NONE,      SET_NONE },
+	{ "sc88vl",  "SC-88VL",   SCEMU_MODEL_SC88VL,  SET_SC88VL_CTL, SET_SC88_WAVE, 4, SET_NONE,      SET_NONE },
+	{ "sc8850",  "SC-8850",   SCEMU_MODEL_SC8850,  SET_8850_CTL,   SET_8850_WAVE, 2, SET_8850_BOOT, SET_8850_TONE },
+	{ "sc55mk2", "SC-55mkII", SCEMU_MODEL_SC55MK2, SET_MK2_CTL,    SET_MK2_WAVE,  2, SET_MK2_BOOT,  SET_NONE },
 };
 
 #define MODEL_COUNT ((int)(sizeof(MODELS) / sizeof(MODELS[0])))
@@ -637,25 +644,34 @@ static int load_model(scplay_roms_t *out, const model_def_t *d, const catalog_t 
 	}
 	if (d->boot_set != SET_NONE)
 	{
-		const int boot = find_control(c, d->boot_set), tone = find_control(c, d->tone_set);
+		const int boot = find_control(c, d->boot_set);
 		void *boot_data = image_read(c, boot);
-		void *tone_data = boot_data ? image_read(c, tone) : NULL;
-		if (!boot_data || !tone_data)
+		if (!boot_data)
 		{
-			const int failed = boot_data ? tone : boot;
 			snprintf(err, err_size, "%s: cannot read the %s from %s", d->name,
-			         IMAGES[failed].role, c->found[failed].path);
-			free(boot_data);
+			         IMAGES[boot].role, c->found[boot].path);
 			scplay_roms_free(out);
 			return 0;
 		}
 		out->owned[out->owned_count++] = boot_data;
-		out->owned[out->owned_count++] = tone_data;
 		out->roms.boot_rom = boot_data;
 		out->roms.boot_rom_size = IMAGES[boot].size;
+		h = hash_image(h, &IMAGES[boot]);
+	}
+	if (d->tone_set != SET_NONE)
+	{
+		const int tone = find_control(c, d->tone_set);
+		void *tone_data = image_read(c, tone);
+		if (!tone_data)
+		{
+			snprintf(err, err_size, "%s: cannot read the %s from %s", d->name,
+			         IMAGES[tone].role, c->found[tone].path);
+			scplay_roms_free(out);
+			return 0;
+		}
+		out->owned[out->owned_count++] = tone_data;
 		out->roms.tone_rom = tone_data;
 		out->roms.tone_rom_size = IMAGES[tone].size;
-		h = hash_image(h, &IMAGES[boot]);
 		h = hash_image(h, &IMAGES[tone]);
 	}
 	out->hash = h;

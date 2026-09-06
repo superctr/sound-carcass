@@ -70,6 +70,7 @@ panel_model_t panel_model_for(scemu_model_t model)
 	case SCEMU_MODEL_SC88: return PANEL_MODEL_SC88;
 	case SCEMU_MODEL_SC88VL: return PANEL_MODEL_SC88VL;
 	case SCEMU_MODEL_SC8850: return PANEL_MODEL_SC8850;
+	case SCEMU_MODEL_SC55MK2: return PANEL_MODEL_SC55MK2;
 	default: return PANEL_MODEL_SC88PRO;
 	}
 }
@@ -333,6 +334,7 @@ static const panel_sprite_id_t led_sprite[SCEMU_LED_COUNT] = {
 	PANEL_SPRITE_LED_EDIT1, PANEL_SPRITE_LED_EDIT2, PANEL_SPRITE_LED_EDIT3,
 	PANEL_SPRITE_LED_USER_INST, PANEL_SPRITE_LED_USER_INST_RED,
 	PANEL_SPRITE_LED_SOLO, PANEL_SPRITE_LED_EDIT, PANEL_SPRITE_LED_DRUM, PANEL_SPRITE_LED_EFFECTS,
+	PANEL_SPRITE_LED_STANDBY,
 };
 
 void panel_render(panel_t *p, uint32_t *pixels, size_t stride)
@@ -343,13 +345,15 @@ void panel_render(panel_t *p, uint32_t *pixels, size_t stride)
 		draw_glcd(p, pixels, stride);
 	else
 		draw_glass(p, pixels, stride);
+	uint32_t standby = 1u << SCEMU_LED_STANDBY;
+	uint32_t leds = p->leds & ~standby;
 	uint32_t both = (1u << SCEMU_LED_USER_INST) | (1u << SCEMU_LED_USER_INST_RED);
 	for (int n = 0; n < SCEMU_LED_COUNT; n++)
-		if ((p->leds & (1u << n)) && ((p->leds & both) != both || !((1u << n) & both)))
+		if ((leds & (1u << n)) && ((leds & both) != both || !((1u << n) & both)))
 			blit_sprite(p, pixels, stride, led_sprite[n]);
-	if ((p->leds & both) == both)
+	if ((leds & both) == both)
 		blit_sprite(p, pixels, stride, PANEL_SPRITE_LED_USER_INST_EFX);
-	if (p->standby)
+	if (p->standby || (p->leds & standby))
 		blit_sprite(p, pixels, stride, PANEL_SPRITE_LED_STANDBY);
 	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
 		if ((p->pressed & ((uint64_t)1 << e)) && panel_element_sprite[e] >= 0)

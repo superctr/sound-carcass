@@ -239,10 +239,11 @@ static void usage(FILE *fp)
 	fprintf(fp,
 	        "usage: scplay [options] song.mid\n"
 	        "\n"
-	        "  --model sc88|sc88pro|sc88vl|sc8850\n"
+	        "  --model sc88|sc88pro|sc88vl|sc8850|sc55mk2\n"
 	        "                                machine to emulate (default sc88pro)\n"
 	        "  --rom PATH                    a zip or a directory holding the ROM images (any names)\n"
-	        "  --wav FILE                    also write what is played, 16-bit stereo 32 kHz\n"
+	        "  --wav FILE                    also write what is played, 16-bit stereo at the\n"
+	        "                                machine's own sample rate\n"
 	        "  --no-audio                    render as fast as the host allows, no sound card\n"
 	        "  --audio-device NAME           play on the output device whose name holds NAME\n"
 	        "                                (--audio-device list prints them) instead of the default\n"
@@ -472,6 +473,7 @@ int main(int argc, char **argv)
 	st.glcd = scemu_glcd(m);
 	st.has_efx_led = roms.model == SCEMU_MODEL_SC88PRO;
 	st.eq_label = roms.model != SCEMU_MODEL_SC88PRO;
+	st.standby_lamp = roms.model == SCEMU_MODEL_SC55MK2;
 
 	int32_t raw[BLOCK * 2];
 	int16_t pcm[BLOCK * 2];

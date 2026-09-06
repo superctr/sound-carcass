@@ -19,7 +19,7 @@ typedef struct machine machine_t;
 
 /* The systems the players keep a rear COMPUTER switch for, in the order of
  * machine_options_t's computer[] (the settings file's rows). */
-#define MACHINE_SYSTEMS 4
+#define MACHINE_SYSTEMS 5
 extern const scemu_model_t machine_systems[MACHINE_SYSTEMS];
 /* the row a model's switch lives in, or -1 for a model without one */
 int machine_system_index(scemu_model_t model);

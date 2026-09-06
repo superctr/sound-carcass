@@ -107,7 +107,8 @@ static void usage(FILE *fp)
 {
 	fprintf(fp,
 	        "usage: scgui [options] [file.mid ...]\n"
-	        "  --model NAME        sc88pro (default when its ROMs are found), sc88, sc88vl, sc8850\n"
+	        "  --model NAME        sc88pro (default when its ROMs are found), sc88, sc88vl, sc8850,\n"
+	        "                      sc55mk2\n"
 	        "  --rom PATH          a zip or directory with the ROM images\n"
 	        "  --map sc55|sc88|sc88pro|sc8850\n"
 	        "                      play every part from that instrument map\n"
@@ -1271,6 +1272,14 @@ static void element_action(app_t *app, int e)
 	switch (e)
 	{
 	case PANEL_SWITCH_POWER:
+		/* the SC-55mkII's is a position in its own switch matrix: the machine puts itself
+		   into standby and keeps running, and its own lamp says so */
+		if (machine_model(app->mc) == SCEMU_MODEL_SC55MK2)
+		{
+			machine_button(app->mc, SCEMU_BUTTON_POWER, true);
+			machine_button_after(app->mc, SCEMU_BUTTON_POWER, false, 100);
+			break;
+		}
 		app->power = !app->power;
 		if (app->power && (app->queued | app->held))
 		{

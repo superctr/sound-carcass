@@ -297,13 +297,18 @@ static void time_text(char *out, size_t size, double seconds)
 static const char *LED_NAME[SCEMU_LED_COUNT] =
 {
 	"ALL", "MUTE", "SC-55", "SC-88", "E1", "E2", "E3", "INST", "EFX",
-	"SOLO", "EDIT", "DRUM", "EFFECTS"
+	"SOLO", "EDIT", "DRUM", "EFFECTS", "STANDBY"
 };
 
 static const uint8_t LED_ROW_LCD[] =
 {
 	SCEMU_LED_ALL, SCEMU_LED_MUTE, SCEMU_LED_SC55_MAP, SCEMU_LED_SC88_MAP,
 	SCEMU_LED_EDIT1, SCEMU_LED_EDIT2, SCEMU_LED_EDIT3, SCEMU_LED_USER_INST, SCEMU_LED_USER_INST_RED
+};
+
+static const uint8_t LED_ROW_SC55MK2[] =
+{
+	SCEMU_LED_ALL, SCEMU_LED_MUTE, SCEMU_LED_STANDBY
 };
 
 static const uint8_t LED_ROW_GLCD[] =
@@ -440,8 +445,9 @@ static void build_frame(tui_t *t, const tui_state_t *st)
 
 	put(&b, "\n");
 	put(&b, " ");
-	const uint8_t *row = st->glcd ? LED_ROW_GLCD : LED_ROW_LCD;
-	int row_count = (int)(st->glcd ? sizeof(LED_ROW_GLCD) : sizeof(LED_ROW_LCD));
+	const uint8_t *row = st->glcd ? LED_ROW_GLCD : st->standby_lamp ? LED_ROW_SC55MK2 : LED_ROW_LCD;
+	int row_count = (int)(st->glcd ? sizeof(LED_ROW_GLCD)
+			: st->standby_lamp ? sizeof(LED_ROW_SC55MK2) : sizeof(LED_ROW_LCD));
 	for (int k = 0; k < row_count; k++)
 	{
 		int n = row[k];

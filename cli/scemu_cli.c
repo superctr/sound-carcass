@@ -37,6 +37,9 @@ static const rom_set_t ROM_SETS[] =
 	{ "sc8850", SCEMU_MODEL_SC8850, { "roland-r01678145.ic9", 0x100000 },
 	  { { "roland-r01891445-823.ic53", 0x1000000 }, { "roland-r01891456-824.ic54", 0x1000000 } }, 2,
 	  { "roland-r01783490.ic1", 0x10000 }, { "roland-r01561945.ic10", 0x200000 } },
+	{ "sc55mk2", SCEMU_MODEL_SC55MK2, { "r00233567_control.bin", 0x80000 },
+	  { { "r15209359_pcm_1.bin", 0x200000 }, { "r15279813_pcm_2.bin", 0x100000 } }, 2,
+	  { "r15199858_main_mcu.bin", 0x8000 }, { NULL, 0 } },
 };
 
 /* ---------------------------------------------------------------- files */
@@ -295,7 +298,7 @@ static int smf_load(smf_t *s, const uint8_t *data, size_t size, uint32_t rate)
 
 static void usage(const char *argv0)
 {
-	fprintf(stderr, "usage: %s <sc88|sc88vl|sc88pro|sc8850> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--tail N] [--state boot.state] [--map sc55|sc88|sc88pro|sc8850] [--midi-rate BAUD] [--computer midi|pc1|pc2|usb] [--rail BITS] [--raw words.bin] [--no-jit]\n", argv0);
+	fprintf(stderr, "usage: %s <sc88|sc88vl|sc88pro|sc8850|sc55mk2> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--tail N] [--state boot.state] [--map sc55|sc88|sc88pro|sc8850] [--midi-rate BAUD] [--computer midi|pc1|pc2|usb] [--rail BITS] [--raw words.bin] [--no-jit]\n", argv0);
 }
 
 int main(int argc, char **argv)
@@ -396,9 +399,14 @@ int main(int argc, char **argv)
 	{
 		roms.boot_rom = load_rom(argv[2], &set->boot);
 		roms.boot_rom_size = set->boot.size;
+		if (!roms.boot_rom)
+			return 1;
+	}
+	if (set->tone.name)
+	{
 		roms.tone_rom = load_rom(argv[2], &set->tone);
 		roms.tone_rom_size = set->tone.size;
-		if (!roms.boot_rom || !roms.tone_rom)
+		if (!roms.tone_rom)
 			return 1;
 	}
 
