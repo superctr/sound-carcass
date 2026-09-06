@@ -35,6 +35,7 @@ add_library(scemu STATIC
 	lib/sh2.c
 	lib/sh2_jit.c
 	lib/xp.c
+	lib/gp.c
 	lib/lsp.c
 	lib/sc88.c
 	lib/sc8850.c
