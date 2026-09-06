@@ -131,7 +131,8 @@ else()
 endif()
 
 # ---------------------------------------------------------------------------
-# PortAudio and PortMidi, built from the submodules as static libraries, for the players
+# PortAudio, PortMidi and libsamplerate, built from the submodules as static
+# libraries, for the players; the library itself resamples nothing
 
 if(SCEMU_BUILD_TOOLS)
 	set(BUILD_SHARED_LIBS OFF)
@@ -140,13 +141,20 @@ if(SCEMU_BUILD_TOOLS)
 	set(PA_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 	set(BUILD_PORTMIDI_TESTS OFF CACHE BOOL "" FORCE)
 	set(BUILD_JAVA_NATIVE_INTERFACE OFF CACHE BOOL "" FORCE)
+	set(BUILD_TESTING OFF)              # libsamplerate's tests, through the CTest module
+	set(LIBSAMPLERATE_EXAMPLES OFF)     # they want libsndfile
+	set(LIBSAMPLERATE_INSTALL OFF)
 	set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 	add_subdirectory(portaudio EXCLUDE_FROM_ALL)
 	add_subdirectory(portmidi EXCLUDE_FROM_ALL)
+	set(CMAKE_POLICY_VERSION_MINIMUM 3.5)   # libsamplerate asks for 3.1
+	add_subdirectory(libsamplerate EXCLUDE_FROM_ALL)
+	unset(CMAKE_POLICY_VERSION_MINIMUM)
 	set_target_properties(portaudio portmidi PROPERTIES C_EXTENSIONS ON)
 	if(NOT MSVC)
 		target_compile_options(portaudio PRIVATE -w)
 		target_compile_options(portmidi PRIVATE -w)
+		target_compile_options(samplerate PRIVATE -w)
 	endif()
 endif()
 
@@ -166,7 +174,8 @@ if(SCEMU_BUILD_TOOLS AND TARGET scemu_gui AND TARGET scemu_config AND GTK4_FOUND
 		COMMENT "the build's git version")
 	add_dependencies(scgui git_version)
 	target_include_directories(scgui PRIVATE play ${CMAKE_CURRENT_BINARY_DIR}/app)
-	target_link_libraries(scgui PRIVATE scemu_gui scemu scemu_config ZLIB::ZLIB PkgConfig::GTK4 portaudio portmidi pthread)
+	target_link_libraries(scgui PRIVATE scemu_gui scemu scemu_config ZLIB::ZLIB PkgConfig::GTK4 portaudio portmidi
+		samplerate pthread)
 	if(NOT MSVC)
 		target_compile_options(scgui PRIVATE -Wall -Wextra -Wno-unused-parameter)
 	endif()
@@ -180,7 +189,7 @@ if(SCEMU_BUILD_TOOLS)
 	find_package(ZLIB QUIET)
 	if(ZLIB_FOUND)
 		add_executable(scplay play/scplay.c play/roms.c play/smf.c play/sjis.c play/tui.c play/audio.c play/session.c)
-		target_link_libraries(scplay PRIVATE scemu ZLIB::ZLIB portaudio)
+		target_link_libraries(scplay PRIVATE scemu ZLIB::ZLIB portaudio samplerate)
 		if(NOT MSVC)
 			target_compile_options(scplay PRIVATE -Wall -Wextra -Wno-unused-parameter)
 		endif()

@@ -7,3 +7,6 @@
 [submodule "portaudio"]
 	path = portaudio
 	url = https://github.com/PortAudio/portaudio
+[submodule "libsamplerate"]
+	path = libsamplerate
+	url = https://github.com/libsndfile/libsamplerate
