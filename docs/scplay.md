@@ -1,10 +1,10 @@
 # scplay
 
-`scplay` plays a Standard MIDI File through an emulated SC-88, SC-88VL, SC-88Pro or SC-8850 and draws
-the machine's front panel in the terminal: on the 88 family the LCD's text fields, the sixteen level
-bars as they animate, the panel LEDs and a clock; on the SC-8850 the whole 160 × 64 graphic display,
-drawn dot for dot in half-block characters.  The panel buttons are on the keyboard, so the display can
-be walked through the parts while the music plays.
+`scplay` plays a Standard MIDI File through an emulated SC-88, SC-88VL, SC-88Pro, SC-8850 or
+SC-55mkII and draws the machine's front panel in the terminal: on the 88 family and the SC-55mkII the
+LCD's text fields, the sixteen level bars as they animate, the panel LEDs and a clock; on the SC-8850
+the whole 160 × 64 graphic display, drawn dot for dot in half-block characters.  The panel buttons are
+on the keyboard, so the display can be walked through the parts while the music plays.
 
 ```
 scplay song.mid
@@ -17,19 +17,19 @@ and starts instantly on later runs.
 
 | option | effect |
 |---|---|
-| `--model sc88 \| sc88vl \| sc88pro \| sc8850` | which machine (default `sc88pro`) |
+| `--model sc88 \| sc88vl \| sc88pro \| sc8850 \| sc55mk2` | which machine (default `sc88pro`) |
 | `--rom PATH` | a zip or a directory holding the ROM images, whatever they are named, searched before the usual places |
-| `--wav FILE` | also write what is played, 16-bit stereo at the machine's own 32 kHz |
+| `--wav FILE` | also write what is played, 16-bit stereo at the machine's own rate: 32 kHz, and 66206 Hz on the SC-55mkII |
 | `--no-audio` | render as fast as the host allows and open no sound card; for `--wav` |
 | `--audio-device NAME` | play on the output device whose name holds `NAME` (any case) instead of the host's default; `--audio-device list` prints them and exits |
-| `--audio-block N` | the device's buffer in frames (default 256, 8 ms); the player keeps two of them ahead, or two of the host's own period when that is larger |
+| `--audio-block N` | the device's buffer in frames (default 256, 8 ms at 32 kHz); the player keeps two of them ahead, or two of the host's own period when that is larger |
 | `--no-cache` | boot the firmware instead of loading the cached boot state, and use no cached settings memory |
 | `--keep-settings` | start from the settings memory the last `--keep-settings` run left, and save it again on exit |
 | `--midi-rate BAUD` | the speed of the MIDI input: 31250 is the cable and the default, 38400 the SC-88Pro's computer port, 0 removes the limit.  Faster than the firmware can take loses messages inside it: a song with a large setup block right after its GS reset plays with wrong sounds and levels at 0 |
-| `--computer midi \| pc1 \| pc2 \| mac` | the switch on the back (default `midi`, and `usb` on the SC-8850).  The firmware reads the ladder once when it comes up, so the position belongs to the boot and each one has a boot cache of its own; `usb` is the SC-8850's word for the fourth position and `mac` is everyone else's, and either word is taken.  On the SC-8850 the USB position is the one that carries all four port groups A-D, 64 parts, and its boot puts up the "USB On Line" box; PC-1 and PC-2 take the parts off the MIDI IN jacks and wait for a serial host, which is not answered here, so the machine plays nothing there; on the 88 family the sub-CPU is emulated at a high level and feeds the firmware from the jacks whatever the switch says, so the song still plays, only the boot differs |
+| `--computer midi \| pc1 \| pc2 \| mac` | the switch on the back (default `midi`, and `usb` on the SC-8850).  The firmware reads the ladder once when it comes up, so the position belongs to the boot and each one has a boot cache of its own; `usb` is the SC-8850's word for the fourth position and `mac` is everyone else's, and either word is taken.  On the SC-8850 the USB position is the one that carries all four port groups A-D, 64 parts, and its boot puts up the "USB On Line" box; PC-1 and PC-2 take the parts off the MIDI IN jacks and wait for a serial host, which is not answered here, so the machine plays nothing there; on the 88 family the sub-CPU is emulated at a high level and feeds the firmware from the jacks whatever the switch says, so the song still plays, only the boot differs; the SC-55mkII's sub-CPU, emulated the same way, does follow it — on the three positions that are not MIDI the machine listens on the computer port instead of MIDI IN 1 and sends its replies there, and the song plays on any of them |
 | `--tail N` | seconds to keep running after the last MIDI event (default 4) |
 | `--port 0 \| 1 \| 2 \| 3` | the MIDI IN for tracks that name no port (default A).  A track with a port event (Cakewalk's and Roland's dual-port files) goes to the port it names, so a 32-part song plays on both blocks; ports 2 and 3, an SC-8850's C and D, play when that machine's rear switch is on USB and are dropped everywhere else |
-| `--map sc55 \| sc88 \| sc88pro \| sc8850` | play every part from that instrument map whatever the song selects: the file's bank select LSBs are rewritten, a part gets the selection before its first program change, and every reset (GS, GM, XG, SC-88 mode set) is followed by the selection on all sixteen parts.  The SC-88 has no SC-88Pro map and plays its own for it, and only the SC-8850 has the SC-8850 map |
+| `--map sc55 \| sc88 \| sc88pro \| sc8850` | play every part from that instrument map whatever the song selects: the file's bank select LSBs are rewritten, a part gets the selection before its first program change, and every reset (GS, GM, XG, SC-88 mode set) is followed by the selection on all sixteen parts.  The SC-88 has no SC-88Pro map and plays its own for it, and only the SC-8850 has the SC-8850 map; the SC-55mkII has one map, its own, and plays it whatever is asked for |
 | `--hold` | wait for a key when the song ends instead of exiting |
 | `--help` | usage |
 
@@ -51,9 +51,11 @@ Naming a model with `--model` turns that off: the named model's set must be ther
 
 ## Booting, the boot cache and the settings memory
 
-The firmware takes about six seconds of machine time to boot.  scplay runs that as fast as the host
-allows, showing the LCD as the machine walks through its startup, and holds the MIDI file until the H8
-releases the analog mute — the same point `scemu_boot` waits for.
+The firmware takes about six seconds of machine time to boot, 4.75 s on the SC-55mkII — and twice that
+the first time, because a machine whose settings memory has never been written comes up a semitone flat
+and has to be booted again on what the first boot wrote.  scplay runs
+that as fast as the host allows, showing the LCD as the machine walks through its startup, and holds
+the MIDI file until the H8 releases the analog mute — the same point `scemu_boot` waits for.
 
 The booted machine is then saved, so later runs of the same model on the same ROM images start with no
 wait at all.  The cache lives in `$XDG_CACHE_HOME/scemu/`, or `~/.cache/scemu/` when that is unset:
@@ -108,6 +110,9 @@ The 88 family's panel:
 | `s` | SELECT |
 | `v` | PREVIEW — the volume knob's push switch |
 
+The SC-55mkII's is that list less the buttons it has not got: it has no map buttons, no USER INST, no
+SELECT and no push switch under the volume knob, so `5`, `8`, `u`, `s` and `v` do nothing there.
+
 The SC-8850's, which has other keys and a value dial:
 
 | key | button or action |
@@ -138,13 +143,15 @@ encoder, and holding the key down turns it as fast as the terminal repeats.
 
 ## The display
 
-On the 88 family the panel is drawn from the LCD controller's memory.  The text fields are drawn as
-text; the sixteen level bars are drawn from the CGRAM patterns the firmware fills, two of a bar's
-sixteen segments to a character cell, so they move exactly as the glass does.  The L and R marks
-beside the bars follow the same pixel the hardware wires them to.
+On the 88 family and the SC-55mkII the panel is drawn from the LCD controller's memory.  The text
+fields are drawn as text; the sixteen level bars are drawn from the CGRAM patterns the firmware fills,
+two of a bar's sixteen segments to a character cell, so they move exactly as the glass does.  The L
+and R marks beside the bars follow the same pixel the hardware wires them to.
 
 The LED row shows the panel's nine lamps; the SC-88's third button is labelled EQ, the Pro's second
-lens die appears as EFX.
+lens die appears as EFX.  The SC-55mkII's row is its own three, ALL, MUTE and STANDBY, the last of
+them the machine's own lamp: its POWER key is a position in the panel matrix, and the firmware answers
+it by muting the audio and switching the display off while the machine keeps running.
 
 **The SC-8850** draws everything — its letters as much as its instrument pictures and part meters —
 into one 160 × 64 bitmap, and the terminal shows that bitmap as it stands: one character cell to a
@@ -166,12 +173,13 @@ ANSI; the terminal is left as it was found, including after Ctrl-C.
 
 ## Audio
 
-Output goes through PortAudio at the machine's own 32 kHz, stereo, 16-bit, on the host's default
-device or the one `--audio-device` names (`--audio-device list` shows what there is, with its host
-API: on Linux ALSA, JACK and PulseAudio).  A device that will not open at 32 kHz runs at its own rate
-and the output is resampled on the way, through a 32-tap windowed sinc.  The emulation keeps two
-device buffers (`--audio-block`, 256 frames or 8 ms by default; the host's own period when that is
-larger, as under JACK) ahead of PortAudio's callback; if the host cannot keep up, scplay counts the
+Output goes through PortAudio at the machine's own rate — 32 kHz, and the SC-55mkII's 66206 Hz —
+stereo, 16-bit, on the host's default device or the one `--audio-device` names (`--audio-device list`
+shows what there is, with its host API: on Linux ALSA, JACK and PulseAudio).  A device that will not
+open at that rate runs at its own and the output is resampled on the way, through a 32-tap windowed
+sinc.  The emulation keeps two device buffers (`--audio-block`, 256 frames, 8 ms at 32 kHz, by
+default; the host's own period when that is larger, as under JACK) ahead of PortAudio's callback; if
+the host cannot keep up, scplay counts the
 dropouts and shows them.  The Pro's OUTPUT 2 is not played;
 only OUTPUT 1 is.
 

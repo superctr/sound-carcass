@@ -25,6 +25,21 @@ complete SC-88VL.
 
 Where several versions of a control ROM are there, the newest is taken.
 
+## SC-55mkII
+
+Four images: the control program, the main CPU's own internal ROM and the two wave ROMs.
+
+| image | size | CRC32 |
+|---|---|---|
+| control ROM 1.01, IC30 | 512 KiB | `fcee1e8e` |
+| CPU ROM, IC21 | 32 KiB | `9b66631f` |
+| wave ROM IC15 | 2 MiB | `1519d3b3` |
+| wave ROM IC16 | 1 MiB | `0f826c7f` |
+
+MAME's `sc55mk2` set holds an NVRAM image besides, and that is not needed: the firmware initialises a
+blank battery SRAM by itself, without saying so, and comes up in the state a unit that has had its
+factory setup run is in.
+
 ## SC-88
 
 | image | size | CRC32 |
@@ -84,5 +99,6 @@ MIDI port groups A-D, 64 parts, go through it.
 ## The sub-CPU
 
 The panel sub-CPU's internal 8 KiB ROM is not dumped on any of the 88-family machines and is not
-needed: its behaviour is emulated at a high level.  The SC-8850 has no sub-CPU — its panel and
-display hang on the main CPU's own bus.
+needed: its behaviour is emulated at a high level.  The SC-55mkII's own 4 KiB one is dumped, and is
+recognised where it is found, but it is not needed either, for the same reason.  The SC-8850 has no
+sub-CPU — its panel and display hang on the main CPU's own bus.

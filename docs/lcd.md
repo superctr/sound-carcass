@@ -1,6 +1,6 @@
 # Drawing the display
 
-The SC-88 family's display is a custom glass (Roland's RCM2024T, shared with the SC-55mkII) driven by an
+The SC-88 family's and the SC-55mkII's display is a custom glass (Roland's RCM2024T) driven by an
 HD44780-compatible controller in 2-line × 40-character mode.  `scemu_lcd()` hands the host the
 controller's memory: `ddram[0..39]` is line 0, `ddram[40..79]` is line 1, `cgram` holds the eight
 user-defined 5×8 characters (8 bytes each, one row per byte, bits 4..0 left to right), `display_on` is

@@ -1,8 +1,9 @@
 # scgui
 
 The Sound Canvas on the desktop: the machine's front panel in a window (the SC-88's, the SC-88VL's, the
-SC-88Pro's or the SC-8850's, following the System choice; the VE-GS Pro, which has no panel, wears the
-Pro's), playing Standard MIDI Files from a playlist, with the panel's buttons under the mouse.
+SC-88Pro's, the SC-8850's or the SC-55mkII's, following the System choice; the VE-GS Pro, which has no
+panel, wears the Pro's), playing Standard MIDI Files from a playlist, with the panel's buttons under
+the mouse.
 
     scgui [options] [file.mid ...]
 
@@ -12,9 +13,9 @@ machine.  Files on the command line become the playlist and the first one plays.
 
 | option | |
 |---|---|
-| `--model sc88pro \| sc88 \| sc88vl \| sc8850` | which machine; the default is the SC-88Pro when its ROMs are found |
+| `--model sc88pro \| sc88 \| sc88vl \| sc8850 \| sc55mk2` | which machine; the default is the SC-88Pro when its ROMs are found |
 | `--rom PATH` | a zip or a directory holding the ROM images, whatever they are named |
-| `--size 4 \| 8` | the window size: 4 is the small panel (1399 × 440 for the 88 family, 1696 × 692 for the SC-8850), 8 twice that.  The bake is named by the glass's dot pitch, which is 4 and 8 on the 88 family and 3 and 6 on the SC-8850, whose display has more and smaller dots.  On a HiDPI screen the large bake is used for the small size automatically |
+| `--size 4 \| 8` | the window size: 4 is the small panel (1399 × 440 for the SC-88 and the SC-88Pro, 1399 × 282 for the shallower SC-88VL and SC-55mkII, 1696 × 692 for the SC-8850), 8 twice that.  The bake is named by the glass's dot pitch, which is 4 and 8 on the 88 family and the SC-55mkII and 3 and 6 on the SC-8850, whose display has more and smaller dots.  On a HiDPI screen the large bake is used for the small size automatically |
 | `--map sc55 \| sc88 \| sc88pro \| sc8850` | play every part from that instrument map, as in scplay |
 | `--midi-rate BAUD` | the speed of the MIDI input, as in scplay |
 | `--keep-settings` | keep the machine's settings memory across sessions |
@@ -41,7 +42,11 @@ machine.  Files on the command line become the playlist and the first one plays.
   (VALUE), a button like any other, and it takes the wheel as well.
 - **The power switch** switches the emulated unit off and on; on the SC-88VL the STANDBY lamp beside
   it is lit while the unit is off.  Switching on boots the firmware for
-  real (not from the cache), with any queued keys held, so the power-on combinations work.
+  real (not from the cache), with any queued keys held, so the power-on combinations work.  The
+  SC-55mkII's POWER is not a mains switch but a position in the panel's own switch matrix, so clicking
+  it sends that key: the firmware mutes the audio and switches the display's power off while the
+  machine keeps running, and the STANDBY lamp is the machine's own.  A note sounding when it is
+  pressed keeps sounding into a dead amplifier, and MIDI arriving in standby goes nowhere.
 - **The MIDI IN B jack** opens the playlist, **the PHONES jack** the Settings window.
 - **The model name** beside the logotype opens a menu of the systems whose ROMs are there, to switch
   between them, and a Reset that power-cycles the machine.
@@ -109,28 +114,33 @@ The PHONES jack opens the Settings window, which has two tabs.
 
 **Audio**: the output device (every device PortAudio finds, on every host API it was built with -- on
 Linux ALSA, JACK and PulseAudio -- or the host's default), the device's buffer (64 to 1024 frames, 2
-to 32 ms at the machine's 32 kHz; 256 by default), the volume knob's travel in notches of the scroll
-wheel (5 to 200 from silent to full; 20 by default), and a readout of the device in use, the latency
+to 32 ms at 32 kHz; 256 by default), the volume knob's travel in notches of the scroll wheel (5 to
+200 from silent to full; 20 by default), and a readout of the device in use, the latency
 from the machine to the jack and the underruns so far.  The machine keeps two buffers ahead of the
 device -- two of the buffer chosen, or of the period the host actually takes when that is larger, as
 under JACK, where the server sets it; a smaller buffer means less delay from a key to the sound and
-more chance of a dropout on a busy host.  A device that will not open at 32 kHz runs at its own rate,
-and the output is resampled on the way (a 32-tap windowed sinc).
+more chance of a dropout on a busy host.  A device that will not open at the machine's own rate -- 32
+kHz, and the SC-55mkII's 66206 Hz -- runs at its own, and the output is resampled on the way (a 32-tap
+windowed sinc).
 
-**System**: which machine this is -- SC-88, SC-88VL, SC-88Pro or SC-8850.  A model whose ROM images
-were not found is greyed out.  Choosing another one switches at once: the song is unloaded, the machine is
-replaced and the new one comes up from its own boot cache, so it is instant from the second time on;
-the sound card and the MIDI ties stay as they are.  Below the choice is what is running: the model,
-its control ROM version, and the file its images came from.
+**System**: which machine this is -- SC-88, SC-88VL, SC-88Pro, SC-8850 or SC-55mkII.  A model whose
+ROM images were not found is greyed out.  Choosing another one switches at once: the song is
+unloaded, the machine is replaced and the new one comes up from its own boot cache, so it is instant
+from the second time on; the sound card and the MIDI ties stay as they are.  Below the choice is what
+is running: the model, its control ROM version, and the file its images came from.
 
 The **computer switch** is the row under the systems: the switch on the back of the unit, in the
-positions that system has -- MIDI, PC-1, PC-2 and Mac on the 88 family, MIDI, PC-1, PC-2 and USB on
-the SC-8850.  It belongs to the system, not to the program, so each one keeps its own; the row always
-shows the running one.  The firmware reads the ladder once when it comes up, so changing it replaces
-the machine and boots it again, the way changing the model does (from that position's own boot cache).
+positions that system has -- MIDI, PC-1, PC-2 and Mac on the 88 family and the SC-55mkII, MIDI, PC-1,
+PC-2 and USB on the SC-8850.  It belongs to the system, not to the program, so each one keeps its own;
+the row always shows the running one.  The firmware reads the ladder once when it comes up, so
+changing it replaces the machine and boots it again, the way changing the model does (from that
+position's own boot cache).
 MIDI is the default on the 88 family, where the sub-CPU is emulated at a high level and feeds the
-firmware from the jacks whatever the switch says, so only the boot differs.  USB is the default on
-the SC-8850: it is the position that carries all four port groups A-D, 64 parts, so a four-port song
+firmware from the jacks whatever the switch says, so only the boot differs.  It is the default on the
+SC-55mkII as well, whose sub-CPU is emulated the same way but does follow the switch: on the three
+positions that are not MIDI the machine listens on the computer port instead of MIDI IN 1 and answers
+there, and it plays on any of them.  USB is the default on the SC-8850: it is the position that
+carries all four port groups A-D, 64 parts, so a four-port song
 plays whole and the playlist window gets the rows for C and D; its boot puts up the "USB On Line" box.
 MIDI there is the two jacks, groups A and B, and PC-1 and PC-2 take the parts off the jacks and wait
 for a serial host, which is not answered here, so the machine plays nothing.  This is not the MIDI
@@ -142,7 +152,9 @@ thing.  Ticking the box gives those words 29 bits -- the width of the DSP's own 
 above the ceiling -- and changes nothing below it, so the sound stays the unit's and only what would
 have been chopped off is kept.  It takes effect at once, also mid-song.  The level does not move: the volume knob has the same scale on
 either rail, and what the wide rail keeps is only lost again where the knob leaves it above full
-scale at the sound card, so turn the knob down for a song that used to clip.
+scale at the sound card, so turn the knob down for a song that used to clip.  The SC-55mkII has no
+such rail -- its output comes out of the GP chip's own saturating adder -- and the box does nothing
+there.
 
 ## The settings file
 
@@ -150,10 +162,10 @@ scale at the sound card, so turn the knob down for a song that used to clip.
 machine and where its ROMs are, the window size, the output device and its buffer, the volume knob,
 its travel in notches and the rail, the nine MIDI ties by the device's name, the message before each song, the instrument
 map, the MIDI speed, the computer switch of each system (`computer_sc88`, `computer_sc88vl`,
-`computer_sc88pro` and `computer_sc8850`, each `midi`, `pc1`, `pc2` or `mac`, with `usb` taken as the
-SC-8850's word for the last), whether the settings memory is kept, and the tail.  It is read at start, written
-a moment after a setting changes, and written again on exit.  An option on the command line overrides
-the file for that run and does not change it.  The file is `key = value` text with `#` comments; a
+`computer_sc88pro`, `computer_sc8850` and `computer_sc55mk2`, each `midi`, `pc1`, `pc2` or `mac`, with
+`usb` taken as the SC-8850's word for the last), whether the settings memory is kept, and the tail.
+It is read at start, written a moment after a setting changes, and written again on exit.  An option
+on the command line overrides the file for that run and does not change it.  The file is `key = value` text with `#` comments; a
 line it cannot make sense of is complained about on stderr and every other line is still taken.
 
 ## Building
