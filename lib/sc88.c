@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
-#include "sc88.h"
+#include "scemu_internal.h"
 #include "wave_rom.h"
 
 typedef struct rom_layout
@@ -44,6 +44,110 @@ const char *sc88_validate_roms(scemu_model_t model, const scemu_roms_t *roms)
 			return "wave ROM has the wrong size";
 	}
 	return NULL;
+}
+
+/* ---------------------------------------------------------------- the gate array */
+
+static void ga_update_int(sc88_ga_t *ga)
+{
+	ga->irq(ga->user, (ga->int_pending & ~ga->int_mask) != 0);
+}
+
+void sc88_ga_init(sc88_ga_t *ga, lcd_t *lcd, void (*irq)(void *user, bool state), void *user)
+{
+	memset(ga, 0, sizeof(*ga));
+	ga->lcd = lcd;
+	ga->irq = irq;
+	ga->user = user;
+}
+
+void sc88_ga_reset(sc88_ga_t *ga)
+{
+	memset(ga->regs, 0, sizeof(ga->regs));
+	ga->int_pending = 0;
+	ga->int_mask = 0;
+	ga->leds = 0;
+	ga->lcd_fifo_count = 0;
+	ga->lcd_command_pending = false;
+	ga->lcd_busy_frames = 0;
+	ga_update_int(ga);
+}
+
+uint8_t sc88_ga_read(sc88_ga_t *ga, uint32_t offset)
+{
+	offset &= 0xff;
+	if (offset == 0x04)
+	{
+		const uint8_t active = ga->int_pending & ~ga->int_mask;
+		for (int source = 0; source < 8; source++)
+		{
+			if ((active >> source) & 1)
+			{
+				ga->int_pending &= (uint8_t)~(1u << source);
+				ga_update_int(ga);
+				return (uint8_t)(source + 1);
+			}
+		}
+		return 0;
+	}
+	return ga->regs[offset];
+}
+
+static void ga_update_leds(sc88_ga_t *ga)
+{
+	const uint8_t data = ga->regs[0x00];
+	const uint8_t commons = ga->regs[0x01];
+	ga->leds = (uint16_t)((commons & 1) ? 0 : data);
+	if (commons & 2)
+		ga->leds |= 0x100;
+}
+
+void sc88_ga_write(sc88_ga_t *ga, uint32_t offset, uint8_t data)
+{
+	offset &= 0xff;
+	ga->regs[offset] = data;
+	switch (offset)
+	{
+	case 0x00:
+	case 0x01:
+		ga_update_leds(ga);
+		break;
+	case 0x05:
+		ga->int_mask = data;
+		ga_update_int(ga);
+		break;
+	case 0x1e:
+	{
+		int bytes = ga->lcd_fifo_count;
+		if (ga->lcd_command_pending)
+		{
+			lcd_command(ga->lcd, ga->regs[0x1f]);
+			bytes++;
+		}
+		for (int i = 0; i < ga->lcd_fifo_count; i++)
+			lcd_data(ga->lcd, ga->lcd_fifo[i]);
+		ga->lcd_command_pending = false;
+		ga->lcd_fifo_count = 0;
+		ga->lcd_busy_frames = (uint32_t)((40 * (bytes + 1) * 32 + 999) / 1000);
+		break;
+	}
+	case 0x1f:
+		ga->lcd_command_pending = true;
+		break;
+	default:
+		if (offset >= 0x20 && offset <= 0x2c && ga->lcd_fifo_count < 13)
+			ga->lcd_fifo[ga->lcd_fifo_count++] = data;
+		break;
+	}
+}
+
+void sc88_ga_frame(sc88_ga_t *ga)
+{
+	if (ga->lcd_busy_frames && !--ga->lcd_busy_frames)
+	{
+		ga->int_pending |= 1;
+		ga_update_int(ga);
+	}
 }
 
 /* ---------------------------------------------------------------- wiring */
@@ -150,7 +254,7 @@ static uint16_t bus_read16(void *user, uint32_t address)
 	case DEV_SRAM: return (uint16_t)((b->sram[offset] << 8) | b->sram[offset + 1]);
 	case DEV_XP:   return xp_read(&b->xp, offset >> 1);
 	case DEV_SUB:  return (uint16_t)((sub_hle_read(&b->sub, offset) << 8) | sub_hle_read(&b->sub, offset + 1));
-	case DEV_GA:   return (uint16_t)((gate_array_read(&b->ga, offset) << 8) | gate_array_read(&b->ga, offset + 1));
+	case DEV_GA:   return (uint16_t)((sc88_ga_read(&b->ga, offset) << 8) | sc88_ga_read(&b->ga, offset + 1));
 	case DEV_LSP:  return (uint16_t)((lsp_host_read(&b->lsp, offset) << 8) | lsp_host_read(&b->lsp, offset + 1));
 	default:       return 0;
 	}
@@ -170,7 +274,7 @@ static uint8_t bus_read8(void *user, uint32_t address)
 		return (uint8_t)((address & 1) ? word : word >> 8);
 	}
 	case DEV_SUB:  return sub_hle_read(&b->sub, offset);
-	case DEV_GA:   return gate_array_read(&b->ga, offset);
+	case DEV_GA:   return sc88_ga_read(&b->ga, offset);
 	case DEV_LSP:  return lsp_host_read(&b->lsp, offset);
 	default:       return 0;
 	}
@@ -185,7 +289,7 @@ static void bus_write8(void *user, uint32_t address, uint8_t data)
 	case DEV_SRAM: b->sram[offset] = data; break;
 	case DEV_XP:   xp_write(&b->xp, offset >> 1, (uint16_t)(data * 0x101), (address & 1) ? 0x00ff : 0xff00); break;
 	case DEV_SUB:  sub_hle_write(&b->sub, offset, data); break;
-	case DEV_GA:   gate_array_write(&b->ga, offset, data); break;
+	case DEV_GA:   sc88_ga_write(&b->ga, offset, data); break;
 	case DEV_LSP:  lsp_host_write(&b->lsp, offset, data); break;
 	default: break;
 	}
@@ -272,9 +376,9 @@ static uint64_t hash_add(uint64_t h, const void *data, size_t size)
 
 bool sc88_init(sc88_t *b, scemu_model_t model, const scemu_roms_t *roms, const scemu_config_t *config)
 {
-	b->midi_baud = SC88_MIDI_DEFAULT_BAUD;
 	memset(b, 0, sizeof(*b));
 	b->model = model;
+	midi_queue_init(&b->midi, SC88_MIDI_PORTS);
 	jit_alloc_init(&b->jit, config);
 
 	const bool sc88 = (model == SCEMU_MODEL_SC88 || model == SCEMU_MODEL_SC88VL);
@@ -342,7 +446,7 @@ bool sc88_init(sc88_t *b, scemu_model_t model, const scemu_roms_t *roms, const s
 	}
 
 	lcd_init(&b->lcd);
-	gate_array_init(&b->ga, &b->lcd, ga_irq, b);
+	sc88_ga_init(&b->ga, &b->lcd, ga_irq, b);
 	sub_hle_init(&b->sub, sub_irq, sub_midi_out, b);
 	return true;
 }
@@ -366,50 +470,37 @@ void sc88_reset(sc88_t *b)
 	b->mute = true;
 	b->lsp_mute = true;
 	b->frame = 0;
-	memset(b->midi_head, 0, sizeof(b->midi_head));
-	memset(b->midi_count, 0, sizeof(b->midi_count));
-	memset(b->midi_credit, 0, sizeof(b->midi_credit));
-	b->midi_drops = 0;
+	midi_queue_reset(&b->midi);
 	xp_reset(&b->xp);
 	if (b->has_lsp)
 		lsp_reset(&b->lsp);
 	lcd_reset(&b->lcd);
-	gate_array_reset(&b->ga);
+	sc88_ga_reset(&b->ga);
 	sub_hle_reset(&b->sub);
 	h8500_reset(&b->cpu);
 }
 
 /* ---------------------------------------------------------------- the frame */
 
+static bool midi_take(void *user, int port, uint8_t byte)
+{
+	sc88_t *b = user;
+	if (b->has_panel)
+	{
+		if (!sub_hle_ready(&b->sub))
+			return false;
+		sub_hle_midi_byte(&b->sub, port, byte);
+		return true;
+	}
+	if (b->cpu.sci[port].rx_pending)
+		return false;
+	h8500_sci_rx(&b->cpu, port, byte);
+	return true;
+}
+
 void sc88_deliver_midi(sc88_t *b)
 {
-	for (int port = 0; port < SC88_MIDI_PORTS; port++)
-	{
-		if (b->midi_credit[port] < SC88_MIDI_BYTE_UNITS)
-			b->midi_credit[port] += b->midi_baud;
-		while (b->midi_count[port] && (!b->midi_baud || b->midi_credit[port] >= SC88_MIDI_BYTE_UNITS))
-		{
-			sc88_midi_event_t *e = &b->midi_queue[port][b->midi_head[port]];
-			if (e->frame > b->frame)
-				break;
-			if (b->has_panel)
-			{
-				if (!sub_hle_ready(&b->sub))
-					break;
-				sub_hle_midi_byte(&b->sub, port, e->byte);
-			}
-			else
-			{
-				if (b->cpu.sci[port].rx_pending)
-					break;
-				h8500_sci_rx(&b->cpu, port, e->byte);
-			}
-			b->midi_head[port] = (b->midi_head[port] + 1) % SC88_MIDI_QUEUE_SIZE;
-			b->midi_count[port]--;
-			if (b->midi_baud)
-				b->midi_credit[port] -= SC88_MIDI_BYTE_UNITS;
-		}
-	}
+	midi_queue_deliver(&b->midi, (uint32_t)b->frame, midi_take, b);
 }
 
 void sc88_run_frame(sc88_t *b)
@@ -426,7 +517,7 @@ void sc88_run_frame(sc88_t *b)
 	if (b->has_panel)
 	{
 		sub_hle_frame(&b->sub);
-		gate_array_frame(&b->ga);
+		sc88_ga_frame(&b->ga);
 	}
 	xp_run_frame(&b->xp);
 	b->frame++;
@@ -439,28 +530,18 @@ bool sc88_idle(const sc88_t *b)
 
 void sc88_queue_midi(sc88_t *b, int port, uint8_t byte, uint32_t frame_offset)
 {
-	port &= SC88_MIDI_PORTS - 1;
-	if (b->midi_count[port] >= SC88_MIDI_QUEUE_SIZE)
-	{
-		b->midi_drops++;
-		return;
-	}
-	uint32_t slot = (b->midi_head[port] + b->midi_count[port]) % SC88_MIDI_QUEUE_SIZE;
-	b->midi_queue[port][slot].frame = (uint32_t)b->frame + frame_offset;
-	b->midi_queue[port][slot].port = (uint8_t)port;
-	b->midi_queue[port][slot].byte = byte;
-	b->midi_count[port]++;
+	midi_queue_push(&b->midi, port, byte, (uint32_t)b->frame + frame_offset);
 }
 
 /* Matrix position of each button: strobe row and return bit. */
-static const uint8_t BUTTON_ROW[SCEMU_BUTTON_COUNT] =
+static const uint8_t BUTTON_ROW[SCEMU_BUTTON_F1] =
 {
 	0, 0, 0, 0, 0,
 	2, 1, 0, 0, 2, 2, 1, 1, 2, 2, 1, 1, 2, 2, 1, 1,
 	3, 3, 3, 3, 3, 3, 3, 3
 };
 
-static const uint8_t BUTTON_BIT[SCEMU_BUTTON_COUNT] =
+static const uint8_t BUTTON_BIT[SCEMU_BUTTON_F1] =
 {
 	6, 5, 2, 1, 7,
 	6, 6, 3, 4, 4, 5, 4, 5, 2, 3, 2, 3, 0, 1, 0, 1,
@@ -469,7 +550,76 @@ static const uint8_t BUTTON_BIT[SCEMU_BUTTON_COUNT] =
 
 void sc88_button(sc88_t *b, scemu_button_t button, bool down)
 {
-	if (button < 0 || button >= SCEMU_BUTTON_COUNT || !b->has_panel)
+	if (button < 0 || button >= SCEMU_BUTTON_F1 || !b->has_panel)
 		return;
 	sub_hle_set_key(&b->sub, BUTTON_ROW[button], BUTTON_BIT[button], down);
 }
+
+/* ---------------------------------------------------------------- the board as the API sees it */
+
+static const char *ops_validate_roms(scemu_model_t model, const scemu_roms_t *roms) { return sc88_validate_roms(model, roms); }
+static bool ops_init(void *b, scemu_model_t model, const scemu_roms_t *roms, const scemu_config_t *config) { return sc88_init(b, model, roms, config); }
+static void ops_release(void *b) { sc88_release(b); }
+static void ops_reset(void *b) { sc88_reset(b); }
+static void ops_run_frame(void *b) { sc88_run_frame(b); }
+static bool ops_idle(const void *b) { return sc88_idle(b); }
+static uint64_t ops_frame(const void *b) { return ((const sc88_t *)b)->frame; }
+static uint64_t ops_rom_id(const void *b) { return ((const sc88_t *)b)->rom_id; }
+static int ops_output_count(const void *b) { return ((const sc88_t *)b)->has_lsp ? 2 : 1; }
+
+/* the SC-88's one DAC on SDOC, the frame half picking left or right; the SC-88Pro's two, SDOC carrying
+   both left channels and SDOD both right, the half picking the DAC; the SC-88VL's one DAC on SDOC, its
+   right word the position after the left, as the Pro's */
+static int32_t ops_output(const void *board, int pair, int channel)
+{
+	const sc88_t *b = board;
+	if (b->mute)
+		return 0;
+	if (pair == 0)
+		return xp_output(&b->xp, channel ? b->dac_right : 2);
+	return xp_output(&b->xp, channel ? 5 : 3);
+}
+
+static midi_queue_t *ops_midi(void *b) { return &((sc88_t *)b)->midi; }
+static void ops_set_midi_out(void *board, scemu_midi_out_fn fn, void *user)
+{
+	sc88_t *b = board;
+	b->midi_out = fn;
+	b->midi_out_user = user;
+}
+static void ops_set_rail(void *b, int bits) { xp_set_rail(&((sc88_t *)b)->xp, bits); }
+static int ops_rail(const void *b) { return ((const sc88_t *)b)->xp.rail_bits; }
+static void ops_button(void *b, scemu_button_t button, bool down) { sc88_button(b, button, down); }
+static void ops_set_computer_switch(void *b, scemu_computer_switch_t sw) { ((sc88_t *)b)->computer_switch = sw; }
+static uint32_t ops_leds(const void *b) { return ((const sc88_t *)b)->ga.leds; }
+static scemu_lcd_t *ops_lcd(void *b) { return &((sc88_t *)b)->lcd.out; }
+
+static size_t ops_nvram_size(const void *b) { (void)b; return SC88_SRAM_SIZE; }
+static size_t ops_nvram_get(const void *board, void *buffer, size_t size)
+{
+	if (size < SC88_SRAM_SIZE)
+		return 0;
+	memcpy(buffer, ((const sc88_t *)board)->sram, SC88_SRAM_SIZE);
+	return SC88_SRAM_SIZE;
+}
+static bool ops_nvram_set(void *board, const void *buffer, size_t size)
+{
+	if (size != SC88_SRAM_SIZE)
+		return false;
+	memcpy(((sc88_t *)board)->sram, buffer, SC88_SRAM_SIZE);
+	return true;
+}
+
+static size_t ops_state_size(const void *b) { return sc88_state_size(b); }
+static size_t ops_state_save(const void *b, void *buffer, size_t size) { return sc88_state_save(b, buffer, size); }
+static bool ops_state_load(void *b, const void *buffer, size_t size) { return sc88_state_load(b, buffer, size); }
+
+const board_ops_t sc88_board_ops =
+{
+	ops_validate_roms, ops_init, ops_release, ops_reset, ops_run_frame, ops_idle, ops_frame, ops_rom_id,
+	ops_output_count, ops_output,
+	ops_midi, ops_set_midi_out, ops_set_rail, ops_rail,
+	ops_button, ops_set_computer_switch, ops_leds, ops_lcd, NULL, NULL,
+	ops_nvram_size, ops_nvram_get, ops_nvram_set,
+	ops_state_size, ops_state_save, ops_state_load,
+};

@@ -1,15 +1,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "sc88.h"
+#include "state_chunks.h"
 
-/* The machine at a frame boundary as a byte stream: a header naming the model and the ROM set, then
-   tagged chunks, every field written little-endian at a fixed width, so a state does not depend on the
-   host's layout, endianness or build.  Unknown chunks are skipped, missing ones refused. */
-
-#define STATE_MAGIC "SCEMUST1"
-#define STATE_HEADER_SIZE 36
-
-#define TAG(a, b, c, d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
+#define TAG STATE_TAG
 
 enum
 {
@@ -24,81 +18,9 @@ static const uint32_t CHUNK_TAG[CHUNK_COUNT] =
 	TAG('L', 'C', 'D', ' '), TAG('S', 'U', 'B', ' '), TAG('M', 'I', 'D', 'I')
 };
 
-/* ---------------------------------------------------------------- the stream */
-
-typedef struct writer
-{
-	uint8_t *p;
-	size_t size;
-} writer_t;
-
-static void put8(writer_t *w, uint8_t v)
-{
-	if (w->p)
-		w->p[w->size] = v;
-	w->size++;
-}
-
-static void put16(writer_t *w, uint16_t v) { put8(w, (uint8_t)v); put8(w, (uint8_t)(v >> 8)); }
-static void put32(writer_t *w, uint32_t v) { put16(w, (uint16_t)v); put16(w, (uint16_t)(v >> 16)); }
-static void put64(writer_t *w, uint64_t v) { put32(w, (uint32_t)v); put32(w, (uint32_t)(v >> 32)); }
-static void put_i32(writer_t *w, int32_t v) { put32(w, (uint32_t)v); }
-static void put_bool(writer_t *w, bool v) { put8(w, v ? 1 : 0); }
-
-static void put_bytes(writer_t *w, const void *data, size_t n)
-{
-	if (w->p)
-		memcpy(w->p + w->size, data, n);
-	w->size += n;
-}
-
-static void put_u16s(writer_t *w, const uint16_t *v, size_t n) { for (size_t i = 0; i < n; i++) put16(w, v[i]); }
-static void put_u32s(writer_t *w, const uint32_t *v, size_t n) { for (size_t i = 0; i < n; i++) put32(w, v[i]); }
-static void put_i32s(writer_t *w, const int32_t *v, size_t n) { for (size_t i = 0; i < n; i++) put_i32(w, v[i]); }
-
-typedef struct reader
-{
-	const uint8_t *p;
-	size_t size, at;
-	bool ok;
-} reader_t;
-
-static uint8_t get8(reader_t *r)
-{
-	if (r->at >= r->size)
-	{
-		r->ok = false;
-		return 0;
-	}
-	return r->p[r->at++];
-}
-
-static uint16_t get16(reader_t *r) { uint16_t lo = get8(r); return (uint16_t)(lo | (get8(r) << 8)); }
-static uint32_t get32(reader_t *r) { uint32_t lo = get16(r); return lo | ((uint32_t)get16(r) << 16); }
-static uint64_t get64(reader_t *r) { uint64_t lo = get32(r); return lo | ((uint64_t)get32(r) << 32); }
-static int32_t get_i32(reader_t *r) { return (int32_t)get32(r); }
-static bool get_bool(reader_t *r) { return get8(r) != 0; }
-
-static void get_bytes(reader_t *r, void *data, size_t n)
-{
-	if (r->at + n > r->size)
-	{
-		r->ok = false;
-		memset(data, 0, n);
-		r->at = r->size;
-		return;
-	}
-	memcpy(data, r->p + r->at, n);
-	r->at += n;
-}
-
-static void get_u16s(reader_t *r, uint16_t *v, size_t n) { for (size_t i = 0; i < n; i++) v[i] = get16(r); }
-static void get_u32s(reader_t *r, uint32_t *v, size_t n) { for (size_t i = 0; i < n; i++) v[i] = get32(r); }
-static void get_i32s(reader_t *r, int32_t *v, size_t n) { for (size_t i = 0; i < n; i++) v[i] = get_i32(r); }
-
 /* ---------------------------------------------------------------- the chunks */
 
-static void put_board(writer_t *w, const sc88_t *b)
+static void put_board(state_writer_t *w, const sc88_t *b)
 {
 	put32(w, b->cpu_half_cycles);
 	put_bool(w, b->xp_int);
@@ -106,10 +28,10 @@ static void put_board(writer_t *w, const sc88_t *b)
 	put_bool(w, b->lsp_mute);
 	put32(w, (uint32_t)b->computer_switch);
 	put64(w, b->frame);
-	put32(w, b->midi_drops);
+	put32(w, b->midi.drops);
 }
 
-static void get_board(reader_t *r, sc88_t *b)
+static void get_board(state_reader_t *r, sc88_t *b)
 {
 	b->cpu_half_cycles = get32(r);
 	b->xp_int = get_bool(r);
@@ -117,10 +39,10 @@ static void get_board(reader_t *r, sc88_t *b)
 	b->lsp_mute = get_bool(r);
 	b->computer_switch = (scemu_computer_switch_t)get32(r);
 	b->frame = get64(r);
-	b->midi_drops = get32(r);
+	b->midi.drops = get32(r);
 }
 
-static void put_cpu(writer_t *w, const h8500_t *c)
+static void put_cpu(state_writer_t *w, const h8500_t *c)
 {
 	put16(w, c->pc);
 	put16(w, c->sr);
@@ -156,7 +78,7 @@ static void put_cpu(writer_t *w, const h8500_t *c)
 	put64(w, c->cycles);
 }
 
-static void get_cpu(reader_t *r, h8500_t *c)
+static void get_cpu(state_reader_t *r, h8500_t *c)
 {
 	c->pc = get16(r);
 	c->sr = get16(r);
@@ -196,7 +118,7 @@ static void get_cpu(reader_t *r, h8500_t *c)
 	c->jit_deadline = 0;
 }
 
-static void put_xp(writer_t *w, const xp_t *x)
+void state_put_xp(state_writer_t *w, const xp_t *x)
 {
 	put_u16s(w, x->regs, XP_REGS);
 	for (int n = 0; n < XP_VOICES; n++)
@@ -244,7 +166,7 @@ static void put_xp(writer_t *w, const xp_t *x)
 	put_i32s(w, x->port_a_out, XP_STROBES);
 }
 
-static void get_xp(reader_t *r, xp_t *x)
+void state_get_xp(state_reader_t *r, xp_t *x)
 {
 	get_u16s(r, x->regs, XP_REGS);
 	for (int n = 0; n < XP_VOICES; n++)
@@ -296,7 +218,7 @@ static void get_xp(reader_t *r, xp_t *x)
 	memset(x->live, 0, sizeof(x->live));
 }
 
-static void put_lsp(writer_t *w, const lsp_t *l)
+void state_put_lsp(state_writer_t *w, const lsp_t *l)
 {
 	put_u32s(w, l->program, LSP_PROGRAM_SIZE);
 	put_i32s(w, l->iram, LSP_IRAM_SIZE);
@@ -326,7 +248,7 @@ static void put_lsp(writer_t *w, const lsp_t *l)
 	put16(w, l->host_address);
 }
 
-static void get_lsp(reader_t *r, lsp_t *l)
+void state_get_lsp(state_reader_t *r, lsp_t *l)
 {
 	get_u32s(r, l->program, LSP_PROGRAM_SIZE);
 	memset(l->iram_window, 0, sizeof(l->iram_window));
@@ -359,7 +281,7 @@ static void get_lsp(reader_t *r, lsp_t *l)
 	l->dirty = true;
 }
 
-static void put_gate_array(writer_t *w, const gate_array_t *g)
+static void put_gate_array(state_writer_t *w, const sc88_ga_t *g)
 {
 	put_bytes(w, g->regs, 0x100);
 	put8(w, g->int_pending);
@@ -371,7 +293,7 @@ static void put_gate_array(writer_t *w, const gate_array_t *g)
 	put32(w, g->lcd_busy_frames);
 }
 
-static void get_gate_array(reader_t *r, gate_array_t *g)
+static void get_gate_array(state_reader_t *r, sc88_ga_t *g)
 {
 	get_bytes(r, g->regs, 0x100);
 	g->int_pending = get8(r);
@@ -383,7 +305,7 @@ static void get_gate_array(reader_t *r, gate_array_t *g)
 	g->lcd_busy_frames = get32(r);
 }
 
-static void put_lcd(writer_t *w, const lcd_t *l)
+static void put_lcd(state_writer_t *w, const lcd_t *l)
 {
 	put_bytes(w, l->out.ddram, 80);
 	put_bytes(w, l->out.cgram, 64);
@@ -396,7 +318,7 @@ static void put_lcd(writer_t *w, const lcd_t *l)
 	put8(w, l->display_shift);
 }
 
-static void get_lcd(reader_t *r, lcd_t *l)
+static void get_lcd(state_reader_t *r, lcd_t *l)
 {
 	get_bytes(r, l->out.ddram, 80);
 	get_bytes(r, l->out.cgram, 64);
@@ -410,7 +332,7 @@ static void get_lcd(reader_t *r, lcd_t *l)
 	l->display_shift = get8(r);
 }
 
-static void put_sub(writer_t *w, const sub_hle_t *s)
+static void put_sub(state_writer_t *w, const sub_hle_t *s)
 {
 	put_bytes(w, s->dpram, sizeof(s->dpram));
 	put_bytes(w, s->ipcm, 4);
@@ -457,7 +379,7 @@ static void put_sub(writer_t *w, const sub_hle_t *s)
 	put_bytes(w, s->keys, 4);
 }
 
-static void get_sub(reader_t *r, sub_hle_t *s)
+static void get_sub(state_reader_t *r, sub_hle_t *s)
 {
 	get_bytes(r, s->dpram, sizeof(s->dpram));
 	get_bytes(r, s->ipcm, 4);
@@ -505,55 +427,47 @@ static void get_sub(reader_t *r, sub_hle_t *s)
 }
 
 /* the queued MIDI bytes not yet delivered, from the head */
-static void put_midi(writer_t *w, const sc88_t *b)
+void state_put_midi(state_writer_t *w, const midi_queue_t *q)
 {
-	for (int port = 0; port < SC88_MIDI_PORTS; port++)
+	for (int port = 0; port < q->ports; port++)
 	{
-		put32(w, b->midi_credit[port]);
-		put32(w, b->midi_count[port]);
-		for (uint32_t n = 0; n < b->midi_count[port]; n++)
+		put32(w, q->credit[port]);
+		put32(w, q->count[port]);
+		for (uint32_t n = 0; n < q->count[port]; n++)
 		{
-			const sc88_midi_event_t *e = &b->midi_queue[port][(b->midi_head[port] + n) % SC88_MIDI_QUEUE_SIZE];
+			const midi_queue_event_t *e = &q->events[port][(q->head[port] + n) % MIDI_QUEUE_SIZE];
 			put32(w, e->frame);
 			put8(w, e->byte);
 		}
 	}
 }
 
-static void get_midi(reader_t *r, sc88_t *b)
+void state_get_midi(state_reader_t *r, midi_queue_t *q)
 {
-	for (int port = 0; port < SC88_MIDI_PORTS; port++)
+	for (int port = 0; port < q->ports; port++)
 	{
-		b->midi_credit[port] = get32(r);
+		q->credit[port] = get32(r);
 		const uint32_t count = get32(r);
-		if (count > SC88_MIDI_QUEUE_SIZE)
+		if (count > MIDI_QUEUE_SIZE)
 		{
 			r->ok = false;
 			return;
 		}
-		b->midi_head[port] = 0;
-		b->midi_count[port] = count;
+		q->head[port] = 0;
+		q->count[port] = count;
 		for (uint32_t n = 0; n < count; n++)
 		{
-			b->midi_queue[port][n].frame = get32(r);
-			b->midi_queue[port][n].port = (uint8_t)port;
-			b->midi_queue[port][n].byte = get8(r);
+			q->events[port][n].frame = get32(r);
+			q->events[port][n].byte = get8(r);
 		}
 	}
 }
 
 /* ---------------------------------------------------------------- the whole */
 
-static void chunk(writer_t *w, int which, writer_t *body)
-{
-	put32(w, CHUNK_TAG[which]);
-	put32(w, (uint32_t)body->size);
-	put_bytes(w, body->p, body->size);
-}
-
 static size_t write_state(const sc88_t *b, uint8_t *out)
 {
-	writer_t w = { out, 0 };
+	state_writer_t w = { out, 0 };
 	put_bytes(&w, STATE_MAGIC, 8);
 	put32(&w, (uint32_t)b->model);
 	put32(&w, b->has_lsp ? 1 : 0);
@@ -574,14 +488,14 @@ static size_t write_state(const sc88_t *b, uint8_t *out)
 		case CHUNK_BOARD:      put_board(&w, b); break;
 		case CHUNK_SRAM:       put_bytes(&w, b->sram, SC88_SRAM_SIZE); break;
 		case CHUNK_CPU:        put_cpu(&w, &b->cpu); break;
-		case CHUNK_XP:         put_xp(&w, &b->xp); break;
+		case CHUNK_XP:         state_put_xp(&w, &b->xp); break;
 		case CHUNK_XP_ERAM:    put_i32s(&w, b->xp.eram, XP_ERAM_SIZE); break;
-		case CHUNK_LSP:        put_lsp(&w, &b->lsp); break;
+		case CHUNK_LSP:        state_put_lsp(&w, &b->lsp); break;
 		case CHUNK_LSP_ERAM:   put_i32s(&w, b->lsp.eram, LSP_ERAM_SIZE); break;
 		case CHUNK_GATE_ARRAY: put_gate_array(&w, &b->ga); break;
 		case CHUNK_LCD:        put_lcd(&w, &b->lcd); break;
 		case CHUNK_SUB:        put_sub(&w, &b->sub); break;
-		case CHUNK_MIDI:       put_midi(&w, b); break;
+		case CHUNK_MIDI:       state_put_midi(&w, &b->midi); break;
 		default: break;
 		}
 		if (out)
@@ -609,54 +523,26 @@ size_t sc88_state_save(const sc88_t *b, void *buffer, size_t size)
 	return write_state(b, buffer);
 }
 
-typedef struct header
-{
-	uint32_t model, flags, chunk_count;
-	uint64_t rom_id, frame;
-} header_t;
-
-static bool read_header(reader_t *r, header_t *h)
-{
-	char magic[8];
-	get_bytes(r, magic, 8);
-	h->model = get32(r);
-	h->flags = get32(r);
-	h->rom_id = get64(r);
-	h->frame = get64(r);
-	h->chunk_count = get32(r);
-	return r->ok && memcmp(magic, STATE_MAGIC, 8) == 0;
-}
-
 bool sc88_state_info(const void *buffer, size_t size, scemu_model_t *model, uint64_t *rom_id, uint64_t *frame)
 {
-	reader_t r = { buffer, size, 0, true };
-	header_t h;
-	if (!read_header(&r, &h) || h.model >= SCEMU_MODEL_COUNT)
-		return false;
-	if (model)
-		*model = (scemu_model_t)h.model;
-	if (rom_id)
-		*rom_id = h.rom_id;
-	if (frame)
-		*frame = h.frame;
-	return true;
+	return state_info(buffer, size, model, rom_id, frame);
 }
 
-static bool read_chunk(int which, reader_t *r, sc88_t *b)
+static bool read_chunk(int which, state_reader_t *r, sc88_t *b)
 {
 	switch (which)
 	{
 	case CHUNK_BOARD:      get_board(r, b); break;
 	case CHUNK_SRAM:       get_bytes(r, b->sram, SC88_SRAM_SIZE); break;
 	case CHUNK_CPU:        get_cpu(r, &b->cpu); break;
-	case CHUNK_XP:         get_xp(r, &b->xp); break;
+	case CHUNK_XP:         state_get_xp(r, &b->xp); break;
 	case CHUNK_XP_ERAM:    get_i32s(r, b->xp.eram, XP_ERAM_SIZE); break;
-	case CHUNK_LSP:        get_lsp(r, &b->lsp); break;
+	case CHUNK_LSP:        state_get_lsp(r, &b->lsp); break;
 	case CHUNK_LSP_ERAM:   get_i32s(r, b->lsp.eram, LSP_ERAM_SIZE); break;
 	case CHUNK_GATE_ARRAY: get_gate_array(r, &b->ga); break;
 	case CHUNK_LCD:        get_lcd(r, &b->lcd); break;
 	case CHUNK_SUB:        get_sub(r, &b->sub); break;
-	case CHUNK_MIDI:       get_midi(r, b); break;
+	case CHUNK_MIDI:       state_get_midi(r, &b->midi); break;
 	default: return false;
 	}
 	return r->ok && r->at == r->size;
@@ -664,9 +550,9 @@ static bool read_chunk(int which, reader_t *r, sc88_t *b)
 
 bool sc88_state_load(sc88_t *b, const void *buffer, size_t size)
 {
-	reader_t r = { buffer, size, 0, true };
-	header_t h;
-	if (!read_header(&r, &h) || h.model != (uint32_t)b->model || h.rom_id != b->rom_id
+	state_reader_t r = { buffer, size, 0, true };
+	state_header_t h;
+	if (!get_header(&r, &h) || h.model != (uint32_t)b->model || h.rom_id != b->rom_id
 	    || (h.flags & 1) != (b->has_lsp ? 1u : 0u))
 		return false;
 
@@ -698,7 +584,7 @@ bool sc88_state_load(sc88_t *b, const void *buffer, size_t size)
 				which = k;
 		if (which >= 0)
 		{
-			reader_t body = { r.p + r.at, len, 0, true };
+			state_reader_t body = { r.p + r.at, len, 0, true };
 			ok = read_chunk(which, &body, t);
 			seen |= 1u << which;
 		}

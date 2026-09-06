@@ -8,9 +8,9 @@
 #include "h8500.h"
 #include "xp.h"
 #include "lsp.h"
-#include "gate_array.h"
 #include "lcd.h"
 #include "sub_hle.h"
+#include "midi_queue.h"
 #include "jit.h"
 
 /* The SC-88 family board.  One frame of the XP's sample clock is the unit of
@@ -26,16 +26,28 @@
 
 #define SC88_SRAM_SIZE 0x10000
 #define SC88_MIDI_PORTS 2
-#define SC88_MIDI_QUEUE_SIZE 16384
-#define SC88_MIDI_DEFAULT_BAUD 31250
-#define SC88_MIDI_BYTE_UNITS (10 * SC88_SAMPLE_RATE)
 
-typedef struct sc88_midi_event
+/* uPD65622 gate array: interrupt aggregator on IRQ0, LED driver, LCD command/data FIFO. */
+typedef struct sc88_ga
 {
-	uint32_t frame;
-	uint8_t port;
-	uint8_t byte;
-} sc88_midi_event_t;
+	uint8_t regs[0x100];
+	uint8_t int_pending;
+	uint8_t int_mask;
+	uint16_t leds;
+	uint8_t lcd_fifo[13];
+	uint8_t lcd_fifo_count;
+	bool lcd_command_pending;
+	uint32_t lcd_busy_frames;
+	lcd_t *lcd;
+	void (*irq)(void *user, bool state);
+	void *user;
+} sc88_ga_t;
+
+void sc88_ga_init(sc88_ga_t *ga, lcd_t *lcd, void (*irq)(void *user, bool state), void *user);
+void sc88_ga_reset(sc88_ga_t *ga);
+uint8_t sc88_ga_read(sc88_ga_t *ga, uint32_t offset);
+void sc88_ga_write(sc88_ga_t *ga, uint32_t offset, uint8_t data);
+void sc88_ga_frame(sc88_ga_t *ga);
 
 typedef struct sc88_map
 {
@@ -67,7 +79,7 @@ typedef struct sc88
 	bool has_lsp;
 	bool has_panel;
 	int dac_right;
-	gate_array_t ga;
+	sc88_ga_t ga;
 	lcd_t lcd;
 	sub_hle_t sub;
 
@@ -77,11 +89,7 @@ typedef struct sc88
 	scemu_computer_switch_t computer_switch;
 
 	uint64_t frame;
-	sc88_midi_event_t midi_queue[SC88_MIDI_PORTS][SC88_MIDI_QUEUE_SIZE];
-	uint32_t midi_head[SC88_MIDI_PORTS], midi_count[SC88_MIDI_PORTS];
-	uint32_t midi_credit[SC88_MIDI_PORTS];
-	uint32_t midi_baud;
-	uint32_t midi_drops;
+	midi_queue_t midi;
 	scemu_midi_out_fn midi_out;
 	void *midi_out_user;
 } sc88_t;
