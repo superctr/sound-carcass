@@ -1,8 +1,8 @@
 # scgui
 
-The Sound Canvas on the desktop: the machine's front panel in a window (the SC-88's, the SC-88VL's or
-the SC-88Pro's, following the System choice; the VE-GS Pro, which has no panel, wears the Pro's), playing
-Standard MIDI Files from a playlist, with the panel's buttons under the mouse.
+The Sound Canvas on the desktop: the machine's front panel in a window (the SC-88's, the SC-88VL's, the
+SC-88Pro's or the SC-8850's, following the System choice; the VE-GS Pro, which has no panel, wears the
+Pro's), playing Standard MIDI Files from a playlist, with the panel's buttons under the mouse.
 
     scgui [options] [file.mid ...]
 
@@ -12,9 +12,9 @@ machine.  Files on the command line become the playlist and the first one plays.
 
 | option | |
 |---|---|
-| `--model sc88pro \| sc88 \| sc88vl` | which machine; the default is the SC-88Pro when its ROMs are found |
+| `--model sc88pro \| sc88 \| sc88vl \| sc8850` | which machine; the default is the SC-88Pro when its ROMs are found |
 | `--rom PATH` | a zip or a directory holding the ROM images, whatever they are named |
-| `--size 4 \| 8` | the window size, named by the display's dot pitch in pixels: 4 is 1399 × 440, 8 twice that.  On a HiDPI screen the 8 is used for a 4 automatically |
+| `--size 4 \| 8` | the window size: 4 is the small panel (1399 × 440 for the 88 family, 1696 × 692 for the SC-8850), 8 twice that.  The bake is named by the glass's dot pitch, which is 4 and 8 on the 88 family and 3 and 6 on the SC-8850, whose display has more and smaller dots.  On a HiDPI screen the large bake is used for the small size automatically |
 | `--map sc55 \| sc88 \| sc88pro` | play every part from that instrument map, as in scplay |
 | `--midi-rate BAUD` | the speed of the MIDI input, as in scplay |
 | `--keep-settings` | keep the machine's settings memory across sessions |
@@ -35,6 +35,10 @@ machine.  Files on the command line become the playlist and the first one plays.
   is how the unit steps a value quickly.
 - **The volume knob** turns with the scroll wheel over it; it is the program's output gain, the
   machine itself has no volume control in software.  The knob's push switch (PREVIEW) is a button.
+- **The SC-8850's value dial** turns two ways: drag its outer ring with the left button and it follows
+  the pointer round, a thirty-sixth of a turn to a detent, so the mark on the panel stays under the
+  hand; or roll the scroll wheel over it, one detent to a notch.  Its centre is the push switch
+  (VALUE), a button like any other, and it takes the wheel as well.
 - **The power switch** switches the emulated unit off and on; on the SC-88VL the STANDBY lamp beside
   it is lit while the unit is off.  Switching on boots the firmware for
   real (not from the cache), with any queued keys held, so the power-on combinations work.
@@ -108,11 +112,22 @@ under JACK, where the server sets it; a smaller buffer means less delay from a k
 more chance of a dropout on a busy host.  A device that will not open at 32 kHz runs at its own rate,
 and the output is resampled on the way (a 32-tap windowed sinc).
 
-**System**: which machine this is -- SC-88, SC-88VL or SC-88Pro.  A model whose ROM images were not
-found is greyed out.  Choosing another one switches at once: the song is unloaded, the machine is
+**System**: which machine this is -- SC-88, SC-88VL, SC-88Pro or SC-8850.  A model whose ROM images
+were not found is greyed out.  Choosing another one switches at once: the song is unloaded, the machine is
 replaced and the new one comes up from its own boot cache, so it is instant from the second time on;
 the sound card and the MIDI ties stay as they are.  Below the choice is what is running: the model,
 its control ROM version, and the file its images came from.
+
+The **computer switch** is the row under the systems: the switch on the back of the unit, in the
+positions that system has -- MIDI, PC-1, PC-2 and Mac on the 88 family, MIDI, PC-1, PC-2 and USB on
+the SC-8850.  It belongs to the system, not to the program, so each one keeps its own; the row always
+shows the running one.  The firmware reads the ladder once when it comes up, so changing it replaces
+the machine and boots it again, the way changing the model does (from that position's own boot cache).
+MIDI is the default everywhere and the position to leave it in: on the SC-8850 the other three take
+the parts off the MIDI IN jacks and wait for a serial or a USB host, neither of which is answered here
+yet, so the machine plays nothing, and on the 88 family the sub-CPU is emulated at a high level and
+feeds the firmware from the jacks whatever the switch says, so only the boot differs.  This is not the
+MIDI speed: a computer port also runs at 38400 baud, which is `--midi-rate`.
 
 The **wide output rail** is a box on the same tab.  The unit's DSP saturates the words it hands the
 converters at 24 bits, and a busy song runs into that ceiling and clips there, as it does on the real
@@ -127,7 +142,9 @@ scale at the sound card, so turn the knob down for a song that used to clip.
 `$XDG_CONFIG_HOME/scemu/scgui.conf`, or `~/.config/scemu/scgui.conf`, keeps what the windows set: the
 machine and where its ROMs are, the window size, the output device and its buffer, the volume knob
 and the rail, the five MIDI ties by the device's name, the message before each song, the instrument
-map, the MIDI speed, whether the settings memory is kept, and the tail.  It is read at start, written
+map, the MIDI speed, the computer switch of each system (`computer_sc88`, `computer_sc88vl`,
+`computer_sc88pro` and `computer_sc8850`, each `midi`, `pc1`, `pc2` or `mac`, with `usb` taken as the
+SC-8850's word for the last), whether the settings memory is kept, and the tail.  It is read at start, written
 a moment after a setting changes, and written again on exit.  An option on the command line overrides
 the file for that run and does not change it.  The file is `key = value` text with `#` comments; a
 line it cannot make sense of is complained about on stderr and every other line is still taken.

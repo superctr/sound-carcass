@@ -1,6 +1,8 @@
-/* scplay: the text-mode front panel.  The glass is drawn from the LCD
- * controller's memory: the text fields as text, the sixteen level bars from the
- * CGRAM patterns the firmware fills, two segments to a character cell.
+/* scplay: the text-mode front panel.  The glass is drawn from the display
+ * controller's memory: on the character models the text fields as text and the
+ * sixteen level bars from the CGRAM patterns the firmware fills, two segments
+ * to a character cell; on the SC-8850 the whole 160 x 64 bitmap, two dot rows
+ * to a character cell.
  *
  * Copyright (c) 2026 ian karlsson
  * SPDX-License-Identifier: BSD-3-Clause
@@ -14,12 +16,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 #include "sjis.h"
 #include "tui.h"
 
-#define FRAME_MAX 16384
+#define FRAME_MAX 65536
 #define IN_MAX 64
 
 #define LIT   "\033[38;5;214m"
@@ -250,6 +253,17 @@ static void put(build_t *b, const char *fmt, ...)
 	}
 }
 
+/* a cell drawn as it stands: the bitmap glass writes 5120 of them a frame */
+static void put_raw(build_t *b, const char *s, size_t len)
+{
+	if ((size_t)(b->end - b->p) > len)
+	{
+		memcpy(b->p, s, len);
+		b->p += len;
+		*b->p = 0;
+	}
+}
+
 static void pad(build_t *b, int columns)
 {
 	while (columns-- > 0)
@@ -258,10 +272,16 @@ static void pad(build_t *b, int columns)
 
 #define BOX_W 66
 
-static void rule(build_t *b, const char *left, const char *right)
+/* the bitmap glass, in half-block cells */
+#define GLCD_COLS 160
+#define GLCD_ROWS 64
+#define GLCD_STRIDE 27
+#define GLCD_DOTS_PER_BYTE 6
+
+static void rule(build_t *b, const char *left, const char *right, int width)
 {
 	put(b, " %s%s", DIM, left);
-	for (int n = 0; n < BOX_W; n++)
+	for (int n = 0; n < width; n++)
 		put(b, "─");
 	put(b, "%s%s\n", right, OFF);
 }
@@ -276,16 +296,27 @@ static void time_text(char *out, size_t size, double seconds)
 
 static const char *LED_NAME[SCEMU_LED_COUNT] =
 {
-	"ALL", "MUTE", "SC-55", "SC-88", "E1", "E2", "E3", "INST", "EFX"
+	"ALL", "MUTE", "SC-55", "SC-88", "E1", "E2", "E3", "INST", "EFX",
+	"SOLO", "EDIT", "DRUM", "EFFECTS"
 };
 
-static void build_frame(tui_t *t, const tui_state_t *st)
+static const uint8_t LED_ROW_LCD[] =
 {
-	build_t b = { t->frame, t->frame + sizeof(t->frame) };
+	SCEMU_LED_ALL, SCEMU_LED_MUTE, SCEMU_LED_SC55_MAP, SCEMU_LED_SC88_MAP,
+	SCEMU_LED_EDIT1, SCEMU_LED_EDIT2, SCEMU_LED_EDIT3, SCEMU_LED_USER_INST, SCEMU_LED_USER_INST_RED
+};
+
+static const uint8_t LED_ROW_GLCD[] =
+{
+	SCEMU_LED_MUTE, SCEMU_LED_SOLO, SCEMU_LED_EDIT, SCEMU_LED_DRUM, SCEMU_LED_EFFECTS
+};
+
+/* the panel of the models whose glass is character cells */
+static void draw_lcd_panel(build_t *b, const tui_state_t *st)
+{
 	const scemu_lcd_t *lcd = st->lcd;
 	char part[32], inst[80], f[6][32];
 	uint16_t bar[16];
-	char elapsed[16], total[16];
 
 	field(part, sizeof(part), lcd, 0, 3);
 	field(inst, sizeof(inst), lcd, 3, 16);
@@ -298,18 +329,7 @@ static void build_frame(tui_t *t, const tui_state_t *st)
 	read_bars(lcd, bar);
 	bool lr = read_lr(lcd);
 
-	time_text(elapsed, sizeof(elapsed), st->elapsed);
-	time_text(total, sizeof(total), st->total);
-
-	put(&b, "\n");
-	put(&b, " %sscplay%s  %s%s%s  %s%.*s%s", PLAIN, OFF, LIT, st->model, OFF, PLAIN,
-	    (int)sjis_fit(st->song, 40), st->song, OFF);
-	if (st->title && st->title[0])
-		put(&b, "  %s%.*s%s", DIM, (int)sjis_fit(st->title, 32), st->title, OFF);
-	put(&b, "\n");
-	put(&b, "\n");
-
-	rule(&b, "┌", "┐");
+	rule(b, "┌", "┐", BOX_W);
 
 	static const char *LEFT_LABEL[4] = { "PART", "LEVEL", "REVERB", "KEY SHIFT" };
 	static const char *RIGHT_LABEL[4] = { "INSTRUMENT", "PAN", "CHORUS", "MIDI CH" };
@@ -321,22 +341,22 @@ static void build_frame(tui_t *t, const tui_state_t *st)
 	{
 		int pair = row / 2;
 		bool label = (row % 2) == 0;
-		put(&b, " %s│%s", DIM, OFF);
+		put(b, " %s│%s", DIM, OFF);
 
 		if (label)
 		{
-			put(&b, "%s %-*s%-*s%s", LABEL, LEFT_W - 1, LEFT_LABEL[pair], RIGHT_W, RIGHT_LABEL[pair], OFF);
-			put(&b, "%s%s%s", LIT, row == 0 ? (lr ? " L " : "   ") : "   ", OFF);
+			put(b, "%s %-*s%-*s%s", LABEL, LEFT_W - 1, LEFT_LABEL[pair], RIGHT_W, RIGHT_LABEL[pair], OFF);
+			put(b, "%s%s%s", LIT, row == 0 ? (lr ? " L " : "   ") : "   ", OFF);
 		}
 		else
 		{
 			int lw = LEFT_W - 1 - sjis_columns(left_value[pair]);
 			int rw = RIGHT_W - sjis_columns(right_value[pair]);
-			put(&b, "%s %s%s", LIT, left_value[pair], OFF);
-			pad(&b, lw > 0 ? lw : 0);
-			put(&b, "%s%s%s", LIT, right_value[pair], OFF);
-			pad(&b, rw > 0 ? rw : 0);
-			put(&b, "%s%s%s", LIT, row == 7 && lr ? " R " : "   ", OFF);
+			put(b, "%s %s%s", LIT, left_value[pair], OFF);
+			pad(b, lw > 0 ? lw : 0);
+			put(b, "%s%s%s", LIT, right_value[pair], OFF);
+			pad(b, rw > 0 ? rw : 0);
+			put(b, "%s%s%s", LIT, row == 7 && lr ? " R " : "   ", OFF);
 		}
 
 		for (int n = 0; n < 16; n++)
@@ -345,21 +365,86 @@ static void build_frame(tui_t *t, const tui_state_t *st)
 			int bottom = (bar[n] >> (row * 2 + 1)) & 1;
 			const char *cell = top && bottom ? "█" : top ? "▀" : bottom ? "▄" : NULL;
 			if (cell)
-				put(&b, "%s%s%s", LIT, cell, OFF);
+				put(b, "%s%s%s", LIT, cell, OFF);
 			else
-				put(&b, "%s·%s", DIM, OFF);
+				put(b, "%s·%s", DIM, OFF);
 			if (n != 15)
-				put(&b, " ");
+				put(b, " ");
 		}
-		pad(&b, BOX_W - (LEFT_W + RIGHT_W + 3 + 31));
-		put(&b, "%s│%s\n", DIM, OFF);
+		pad(b, BOX_W - (LEFT_W + RIGHT_W + 3 + 31));
+		put(b, "%s│%s\n", DIM, OFF);
 	}
-	rule(&b, "└", "┘");
+	rule(b, "└", "┘", BOX_W);
+}
+
+/* the SC-8850's glass: one character cell to a column and two dot rows, cut on
+ * the right when the terminal is narrower than the display */
+static void draw_glcd_panel(build_t *b, const scemu_glcd_t *glcd, int columns)
+{
+	static const struct { const char *cell; size_t len; } HALF[4] =
+	{
+		{ " ", 1 }, { "▀", 3 }, { "▄", 3 }, { "█", 3 }
+	};
+	int cols = GLCD_COLS;
+	if (columns > 0 && columns - 3 < cols)
+		cols = columns - 3;
+	if (cols < 1)
+		return;
+
+	rule(b, "┌", "┐", cols);
+	for (int row = 0; row < GLCD_ROWS / 2; row++)
+	{
+		const uint8_t *top = glcd->bitmap + (size_t)(row * 2) * GLCD_STRIDE;
+		const uint8_t *bottom = top + GLCD_STRIDE;
+		put(b, " %s│%s%s", DIM, OFF, LIT);
+		for (int col = 0; col < cols; col++)
+		{
+			int bit = 0x80 >> (col % GLCD_DOTS_PER_BYTE), byte = col / GLCD_DOTS_PER_BYTE;
+			int k = glcd->display_on ? ((top[byte] & bit) ? 1 : 0) | ((bottom[byte] & bit) ? 2 : 0) : 0;
+			put_raw(b, HALF[k].cell, HALF[k].len);
+		}
+		put(b, "%s%s│%s\n", OFF, DIM, OFF);
+	}
+	rule(b, "└", "┘", cols);
+}
+
+/* the terminal's width, or 0 when it cannot be had */
+static int terminal_columns(void)
+{
+	struct winsize ws;
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
+		return ws.ws_col;
+	return 0;
+}
+
+static void build_frame(tui_t *t, const tui_state_t *st)
+{
+	build_t b = { t->frame, t->frame + sizeof(t->frame) };
+	char elapsed[16], total[16];
+
+	time_text(elapsed, sizeof(elapsed), st->elapsed);
+	time_text(total, sizeof(total), st->total);
+
+	put(&b, "\n");
+	put(&b, " %sscplay%s  %s%s%s  %s%.*s%s", PLAIN, OFF, LIT, st->model, OFF, PLAIN,
+	    (int)sjis_fit(st->song, 40), st->song, OFF);
+	if (st->title && st->title[0])
+		put(&b, "  %s%.*s%s", DIM, (int)sjis_fit(st->title, 32), st->title, OFF);
+	put(&b, "\n");
+	put(&b, "\n");
+
+	if (st->glcd)
+		draw_glcd_panel(&b, st->glcd, terminal_columns());
+	else if (st->lcd)
+		draw_lcd_panel(&b, st);
 
 	put(&b, "\n");
 	put(&b, " ");
-	for (int n = 0; n < SCEMU_LED_COUNT; n++)
+	const uint8_t *row = st->glcd ? LED_ROW_GLCD : LED_ROW_LCD;
+	int row_count = (int)(st->glcd ? sizeof(LED_ROW_GLCD) : sizeof(LED_ROW_LCD));
+	for (int k = 0; k < row_count; k++)
 	{
+		int n = row[k];
 		const char *name = LED_NAME[n];
 		if (n == SCEMU_LED_SC88_MAP && st->eq_label)
 			name = "EQ";
@@ -395,30 +480,44 @@ static void build_frame(tui_t *t, const tui_state_t *st)
 	put(&b, "\n");
 	put(&b, "\n");
 
+	static const char *KEYS_LCD[] =
+	{
+		"space  pause / resume        q, Esc  quit",
+		"← →    PART                  ↑ ↓     INSTRUMENT",
+		"- =    LEVEL                 [ ]     PAN",
+		"; '    REVERB                , .     CHORUS",
+		"k l    KEY SHIFT             n m     MIDI CH",
+		"a      ALL                   x       MUTE",
+		"5      SC-55 map             8       SC-88 map / EQ",
+		"u      USER INST / EFX       s       SELECT",
+		"v      PREVIEW (volume knob) ?       hide this list",
+		NULL
+	};
+	static const char *KEYS_GLCD[] =
+	{
+		"space  pause / resume        q, Esc  quit",
+		"← →    PART                  ↑ ↓     UP / DOWN",
+		"[ ]    VALUE dial            - =     DEC / INC",
+		"1 - 4  F1 to F4              m       INST MAP",
+		"e      EDIT / UTIL           d       DRUM",
+		"f      EFFECTS               s       SHIFT",
+		"o      SOLO                  x       MUTE",
+		"ret    ENTER                 bksp    EXIT",
+		"v      PREVIEW (volume knob) ?       hide this list",
+		NULL
+	};
 	if (st->show_keys)
 	{
-		static const char *KEYS[] =
+		const char *const *keys = st->glcd ? KEYS_GLCD : KEYS_LCD;
+		for (int n = 0; keys[n]; n++)
 		{
-			"space  pause / resume        q, Esc  quit",
-			"← →    PART                  ↑ ↓     INSTRUMENT",
-			"- =    LEVEL                 [ ]     PAN",
-			"; '    REVERB                , .     CHORUS",
-			"k l    KEY SHIFT             n m     MIDI CH",
-			"a      ALL                   x       MUTE",
-			"5      SC-55 map             8       SC-88 map / EQ",
-			"u      USER INST / EFX       s       SELECT",
-			"v      PREVIEW (volume knob) ?       hide this list",
-			NULL
-		};
-		for (int n = 0; KEYS[n]; n++)
-		{
-			put(&b, " %s%s%s\n", DIM, KEYS[n], OFF);
+			put(&b, " %s%s%s\n", DIM, keys[n], OFF);
 		}
 	}
+	else if (st->glcd)
+		put(&b, " %sspace pause  q quit  ←→ part  ↑↓ move  [ ] value  ? all keys%s\n", DIM, OFF);
 	else
-	{
 		put(&b, " %sspace pause  q quit  ←→ part  ↑↓ instrument  ? all keys%s\n", DIM, OFF);
-	}
 
 	t->len = (size_t)(b.p - t->frame);
 }

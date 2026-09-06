@@ -122,8 +122,9 @@ static void save_state(const scemu_t *m, const char *path)
 }
 
 void session_init(session_t *s, scemu_t *m, const char *model_name, uint64_t rom_hash,
-                  bool no_cache, bool keep_settings)
+                  scemu_computer_switch_t computer, bool no_cache, bool keep_settings)
 {
+	static const char *const computer_tag[] = { "", "-pc1", "-pc2", "-mac" };
 	char root[1024];
 	memset(s, 0, sizeof(*s));
 	s->m = m;
@@ -138,8 +139,8 @@ void session_init(session_t *s, scemu_t *m, const char *model_name, uint64_t rom
 	}
 	snprintf(s->factory_file, sizeof(s->factory_file), "%s/%s-factory.nvram", root, model_name);
 	snprintf(s->settings_file, sizeof(s->settings_file), "%s/%s.nvram", root, model_name);
-	snprintf(s->state_file, sizeof(s->state_file), "%s/boot-%s-%016llx.state", root, model_name,
-	         (unsigned long long)rom_hash);
+	snprintf(s->state_file, sizeof(s->state_file), "%s/boot-%s%s-%016llx.state", root, model_name,
+	         computer_tag[computer], (unsigned long long)rom_hash);
 	if (keep_settings && read_file_exact(s->settings_file, s->nvram, s->nvram_size)
 	    && scemu_nvram_set(m, s->nvram, s->nvram_size))
 		s->have_seed = s->seed_is_user = true;

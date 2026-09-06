@@ -131,6 +131,43 @@ static void panel_advance(panel_t *p, int frames)
 		}
 }
 
+/* the SC-8850's own keys; the models with a character glass take the map below */
+static int button_for_key_8850(int key)
+{
+	switch (key)
+	{
+	case TUI_KEY_LEFT:  return SCEMU_BUTTON_PART_LEFT;
+	case TUI_KEY_RIGHT: return SCEMU_BUTTON_PART_RIGHT;
+	case TUI_KEY_DOWN:  return SCEMU_BUTTON_DOWN;
+	case TUI_KEY_UP:    return SCEMU_BUTTON_UP;
+	case '-':           return SCEMU_BUTTON_DEC;
+	case '=':           return SCEMU_BUTTON_INC;
+	case '1':           return SCEMU_BUTTON_F1;
+	case '2':           return SCEMU_BUTTON_F2;
+	case '3':           return SCEMU_BUTTON_F3;
+	case '4':           return SCEMU_BUTTON_F4;
+	case 'm':           return SCEMU_BUTTON_MAP;
+	case 'e':           return SCEMU_BUTTON_EDIT;
+	case 'd':           return SCEMU_BUTTON_DRUM;
+	case 'f':           return SCEMU_BUTTON_EFFECTS;
+	case 's':           return SCEMU_BUTTON_SHIFT;
+	case 'o':           return SCEMU_BUTTON_SOLO;
+	case 'x':           return SCEMU_BUTTON_MUTE;
+	case '\r':
+	case '\n':          return SCEMU_BUTTON_ENTER;
+	case '\b':
+	case 0x7f:          return SCEMU_BUTTON_EXIT;
+	case 'v':           return SCEMU_BUTTON_PREVIEW;
+	default:            return -1;
+	}
+}
+
+/* one detent of the SC-8850's value dial, or 0 */
+static int dial_for_key(int key)
+{
+	return key == ']' ? 1 : key == '[' ? -1 : 0;
+}
+
 static int button_for_key(int key)
 {
 	switch (key)
@@ -180,14 +217,29 @@ typedef struct options
 	bool hold;
 	scemu_map_t map;
 	uint32_t midi_rate;
+	scemu_computer_switch_t computer;
 } options_t;
+
+/* the rear switch, by the word the unit's own panel prints on it */
+static int computer_switch_for(const char *name, scemu_computer_switch_t *out)
+{
+	static const char *const words[] = { "midi", "pc1", "pc2", "mac", "usb", NULL };
+	for (int n = 0; words[n]; n++)
+		if (!strcmp(words[n], name))
+		{
+			*out = (scemu_computer_switch_t)(n > SCEMU_COMPUTER_MAC ? SCEMU_COMPUTER_MAC : n);
+			return 1;
+		}
+	return 0;
+}
 
 static void usage(FILE *fp)
 {
 	fprintf(fp,
 	        "usage: scplay [options] song.mid\n"
 	        "\n"
-	        "  --model sc88|sc88pro|sc88vl   machine to emulate (default sc88pro)\n"
+	        "  --model sc88|sc88pro|sc88vl|sc8850\n"
+	        "                                machine to emulate (default sc88pro)\n"
 	        "  --rom PATH                    a zip or a directory holding the ROM images (any names)\n"
 	        "  --wav FILE                    also write what is played, 16-bit stereo 32 kHz\n"
 	        "  --no-audio                    render as fast as the host allows, no sound card\n"
@@ -205,6 +257,8 @@ static void usage(FILE *fp)
 	        "                                the song selects (the SC-88 has no SC-88Pro map)\n"
 	        "  --midi-rate BAUD              speed of the MIDI input: 31250 (the cable, default),\n"
 	        "                                38400 (the computer port), 0 for no limit\n"
+	        "  --computer midi|pc1|pc2|mac   the rear COMPUTER switch (default midi); usb is the\n"
+	        "                                SC-8850's fourth position, the mac one elsewhere\n"
 	        "  --hold                        wait for a key when the song ends\n"
 	        "  --help\n");
 }
@@ -246,6 +300,14 @@ static int parse_options(int argc, char **argv, options_t *o)
 		}
 		else if (!strcmp(a, "--midi-rate") && n + 1 < argc)
 			o->midi_rate = (uint32_t)atoi(argv[++n]);
+		else if (!strcmp(a, "--computer") && n + 1 < argc)
+		{
+			if (!computer_switch_for(argv[++n], &o->computer))
+			{
+				fprintf(stderr, "scplay: --computer takes midi, pc1, pc2, mac or usb\n");
+				return -1;
+			}
+		}
 		else if (!strcmp(a, "--audio-device") && n + 1 < argc)
 			o->audio_device = argv[++n];
 		else if (!strcmp(a, "--audio-block") && n + 1 < argc)
@@ -372,6 +434,7 @@ int main(int argc, char **argv)
 		scplay_roms_free(&roms);
 		return 1;
 	}
+	scemu_set_computer_switch(m, opt.computer);
 	uint32_t rate = scemu_sample_rate(m);
 
 	smf_t smf;
@@ -392,6 +455,7 @@ int main(int argc, char **argv)
 	st.song = session_base_name(opt.midi);
 	st.title = smf.name;
 	st.lcd = scemu_lcd(m);
+	st.glcd = scemu_glcd(m);
 	st.has_efx_led = roms.model == SCEMU_MODEL_SC88PRO;
 	st.eq_label = roms.model != SCEMU_MODEL_SC88PRO;
 
@@ -402,7 +466,7 @@ int main(int argc, char **argv)
 	/* ------------------------------------------------------------ boot */
 
 	session_t session;
-	session_init(&session, m, roms.model_name, roms.hash, opt.no_cache, opt.keep_settings);
+	session_init(&session, m, roms.model_name, roms.hash, opt.computer, opt.no_cache, opt.keep_settings);
 
 	boot_progress_t progress = { tui, &st, m, rate, 0 };
 	double boot_start = now_seconds();
@@ -461,6 +525,14 @@ int main(int argc, char **argv)
 			}
 			else if (key == '?')
 				st.show_keys = !st.show_keys;
+			else if (st.glcd)
+			{
+				int steps = dial_for_key(key), b = button_for_key_8850(key);
+				if (steps)
+					scemu_dial(m, steps);
+				else if (b >= 0)
+					panel_press(&panel, (scemu_button_t)b);
+			}
 			else
 			{
 				int b = button_for_key(key);

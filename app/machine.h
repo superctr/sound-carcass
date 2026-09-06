@@ -17,6 +17,13 @@
 
 typedef struct machine machine_t;
 
+/* The systems the players keep a rear COMPUTER switch for, in the order of
+ * machine_options_t's computer[] (the settings file's rows). */
+#define MACHINE_SYSTEMS 4
+extern const scemu_model_t machine_systems[MACHINE_SYSTEMS];
+/* the row a model's switch lives in, or -1 for a model without one */
+int machine_system_index(scemu_model_t model);
+
 typedef struct machine_options
 {
 	const char *model;        /* NULL: the best ROM set found */
@@ -24,6 +31,7 @@ typedef struct machine_options
 	const char *exe_dir;
 	scemu_map_t map;
 	uint32_t midi_rate;
+	scemu_computer_switch_t computer[MACHINE_SYSTEMS];  /* the rear switch of each system */
 	double tail;              /* seconds after a song's last event */
 	bool keep_settings, no_cache, no_audio;
 	int audio_device;         /* an index from audio_list (audio.h), or -1 for the default */
@@ -33,6 +41,8 @@ typedef struct machine_options
 typedef struct machine_state
 {
 	scemu_lcd_t lcd;
+	scemu_glcd_t glcd;
+	bool has_glcd;            /* the machine's glass is the bitmap, not the character cells */
 	uint32_t leds;
 	bool power, booting, playing, paused, finished;
 	double position, length;  /* seconds into the song, and its length with the tail */
@@ -74,6 +84,7 @@ void machine_play(machine_t *mc, const char *path);    /* a fresh machine, then 
 void machine_pause(machine_t *mc, bool paused);
 void machine_stop_song(machine_t *mc);
 void machine_button(machine_t *mc, scemu_button_t b, bool down);
+void machine_dial(machine_t *mc, int steps);           /* the value dial, positive clockwise */
 /* the same, ms of the machine's own time later (it stands still while the
  * machine boots), in the order posted; for the panel's key combinations */
 void machine_button_after(machine_t *mc, scemu_button_t b, bool down, unsigned ms);
@@ -84,6 +95,10 @@ void machine_set_dac_rail(machine_t *mc, int bits);     /* 24..29, kept across b
  * the new one boots from its cache.  On a failure the old one keeps running
  * and the snapshot's error says why. */
 void machine_set_model(machine_t *mc, scemu_model_t model);
+/* The rear COMPUTER switch of the running system.  The firmware reads the
+ * ladder once at boot, so this replaces the machine the way a model change
+ * does; the position is remembered for that system. */
+void machine_set_computer_switch(machine_t *mc, scemu_computer_switch_t sw);
 /* Reopen the output on another device (audio.h's index, -1 the default)
  * with another buffer; 0 keeps the block. */
 void machine_set_audio(machine_t *mc, int device, unsigned block);

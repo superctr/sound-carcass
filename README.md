@@ -1,9 +1,10 @@
 # scemu aka SoundCarcass
 
-An emulator of the Roland Sound Canvas SC-88, SC-88VL and SC-88Pro as a C library, with a terminal
-player and a headless renderer.  It runs the machine's own firmware on an emulated board; the H8/510
-main CPU, the XP tone generator's DSP program and the LSP effect processor's program are all compiled
-to native code with [sljit](https://github.com/zherczeg/sljit).  An audio plugin is planned on top of
+An emulator of the Roland Sound Canvas SC-88, SC-88VL, SC-88Pro and SC-8850 as a C library, with a
+terminal player and a headless renderer.  It runs the machine's own firmware on an emulated board; the
+H8/510 main CPU (the SH-2 on the SC-8850), the XP tone generator's DSP program and the LSP effect
+processor's program are all compiled to native code with
+[sljit](https://github.com/zherczeg/sljit).  An audio plugin is planned on top of
 the library.
 
 Clean-room, BSD-3.  You need your own ROM images: see `docs/roms.md`.
@@ -37,15 +38,17 @@ battery-backed settings memory, can be saved and restored.
 
 ## Tools
 
-`scemu-cli <sc88|sc88vl|sc88pro> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--state boot.state] [--rail BITS]
+`scemu-cli <sc88|sc88vl|sc88pro|sc8850> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--state boot.state] [--rail BITS]
 ...` boots the machine (or loads a saved state, saving one after the boot when the file is not there) and
 renders a song to a WAV file; `--rail 29` widens the DSP's output rail for the busy songs that clip on the
 unit's 24 bits.
 
 `scplay song.mid` plays a Standard MIDI File to the speakers with the front panel drawn in the terminal:
 the LCD's text fields, the sixteen level bars animating from the CGRAM patterns the firmware writes, the
-LEDs and a clock, with the panel buttons on the keyboard.  It finds its ROM images by itself — recognised by
-content, in any zip or directory beside the program or in `~/.mame/roms` (`docs/roms.md`) — boots the firmware once and
+LEDs and a clock, with the panel buttons on the keyboard (on the SC-8850, whose panel is one 160 × 64
+bitmap, that display drawn dot for dot in half-block characters, with the value dial on two keys).  It
+finds its ROM images by itself — recognised by content, in any zip or directory beside the program or
+in `~/.mame/roms` (`docs/roms.md`) — boots the firmware once and
 caches the booted machine, so later runs start instantly from factory settings (`--keep-settings` keeps
 the machine's settings memory across sessions instead).  `--no-audio --wav out.wav` renders a file
 about ten times faster than real time instead, and `--map sc55` (or `sc88`, `sc88pro`) plays every part
@@ -54,16 +57,19 @@ computer port's speed instead of the cable's.  A dual-port file (tracks with por
 32-part songs written for a Pro on both MIDI INs) plays on both blocks.  See [docs/scplay.md](docs/scplay.md).
 
 `scgui` is the same player as a desktop window: the front panel drawn from `gui/`'s artwork, its
-buttons under the mouse, the volume knob under the wheel, a playlist in a second window.  It needs
-GTK 4 besides zlib.  See [docs/scgui.md](docs/scgui.md).  Both players play through PortAudio and
-`scgui` takes MIDI through PortMidi, built from the submodules (`git submodule update --init`).
+buttons under the mouse, the volume knob and the SC-8850's value dial under the wheel, a playlist in a
+second window.  It needs GTK 4 besides zlib.  See [docs/scgui.md](docs/scgui.md).  Both players play
+through PortAudio and `scgui` takes MIDI through PortMidi, built from the submodules
+(`git submodule update --init`).
 Without zlib the library and `scemu-cli` still build.
 
 ## Status
 
 Playable.  The SC-88 and the SC-88Pro boot their real firmware through the display sequence, the
 front panel and its LEDs work, MIDI files render and play on both, and the SC-88VL boots and plays
-with the SC-88's wave ROMs.  What is emulated:
+with the SC-88's wave ROMs.  The SC-8850 boots its own firmware on the SH-2, draws its graphic
+display, answers its panel and its value dial and plays, on the interpreter for now.  What is
+emulated:
 
 | part | how | checked against |
 |---|---|---|

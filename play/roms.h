@@ -15,7 +15,7 @@ typedef struct scplay_roms
 	scemu_model_t model;
 	const char *model_name;
 	scemu_roms_t roms;
-	void *owned[1 + SCEMU_MAX_WAVE_ROMS];
+	void *owned[3 + SCEMU_MAX_WAVE_ROMS];
 	int owned_count;
 	uint64_t hash;           /* the chosen images' identity, stable across runs */
 	char version[16];        /* the control ROM version taken */

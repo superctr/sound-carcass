@@ -35,15 +35,17 @@ typedef struct key
 	const char *group;
 } config_key_t;
 
-static const char *const model_words[] = { "", "sc88pro", "sc88", "sc88vl", NULL };
+static const char *const model_words[] = { "", "sc88pro", "sc88", "sc88vl", "sc8850", NULL };
 static const char *const reset_words[] = { "none", "gm", "gs", "gm2", "sc88-single", "sc88-double", NULL };
 static const char *const map_words[] = { "native", "sc55", "sc88", "sc88pro", NULL };
 static const int size_numbers[] = { 4, 8, -1 };
 static const int rate_numbers[] = { 0, 31250, 38400, -1 };
 static const int rail_numbers[] = { 24, 29, -1 };
+static const char *const computer_words[] = { "midi", "pc1", "pc2", "mac", "usb", NULL };
 
 static const char group_machine[] = "the machine: which module, where its ROMs are, and what it remembers";
-static const char group_window[] = "the window: the glass's dot pitch in pixels";
+static const char group_window[] = "the window: 4 the small panel, 8 twice as large";
+static const char group_computer[] = "the rear COMPUTER switch of each system: midi, pc1, pc2, mac (usb on the SC-8850)";
 static const char group_audio[] = "audio: the output device, its buffer, the knob and the DSP rail";
 static const char group_midi[] = "MIDI: the host ports, and the speed of the inputs";
 static const char group_song[] = "each song: the reset that precedes it and the tail that follows it";
@@ -51,23 +53,27 @@ static const char group_song[] = "each song: the reset that precedes it and the 
 #define FIELD(f) (unsigned short)offsetof(scgui_config_t, f), (unsigned short)sizeof(((scgui_config_t *)0)->f)
 
 static const config_key_t keys[] = {
-	{ "model",         SLOT_TEXT, FIELD(model),         0, 0,    model_words, NULL,         group_machine },
-	{ "rom",           SLOT_TEXT, FIELD(rom),           0, 0,    NULL,        NULL,         group_machine },
-	{ "map",           SLOT_TEXT, FIELD(map),           0, 0,    map_words,   NULL,         group_machine },
-	{ "keep_settings", SLOT_BOOL, FIELD(keep_settings), 0, 0,    NULL,        NULL,         group_machine },
-	{ "size",          SLOT_INT,  FIELD(size),          0, 0,    NULL,        size_numbers, group_window },
-	{ "audio_device",  SLOT_TEXT, FIELD(audio_device),  0, 0,    NULL,        NULL,         group_audio },
-	{ "audio_block",   SLOT_INT,  FIELD(audio_block),   64, 1024, NULL,       NULL,         group_audio },
-	{ "volume",        SLOT_REAL, FIELD(volume),        0, 1,    NULL,        NULL,         group_audio },
-	{ "dac_rail",      SLOT_INT,  FIELD(dac_rail),      0, 0,    NULL,        rail_numbers, group_audio },
-	{ "midi_in_a",     SLOT_TEXT, FIELD(midi[0]),       0, 0,    NULL,        NULL,         group_midi },
-	{ "midi_in_b",     SLOT_TEXT, FIELD(midi[1]),       0, 0,    NULL,        NULL,         group_midi },
-	{ "midi_out",      SLOT_TEXT, FIELD(midi[2]),       0, 0,    NULL,        NULL,         group_midi },
-	{ "song_a",        SLOT_TEXT, FIELD(midi[3]),       0, 0,    NULL,        NULL,         group_midi },
-	{ "song_b",        SLOT_TEXT, FIELD(midi[4]),       0, 0,    NULL,        NULL,         group_midi },
-	{ "midi_rate",     SLOT_INT,  FIELD(midi_rate),     0, 0,    NULL,        rate_numbers, group_midi },
-	{ "reset",         SLOT_TEXT, FIELD(reset),         0, 0,    reset_words, NULL,         group_song },
-	{ "tail",          SLOT_REAL, FIELD(tail),          0, 300,  NULL,        NULL,         group_song },
+	{ "model",            SLOT_TEXT, FIELD(model),         0, 0,     model_words,    NULL,         group_machine },
+	{ "rom",              SLOT_TEXT, FIELD(rom),           0, 0,     NULL,           NULL,         group_machine },
+	{ "map",              SLOT_TEXT, FIELD(map),           0, 0,     map_words,      NULL,         group_machine },
+	{ "keep_settings",    SLOT_BOOL, FIELD(keep_settings), 0, 0,     NULL,           NULL,         group_machine },
+	{ "computer_sc88",    SLOT_TEXT, FIELD(computer[0]),   0, 0,     computer_words, NULL,         group_computer },
+	{ "computer_sc88vl",  SLOT_TEXT, FIELD(computer[1]),   0, 0,     computer_words, NULL,         group_computer },
+	{ "computer_sc88pro", SLOT_TEXT, FIELD(computer[2]),   0, 0,     computer_words, NULL,         group_computer },
+	{ "computer_sc8850",  SLOT_TEXT, FIELD(computer[3]),   0, 0,     computer_words, NULL,         group_computer },
+	{ "size",             SLOT_INT,  FIELD(size),          0, 0,     NULL,           size_numbers, group_window },
+	{ "audio_device",     SLOT_TEXT, FIELD(audio_device),  0, 0,     NULL,           NULL,         group_audio },
+	{ "audio_block",      SLOT_INT,  FIELD(audio_block),   64, 1024, NULL,           NULL,         group_audio },
+	{ "volume",           SLOT_REAL, FIELD(volume),        0, 1,     NULL,           NULL,         group_audio },
+	{ "dac_rail",         SLOT_INT,  FIELD(dac_rail),      0, 0,     NULL,           rail_numbers, group_audio },
+	{ "midi_in_a",        SLOT_TEXT, FIELD(midi[0]),       0, 0,     NULL,           NULL,         group_midi },
+	{ "midi_in_b",        SLOT_TEXT, FIELD(midi[1]),       0, 0,     NULL,           NULL,         group_midi },
+	{ "midi_out",         SLOT_TEXT, FIELD(midi[2]),       0, 0,     NULL,           NULL,         group_midi },
+	{ "song_a",           SLOT_TEXT, FIELD(midi[3]),       0, 0,     NULL,           NULL,         group_midi },
+	{ "song_b",           SLOT_TEXT, FIELD(midi[4]),       0, 0,     NULL,           NULL,         group_midi },
+	{ "midi_rate",        SLOT_INT,  FIELD(midi_rate),     0, 0,     NULL,           rate_numbers, group_midi },
+	{ "reset",            SLOT_TEXT, FIELD(reset),         0, 0,     reset_words,    NULL,         group_song },
+	{ "tail",             SLOT_REAL, FIELD(tail),          0, 300,   NULL,           NULL,         group_song },
 };
 
 #undef FIELD
@@ -79,6 +85,8 @@ void config_defaults(scgui_config_t *c)
 	c->audio_block = 256;
 	snprintf(c->reset, sizeof(c->reset), "gs");
 	snprintf(c->map, sizeof(c->map), "native");
+	for (int n = 0; n < CONFIG_SYSTEMS; n++)
+		snprintf(c->computer[n], sizeof(c->computer[n]), "midi");
 	c->midi_rate = 31250;
 	c->volume = 0.75f;
 	c->dac_rail = 24;

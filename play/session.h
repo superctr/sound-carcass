@@ -29,9 +29,11 @@ typedef bool (*session_progress_fn)(void *user, uint64_t frames);
 
 /* Sets up the cache files for this model and ROM set, and seeds the machine's
  * settings memory: the user's own when keep_settings and it exists, else the
- * firmware's factory image from an earlier run. */
+ * firmware's factory image from an earlier run.  The boot state is kept per
+ * position of the rear computer switch: the firmware's boot path depends on
+ * it. */
 void session_init(session_t *s, scemu_t *m, const char *model_name, uint64_t rom_hash,
-                  bool no_cache, bool keep_settings);
+                  scemu_computer_switch_t computer, bool no_cache, bool keep_settings);
 
 /* Runs the firmware until it releases the mute, restoring the cached boot
  * state instead when use_cache and there is one.  Returns true when the

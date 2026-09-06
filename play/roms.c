@@ -23,8 +23,10 @@
 
 enum
 {
-	SET_SC88_CTL, SET_SC88VL_CTL, SET_PRO_CTL,
-	SET_SC88_WAVE, SET_PRO_WAVE,
+	SET_SC88_CTL, SET_SC88VL_CTL, SET_PRO_CTL, SET_8850_CTL,
+	SET_SC88_WAVE, SET_PRO_WAVE, SET_8850_WAVE,
+	SET_8850_BOOT, SET_8850_TONE,
+	SET_NONE = -1
 };
 
 typedef struct rom_image
@@ -60,6 +62,12 @@ static const rom_image_t IMAGES[] =
 	{ 0x5f883ddd, 0x400000, SET_PRO_WAVE,   2, 0, NULL, 0, "wave ROM ic22" },
 	{ 0xecb4dd39, 0x400000, SET_PRO_WAVE,   3, 0, NULL, 0, "wave ROM ic23" },
 	{ 0x93541e95, 0x400000, SET_PRO_WAVE,   4, 0, NULL, 0, "wave ROM ic24" },
+
+	{ 0x3ef69f93, 0x100000, SET_8850_CTL,   0, 100, "1.00", 0, "program flash ic9" },
+	{ 0x4b2f36e3, 0x010000, SET_8850_BOOT,  0, 0, NULL, 0, "CPU ROM ic1" },
+	{ 0x390faa62, 0x200000, SET_8850_TONE,  0, 0, NULL, 0, "tone flash ic10" },
+	{ 0x2cfe5aa2, 0x1000000, SET_8850_WAVE, 0, 0, NULL, 0, "wave ROM ic53" },
+	{ 0x623015b6, 0x1000000, SET_8850_WAVE, 1, 0, NULL, 0, "wave ROM ic54" },
 };
 
 #define IMAGE_COUNT ((int)(sizeof(IMAGES) / sizeof(IMAGES[0])))
@@ -72,13 +80,16 @@ typedef struct model_def
 	int control_set;
 	int wave_set;
 	int wave_count;
+	int boot_set;         /* the SC-8850's CPU ROM and tone flash; SET_NONE elsewhere */
+	int tone_set;
 } model_def_t;
 
 static const model_def_t MODELS[] =
 {
-	{ "sc88pro", "SC-88Pro", SCEMU_MODEL_SC88PRO, SET_PRO_CTL,    SET_PRO_WAVE,  5 },
-	{ "sc88",    "SC-88",    SCEMU_MODEL_SC88,    SET_SC88_CTL,   SET_SC88_WAVE, 4 },
-	{ "sc88vl",  "SC-88VL",  SCEMU_MODEL_SC88VL,  SET_SC88VL_CTL, SET_SC88_WAVE, 4 },
+	{ "sc88pro", "SC-88Pro", SCEMU_MODEL_SC88PRO, SET_PRO_CTL,    SET_PRO_WAVE,  5, SET_NONE, SET_NONE },
+	{ "sc88",    "SC-88",    SCEMU_MODEL_SC88,    SET_SC88_CTL,   SET_SC88_WAVE, 4, SET_NONE, SET_NONE },
+	{ "sc88vl",  "SC-88VL",  SCEMU_MODEL_SC88VL,  SET_SC88VL_CTL, SET_SC88_WAVE, 4, SET_NONE, SET_NONE },
+	{ "sc8850",  "SC-8850",  SCEMU_MODEL_SC8850,  SET_8850_CTL,   SET_8850_WAVE, 2, SET_8850_BOOT, SET_8850_TONE },
 };
 
 #define MODEL_COUNT ((int)(sizeof(MODELS) / sizeof(MODELS[0])))
@@ -486,6 +497,10 @@ static int missing_count(const catalog_t *c, const model_def_t *d)
 	for (int n = 0; n < d->wave_count; n++)
 		if (find_wave(c, d->wave_set, n) < 0)
 			missing++;
+	if (d->boot_set != SET_NONE && find_control(c, d->boot_set) < 0)
+		missing++;
+	if (d->tone_set != SET_NONE && find_control(c, d->tone_set) < 0)
+		missing++;
 	return missing;
 }
 
@@ -550,6 +565,19 @@ static void missing_message(const catalog_t *c, const model_def_t *d, char *err,
 				sep = ", no ";
 			}
 	}
+	const int extra[2] = { d->boot_set, d->tone_set };
+	for (int e = 0; e < 2; e++)
+	{
+		if (extra[e] == SET_NONE || find_control(c, extra[e]) >= 0)
+			continue;
+		for (int i = 0; i < IMAGE_COUNT; i++)
+			if (IMAGES[i].set == extra[e])
+			{
+				append(err, err_size, &at, "%s%s (%s, crc %08x)", sep, IMAGES[i].role,
+				       size_text(IMAGES[i].size, text, sizeof(text)), IMAGES[i].crc);
+				sep = ", no ";
+			}
+	}
 }
 
 /* ---------------------------------------------------------------- loading */
@@ -606,6 +634,29 @@ static int load_model(scplay_roms_t *out, const model_def_t *d, const catalog_t 
 		out->roms.wave_rom[n] = wave;
 		out->roms.wave_rom_size[n] = IMAGES[index].size;
 		h = hash_image(h, &IMAGES[index]);
+	}
+	if (d->boot_set != SET_NONE)
+	{
+		const int boot = find_control(c, d->boot_set), tone = find_control(c, d->tone_set);
+		void *boot_data = image_read(c, boot);
+		void *tone_data = boot_data ? image_read(c, tone) : NULL;
+		if (!boot_data || !tone_data)
+		{
+			const int failed = boot_data ? tone : boot;
+			snprintf(err, err_size, "%s: cannot read the %s from %s", d->name,
+			         IMAGES[failed].role, c->found[failed].path);
+			free(boot_data);
+			scplay_roms_free(out);
+			return 0;
+		}
+		out->owned[out->owned_count++] = boot_data;
+		out->owned[out->owned_count++] = tone_data;
+		out->roms.boot_rom = boot_data;
+		out->roms.boot_rom_size = IMAGES[boot].size;
+		out->roms.tone_rom = tone_data;
+		out->roms.tone_rom_size = IMAGES[tone].size;
+		h = hash_image(h, &IMAGES[boot]);
+		h = hash_image(h, &IMAGES[tone]);
 	}
 	out->hash = h;
 	return 1;

@@ -25,7 +25,7 @@
 
 typedef enum command_kind
 {
-	CMD_PLAY, CMD_PAUSE, CMD_STOP, CMD_BUTTON, CMD_POWER, CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT,
+	CMD_PLAY, CMD_PAUSE, CMD_STOP, CMD_BUTTON, CMD_DIAL, CMD_POWER, CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT,
 	CMD_RESET, CMD_MAP, CMD_RAIL, CMD_MODEL, CMD_SEND, CMD_QUIT
 } command_kind_t;
 
@@ -69,6 +69,7 @@ struct machine
 	float gain;
 	int rail;
 	machine_reset_t reset;
+	scemu_computer_switch_t computer;   /* the rear switch the running machine came up with */
 	double clock_start;
 	uint64_t clock_frames;
 	bool started;
@@ -78,6 +79,25 @@ struct machine
 	int pending_count;
 	uint32_t pending_used;
 };
+
+const scemu_model_t machine_systems[MACHINE_SYSTEMS] = {
+	SCEMU_MODEL_SC88, SCEMU_MODEL_SC88VL, SCEMU_MODEL_SC88PRO, SCEMU_MODEL_SC8850
+};
+
+int machine_system_index(scemu_model_t model)
+{
+	for (int n = 0; n < MACHINE_SYSTEMS; n++)
+		if (machine_systems[n] == model)
+			return n;
+	return -1;
+}
+
+/* the position the options hold for a model, MIDI for one with no row */
+static scemu_computer_switch_t computer_of(const machine_t *mc, scemu_model_t model)
+{
+	int row = machine_system_index(model);
+	return row < 0 ? SCEMU_COMPUTER_MIDI : mc->opt.computer[row];
+}
 
 static double now_seconds(void)
 {
@@ -125,10 +145,25 @@ static void publish(machine_t *mc, bool booting)
 {
 	machine_state_t s;
 	memset(&s, 0, sizeof(s));
+	bool glass_changed = false;
 	if (mc->power)
 	{
 		const scemu_lcd_t *lcd = scemu_lcd(mc->m);
-		s.lcd = *lcd;
+		const scemu_glcd_t *glcd = scemu_glcd(mc->m);
+		if (lcd)
+			s.lcd = *lcd;
+		s.has_glcd = glcd != NULL;
+		/* the whole bitmap when the last snapshot had no glass of this kind:
+		 * a fresh machine, or one that has just been switched on */
+		if (glcd && (glcd->changed || !mc->state.has_glcd))
+		{
+			s.glcd = *glcd;
+			s.glcd.changed = false;
+			scemu_glcd_ack(mc->m);
+			glass_changed = true;
+		}
+		else if (glcd)
+			s.glcd = mc->state.glcd;
 		s.leds = scemu_leds(mc->m);
 	}
 	s.power = mc->power;
@@ -152,7 +187,7 @@ static void publish(machine_t *mc, bool booting)
 	snprintf(s.title, sizeof(s.title), "%s", mc->state.title);
 	snprintf(s.error, sizeof(s.error), "%s", mc->state.error);
 	s.generation = mc->state.generation;
-	if (memcmp(&s.lcd, &mc->state.lcd, sizeof(s.lcd)) != 0 || s.leds != mc->state.leds || s.power != mc->state.power
+	if (glass_changed || memcmp(&s.lcd, &mc->state.lcd, sizeof(s.lcd)) != 0 || s.leds != mc->state.leds || s.power != mc->state.power
 	    || s.booting != mc->state.booting || s.playing != mc->state.playing || s.paused != mc->state.paused
 	    || s.finished != mc->state.finished || s.position != mc->state.position || s.underruns != mc->state.underruns
 	    || strcmp(s.audio, mc->state.audio) != 0 || s.latency != mc->state.latency)
@@ -381,27 +416,33 @@ static void open_audio(machine_t *mc)
 		fprintf(stderr, "scgui: no audio (%s), running silently\n", err);
 }
 
-/* Another machine in place of this one: the new ROMs are loaded before the
- * old instance goes, so a set that is not there leaves the old one playing. */
-static void switch_model(machine_t *mc, scemu_model_t model)
+/* Another machine in place of this one -- another model, or the same one with
+ * its rear switch in another position, which the firmware only reads at boot.
+ * The new ROMs are loaded before the old instance goes, so a set that is not
+ * there leaves the old one playing; the same model keeps the images it has. */
+static void switch_machine(machine_t *mc, scemu_model_t model)
 {
 	const char *name = scplay_model_name(model);
-	if (!name || model == mc->roms.model)
+	scemu_computer_switch_t computer = computer_of(mc, model);
+	bool same_roms = model == mc->roms.model;
+	if (!name || (same_roms && computer == mc->computer))
 		return;
 	scplay_roms_t roms;
 	char err[256];
-	if (!scplay_roms_load(&roms, name, mc->opt.rom, mc->opt.exe_dir, err, sizeof(err)))
+	if (!same_roms && !scplay_roms_load(&roms, name, mc->opt.rom, mc->opt.exe_dir, err, sizeof(err)))
 	{
 		set_error(mc, err);
 		return;
 	}
-	scemu_t *m = scemu_create(roms.model, &roms.roms, NULL);
+	scemu_t *m = scemu_create(model, same_roms ? &mc->roms.roms : &roms.roms, NULL);
 	if (!m)
 	{
 		set_error(mc, scemu_error(NULL));
-		scplay_roms_free(&roms);
+		if (!same_roms)
+			scplay_roms_free(&roms);
 		return;
 	}
+	scemu_set_computer_switch(m, computer);
 	bool was_on = mc->power;
 	if (was_on)
 	{
@@ -414,14 +455,19 @@ static void switch_model(machine_t *mc, scemu_model_t model)
 	mc->power = false;
 	session_free(&mc->session);
 	scemu_destroy(mc->m);
-	scplay_roms_free(&mc->roms);
+	if (!same_roms)
+	{
+		scplay_roms_free(&mc->roms);
+		mc->roms = roms;
+	}
 
-	mc->roms = roms;
 	mc->m = m;
+	mc->computer = computer;
 	mc->rate = scemu_sample_rate(m);
 	snprintf(mc->model_name, sizeof(mc->model_name), "%s", name);
 	mc->opt.model = mc->model_name;
-	session_init(&mc->session, mc->m, mc->roms.model_name, mc->roms.hash, mc->opt.no_cache, mc->opt.keep_settings);
+	session_init(&mc->session, mc->m, mc->roms.model_name, mc->roms.hash, mc->computer,
+	             mc->opt.no_cache, mc->opt.keep_settings);
 	scemu_set_midi_out(mc->m, midi_out, mc);
 	set_error(mc, "");
 	set_rom_info(mc);
@@ -462,6 +508,10 @@ static void handle(machine_t *mc, const command_t *c)
 		}
 		else
 			key(mc, (scemu_button_t)c->a, c->b != 0);
+		break;
+	case CMD_DIAL:
+		if (mc->power)
+			scemu_dial(mc->m, c->a);
 		break;
 	case CMD_POWER:
 		if (c->a && !mc->power)
@@ -513,7 +563,9 @@ static void handle(machine_t *mc, const command_t *c)
 		scemu_set_dac_rail(mc->m, mc->rail);
 		break;
 	case CMD_MODEL:
-		switch_model(mc, (scemu_model_t)c->a);
+		if (c->b >= 0)
+			mc->opt.computer[c->b] = (scemu_computer_switch_t)c->c;
+		switch_machine(mc, (scemu_model_t)c->a);
 		break;
 	case CMD_QUIT:
 		break;
@@ -705,10 +757,13 @@ machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size)
 		free(mc);
 		return NULL;
 	}
+	mc->computer = computer_of(mc, mc->roms.model);
+	scemu_set_computer_switch(mc->m, mc->computer);
 	mc->rate = scemu_sample_rate(mc->m);
 	snprintf(mc->model_name, sizeof(mc->model_name), "%s", mc->roms.model_name);
 	mc->opt.model = mc->model_name;
-	session_init(&mc->session, mc->m, mc->roms.model_name, mc->roms.hash, o->no_cache, o->keep_settings);
+	session_init(&mc->session, mc->m, mc->roms.model_name, mc->roms.hash, mc->computer,
+	             o->no_cache, o->keep_settings);
 	open_audio(mc);
 	mc->gain = 0.75f * 0.75f;
 	mc->rail = 24;
@@ -803,6 +858,12 @@ void machine_button(machine_t *mc, scemu_button_t b, bool down)
 	post(mc, c);
 }
 
+void machine_dial(machine_t *mc, int steps)
+{
+	command_t c = { CMD_DIAL, steps, 0, 0, 0, NULL };
+	post(mc, c);
+}
+
 void machine_button_after(machine_t *mc, scemu_button_t b, bool down, unsigned ms)
 {
 	command_t c = { CMD_BUTTON, b, down, (int)(ms ? ms : 1), 0, NULL };
@@ -829,9 +890,20 @@ void machine_set_dac_rail(machine_t *mc, int bits)
 
 void machine_set_model(machine_t *mc, scemu_model_t model)
 {
-	command_t c = { CMD_MODEL, (int)model, 0, 0, 0, NULL };
+	command_t c = { CMD_MODEL, (int)model, -1, 0, 0, NULL };
 	post(mc, c);
 }
+
+void machine_set_computer_switch(machine_t *mc, scemu_computer_switch_t sw)
+{
+	scemu_model_t model = machine_model(mc);
+	int row = machine_system_index(model);
+	if (row < 0)
+		return;
+	command_t c = { CMD_MODEL, (int)model, row, (int)sw, 0, NULL };
+	post(mc, c);
+}
+
 
 const char *const machine_reset_names[MACHINE_RESET_COUNT] = {
 	"nothing", "GM System On", "GS Reset", "GM2 System On", "SC-88 Mode Set, single module", "SC-88 Mode Set, double module"

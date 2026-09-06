@@ -6,6 +6,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,18 +26,20 @@
 #define MIDI_PORTS_MAX 64
 #define AUDIO_DEVICES_MAX 64
 #define MIDI_SLOTS 5           /* MIDI IN A, MIDI IN B, MIDI OUT, Song A, Song B */
+#define COMPUTER_POSITIONS 4   /* the rear switch: MIDI, PC-1, PC-2, Mac (USB on the SC-8850) */
 
 #define KNOB_STEP 0.05f
+#define DIAL_DEGREES (360.0 / PANEL_DIAL_FRAMES)   /* what the pointer turns for one detent */
 
 typedef struct app
 {
 	machine_t *mc;
 	panel_t *panel;
-	int pitch, scale;
+	int size, scale;           /* the window size setting (4 or 8) and the screen's scale factor */
 	uint32_t *frame;
 	GtkWidget *window, *area, *playlist_window, *list;
 	GtkWidget *settings_window, *notebook, *audio_label, *audio_drop, *block_drop;
-	GtkWidget *system_label, *model_check[3], *rail_check;
+	GtkWidget *system_label, *model_check[MACHINE_SYSTEMS], *computer_check[COMPUTER_POSITIONS], *rail_check;
 	GtkWidget *logo_popover, *system_popover;
 	GSimpleAction *system_model_action;   /* the system menu's radio state */
 	scgui_config_t cfg;
@@ -58,6 +61,8 @@ typedef struct app
 	bool macro_after_boot;
 	unsigned macro_ms;         /* how long it plays after the boot */
 	double pointer_x, pointer_y;
+	bool dial_drag;            /* the left button is turning the value dial */
+	double dial_angle, dial_rest;   /* where it was last seen, and the part of a detent left over */
 	midi_port_info_t ports[MIDI_PORTS_MAX];
 	int port_count;
 	audio_device_info_t devices[AUDIO_DEVICES_MAX];
@@ -89,7 +94,8 @@ typedef struct options
 	const char *model, *rom;
 	scemu_map_t map;
 	uint32_t midi_rate;
-	int pitch;
+	int size;
+	scemu_computer_switch_t computer[MACHINE_SYSTEMS];
 	bool keep_settings, no_cache, no_audio;
 	double tail;
 } options_t;
@@ -98,12 +104,12 @@ static void usage(FILE *fp)
 {
 	fprintf(fp,
 	        "usage: scgui [options] [file.mid ...]\n"
-	        "  --model NAME        sc88pro (default when its ROMs are found), sc88, sc88vl\n"
+	        "  --model NAME        sc88pro (default when its ROMs are found), sc88, sc88vl, sc8850\n"
 	        "  --rom PATH          a zip or directory with the ROM images\n"
 	        "  --map sc55|sc88|sc88pro\n"
 	        "                      play every part from that instrument map\n"
 	        "  --midi-rate BAUD    31250 (default), 38400, 0\n"
-	        "  --size 4|8          the window size: the display's dot pitch in pixels\n"
+	        "  --size 4|8          the window size: 4 the small panel, 8 twice as large\n"
 	        "  --keep-settings     keep the machine's settings memory across sessions\n"
 	        "  --no-cache          boot the firmware every time\n"
 	        "  --no-audio          run without a sound card\n"
@@ -133,7 +139,7 @@ static int parse_options(int argc, char **argv, options_t *o, GPtrArray *songs)
 		else if (!strcmp(a, "--midi-rate") && n + 1 < argc)
 			o->midi_rate = (uint32_t)atoi(argv[++n]);
 		else if (!strcmp(a, "--size") && n + 1 < argc)
-			o->pitch = atoi(argv[++n]);
+			o->size = atoi(argv[++n]);
 		else if (!strcmp(a, "--tail") && n + 1 < argc)
 			o->tail = atof(argv[++n]);
 		else if (!strcmp(a, "--keep-settings"))
@@ -168,6 +174,28 @@ static int word_index(const char *const *words, int count, const char *word, int
 	return fallback;
 }
 
+/* the rear COMPUTER switch, as the settings file spells it and as the unit
+ * prints it; the SC-8850's fourth position is the one the others call Mac */
+static const char *const computer_words[COMPUTER_POSITIONS] = { "midi", "pc1", "pc2", "mac" };
+static const char *const computer_labels[COMPUTER_POSITIONS] = { "MIDI", "PC-1", "PC-2", "Mac" };
+
+static scemu_computer_switch_t computer_position(const char *word)
+{
+	if (!strcmp(word, "usb"))
+		return SCEMU_COMPUTER_MAC;
+	return (scemu_computer_switch_t)word_index(computer_words, COMPUTER_POSITIONS, word, SCEMU_COMPUTER_MIDI);
+}
+
+static const char *computer_word(scemu_model_t model, scemu_computer_switch_t sw)
+{
+	return sw == SCEMU_COMPUTER_MAC && model == SCEMU_MODEL_SC8850 ? "usb" : computer_words[sw];
+}
+
+static const char *computer_label(scemu_model_t model, scemu_computer_switch_t sw)
+{
+	return sw == SCEMU_COMPUTER_MAC && model == SCEMU_MODEL_SC8850 ? "USB" : computer_labels[sw];
+}
+
 /* the entry of a fixed set nearest the file's number */
 static int nearest_index(const int *values, int count, int want)
 {
@@ -183,7 +211,9 @@ static void options_from_config(const scgui_config_t *c, options_t *o)
 	memset(o, 0, sizeof(*o));
 	o->model = c->model[0] ? c->model : NULL;
 	o->rom = c->rom[0] ? c->rom : NULL;
-	o->pitch = c->size;
+	o->size = c->size;
+	for (int n = 0; n < MACHINE_SYSTEMS; n++)
+		o->computer[n] = computer_position(c->computer[n]);
 	o->map = (scemu_map_t)word_index(map_words, MAP_WORDS, c->map, SCEMU_MAP_NATIVE);
 	o->midi_rate = (uint32_t)c->midi_rate;
 	o->keep_settings = c->keep_settings;
@@ -721,9 +751,6 @@ static GtkWidget *audio_page(app_t *app)
 
 /* ---------------------------------------------------------------- system settings */
 
-static const scemu_model_t system_models[] = { SCEMU_MODEL_SC88, SCEMU_MODEL_SC88VL, SCEMU_MODEL_SC88PRO };
-#define SYSTEM_MODELS ((int)(sizeof(system_models) / sizeof(system_models[0])))
-
 #define RAIL_NARROW 24
 #define RAIL_WIDE 29
 
@@ -740,9 +767,18 @@ static void system_readout(app_t *app)
 		snprintf(text + at, sizeof(text) - at, "\n%s", app->state.error);
 	gtk_label_set_text(GTK_LABEL(app->system_label), text);
 	app->system_updating = true;
-	for (int n = 0; n < SYSTEM_MODELS; n++)
-		if (system_models[n] == info.model)
+	for (int n = 0; n < MACHINE_SYSTEMS; n++)
+		if (machine_systems[n] == info.model)
 			gtk_check_button_set_active(GTK_CHECK_BUTTON(app->model_check[n]), TRUE);
+	int row = machine_system_index(info.model);
+	scemu_computer_switch_t sw = row < 0 ? SCEMU_COMPUTER_MIDI : computer_position(app->cfg.computer[row]);
+	for (int n = 0; n < COMPUTER_POSITIONS; n++)
+	{
+		gtk_check_button_set_label(GTK_CHECK_BUTTON(app->computer_check[n]),
+		                           computer_label(info.model, (scemu_computer_switch_t)n));
+		if (n == (int)sw)
+			gtk_check_button_set_active(GTK_CHECK_BUTTON(app->computer_check[n]), TRUE);
+	}
 	app->system_updating = false;
 }
 
@@ -757,6 +793,21 @@ static void on_model_toggled(GtkCheckButton *b, gpointer user)
 	machine_set_model(app->mc, model);
 	snprintf(app->cfg.model, sizeof(app->cfg.model), "%s", scplay_model_name(model));
 	config_touch(app);
+}
+
+static void on_computer_toggled(GtkCheckButton *b, gpointer user)
+{
+	app_t *app = user;
+	if (app->system_updating || !gtk_check_button_get_active(b))
+		return;
+	scemu_computer_switch_t sw = (scemu_computer_switch_t)GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "position"));
+	scemu_model_t model = machine_model(app->mc);
+	int row = machine_system_index(model);
+	if (row < 0 || sw == computer_position(app->cfg.computer[row]))
+		return;
+	snprintf(app->cfg.computer[row], sizeof(app->cfg.computer[row]), "%s", computer_word(model, sw));
+	config_touch(app);
+	machine_set_computer_switch(app->mc, sw);
 }
 
 static void on_rail_toggled(GtkCheckButton *b, gpointer user)
@@ -778,25 +829,42 @@ static GtkWidget *system_page(app_t *app)
 	scemu_model_t model = machine_model(app->mc);
 	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
 	app->system_updating = true;
-	for (int n = 0; n < SYSTEM_MODELS; n++)
+	for (int n = 0; n < MACHINE_SYSTEMS; n++)
 	{
-		GtkWidget *b = gtk_check_button_new_with_label(scplay_model_label(system_models[n]));
+		GtkWidget *b = gtk_check_button_new_with_label(scplay_model_label(machine_systems[n]));
 		app->model_check[n] = b;
 		if (n)
 			gtk_check_button_set_group(GTK_CHECK_BUTTON(b), GTK_CHECK_BUTTON(app->model_check[0]));
-		if (system_models[n] == model)
+		if (machine_systems[n] == model)
 			gtk_check_button_set_active(GTK_CHECK_BUTTON(b), TRUE);
-		if (!(have & (1u << system_models[n])))
+		if (!(have & (1u << machine_systems[n])))
 		{
 			gtk_widget_set_sensitive(b, FALSE);
 			gtk_widget_set_tooltip_text(b, "ROM images not found");
 		}
-		g_object_set_data(G_OBJECT(b), "model", GINT_TO_POINTER((int)system_models[n]));
+		g_object_set_data(G_OBJECT(b), "model", GINT_TO_POINTER((int)machine_systems[n]));
 		g_signal_connect(b, "toggled", G_CALLBACK(on_model_toggled), app);
 		gtk_box_append(GTK_BOX(box), b);
 	}
 	app->system_updating = false;
 	grid_row(grid, 0, "System", box);
+
+	GtkWidget *positions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	app->system_updating = true;
+	for (int n = 0; n < COMPUTER_POSITIONS; n++)
+	{
+		GtkWidget *b = gtk_check_button_new_with_label(computer_label(model, (scemu_computer_switch_t)n));
+		app->computer_check[n] = b;
+		if (n)
+			gtk_check_button_set_group(GTK_CHECK_BUTTON(b), GTK_CHECK_BUTTON(app->computer_check[0]));
+		g_object_set_data(G_OBJECT(b), "position", GINT_TO_POINTER(n));
+		g_signal_connect(b, "toggled", G_CALLBACK(on_computer_toggled), app);
+		gtk_box_append(GTK_BOX(positions), b);
+	}
+	app->system_updating = false;
+	gtk_widget_set_tooltip_text(positions, "The switch on the back, read by the firmware when it comes up:"
+	                                       " changing it boots the machine again");
+	grid_row(grid, 1, "Computer switch", positions);
 
 	app->system_label = gtk_label_new("");
 	gtk_label_set_xalign(GTK_LABEL(app->system_label), 0);
@@ -805,7 +873,7 @@ static GtkWidget *system_page(app_t *app)
 	gtk_label_set_max_width_chars(GTK_LABEL(app->system_label), 60);
 	gtk_widget_set_margin_top(app->system_label, 8);
 	gtk_widget_set_margin_bottom(app->system_label, 8);
-	gtk_grid_attach(GTK_GRID(grid), app->system_label, 0, 1, 3, 1);
+	gtk_grid_attach(GTK_GRID(grid), app->system_label, 0, 2, 3, 1);
 
 	GtkWidget *rail_label = gtk_label_new("Wide output rail: 29 bits, 30 dB of headroom above the unit's 24"
 	                                      " (busy songs no longer clip; the knob sets the level)");
@@ -816,7 +884,7 @@ static GtkWidget *system_page(app_t *app)
 	gtk_check_button_set_child(GTK_CHECK_BUTTON(app->rail_check), rail_label);
 	gtk_check_button_set_active(GTK_CHECK_BUTTON(app->rail_check), app->rail_wide);
 	g_signal_connect(app->rail_check, "toggled", G_CALLBACK(on_rail_toggled), app);
-	gtk_grid_attach(GTK_GRID(grid), app->rail_check, 0, 2, 3, 1);
+	gtk_grid_attach(GTK_GRID(grid), app->rail_check, 0, 3, 3, 1);
 	system_readout(app);
 	return grid;
 }
@@ -1004,9 +1072,9 @@ static void system_menu(app_t *app, double x, double y)
 		GMenu *menu = g_menu_new();
 		GMenu *models = g_menu_new();
 		unsigned have = machine_models_available(app->mc);
-		for (int n = 0; n < SYSTEM_MODELS; n++)
-			if (have & (1u << system_models[n]))
-				menu_append(models, scplay_model_label(system_models[n]), "system.model", (int)system_models[n]);
+		for (int n = 0; n < MACHINE_SYSTEMS; n++)
+			if (have & (1u << machine_systems[n]))
+				menu_append(models, scplay_model_label(machine_systems[n]), "system.model", (int)machine_systems[n]);
 		g_menu_append_section(menu, NULL, G_MENU_MODEL(models));
 		GMenu *actions = g_menu_new();
 		menu_append(actions, "Reset", "system.reset", -1);
@@ -1042,12 +1110,29 @@ static void draw(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoin
 	cairo_surface_destroy(surface);
 }
 
+/* the bake for a panel at the size setting: the glass's dot pitch, 4 and 8 on
+ * the 88 family, 3 and 6 on the SC-8850 */
+static int panel_pitch_for(panel_model_t model, int size)
+{
+	return panel_sizes[model][size >= 8 ? 1 : 0].pitch;
+}
+
+/* what the panel shows of the machine: one of the two kinds of glass, and the lamps */
+static void panel_glass(panel_t *p, const machine_state_t *st)
+{
+	if (st->has_glcd)
+		panel_set_glcd(p, &st->glcd);
+	else
+		panel_set_lcd(p, &st->lcd);
+	panel_set_leds(p, st->leds);
+}
+
 /* the panel of another model: the same size, the keys held come up with the old one */
 static void panel_switch(app_t *app, panel_model_t model)
 {
 	if (model == panel_model(app->panel))
 		return;
-	panel_t *p = panel_create(model, app->pitch * app->scale);
+	panel_t *p = panel_create(model, panel_pitch_for(model, app->size) * app->scale);
 	if (!p)
 		return;
 	panel_destroy(app->panel);
@@ -1058,8 +1143,7 @@ static void panel_switch(app_t *app, panel_model_t model)
 	panel_set_knob(p, app->knob);
 	/* the glass and the lamps come with the snapshot, whose generation has
 	 * already passed; give the new panel the last one */
-	panel_set_lcd(p, &app->state.lcd);
-	panel_set_leds(p, app->state.leds);
+	panel_glass(p, &app->state);
 	gtk_widget_set_size_request(app->area, w / app->scale, h / app->scale);
 	gtk_widget_queue_draw(app->area);
 }
@@ -1087,8 +1171,7 @@ static gboolean on_tick(gpointer user)
 		bool song_changed = strcmp(st.song, app->state.song) != 0 || strcmp(st.title, app->state.title) != 0
 		                    || st.paused != app->state.paused;
 		app->state = st;
-		panel_set_lcd(app->panel, &st.lcd);
-		panel_set_leds(app->panel, st.leds);
+		panel_glass(app->panel, &st);
 		if (app->settings_window && gtk_widget_get_visible(app->settings_window))
 		{
 			audio_readout(app);
@@ -1400,6 +1483,32 @@ static void combo_menu(app_t *app, int element, double x, double y)
 	gtk_popover_popup(GTK_POPOVER(app->combo_popover));
 }
 
+static double dial_angle_at(app_t *app, double x, double y)
+{
+	const panel_rect_t *r = panel_element_rect(app->panel, PANEL_DIAL_VALUE);
+	double cx = r->x + r->w / 2.0, cy = r->y + r->h / 2.0;
+	return atan2(y * app->scale - cy, x * app->scale - cx) * (180 / G_PI);
+}
+
+/* the dial follows the pointer around it, a thirty-sixth of a turn to the
+ * detent, so the mark on the panel turns with the hand */
+static void dial_turn(app_t *app, double x, double y)
+{
+	double angle = dial_angle_at(app, x, y), turn = angle - app->dial_angle;
+	if (turn > 180)
+		turn -= 360;
+	else if (turn < -180)
+		turn += 360;
+	app->dial_angle = angle;
+	app->dial_rest += turn;
+	int steps = (int)(app->dial_rest / DIAL_DEGREES);
+	if (!steps)
+		return;
+	app->dial_rest -= steps * DIAL_DEGREES;
+	machine_dial(app->mc, steps);
+	panel_set_dial(app->panel, steps);
+}
+
 static void press(app_t *app, guint button, GdkModifierType mods, double x, double y)
 {
 	int e = panel_hit(app->panel, (int)(x * app->scale), (int)(y * app->scale));
@@ -1454,7 +1563,16 @@ static void press(app_t *app, guint button, GdkModifierType mods, double x, doub
 		}
 	}
 	else if (button == GDK_BUTTON_PRIMARY)
-		element_action(app, e);
+	{
+		if (e == PANEL_DIAL_VALUE)
+		{
+			app->dial_drag = true;
+			app->dial_angle = dial_angle_at(app, x, y);
+			app->dial_rest = 0;
+		}
+		else
+			element_action(app, e);
+	}
 }
 
 static void release(app_t *app, guint button)
@@ -1472,6 +1590,7 @@ static void release(app_t *app, guint button)
 	}
 	if (button != GDK_BUTTON_PRIMARY)
 		return;
+	app->dial_drag = false;
 	int e = app->pressed_element;
 	if (e < 0)
 		return;
@@ -1488,6 +1607,8 @@ static void on_motion(GtkEventControllerMotion *c, double x, double y, gpointer 
 	app_t *app = user;
 	app->pointer_x = x;
 	app->pointer_y = y;
+	if (app->dial_drag)
+		dial_turn(app, x, y);
 }
 
 /* the raw button events: the toolkit's click gestures track one button at
@@ -1511,6 +1632,16 @@ static gboolean on_scroll(GtkEventControllerScroll *c, double dx, double dy, gpo
 {
 	app_t *app = user;
 	int e = panel_hit(app->panel, (int)(app->pointer_x * app->scale), (int)(app->pointer_y * app->scale));
+	if (e == PANEL_DIAL_VALUE || e == PANEL_BUTTON_VALUE)
+	{
+		int steps = dy > 0 ? -1 : dy < 0 ? 1 : 0;
+		if (steps)
+		{
+			machine_dial(app->mc, steps);
+			panel_set_dial(app->panel, steps);
+		}
+		return TRUE;
+	}
 	if (e != PANEL_KNOB_VOLUME && e != PANEL_BUTTON_PREVIEW)
 		return FALSE;
 	app->knob -= (float)dy * KNOB_STEP;
@@ -1600,8 +1731,9 @@ int main(int argc, char **argv)
 
 	char exe_dir[PATH_MAX];
 	session_exe_directory(argv[0], exe_dir, sizeof(exe_dir));
-	machine_options_t mo = { opt.model, opt.rom, exe_dir, opt.map, opt.midi_rate, opt.tail,
-	                         opt.keep_settings, opt.no_cache, opt.no_audio,
+	machine_options_t mo = { opt.model, opt.rom, exe_dir, opt.map, opt.midi_rate,
+	                         { opt.computer[0], opt.computer[1], opt.computer[2], opt.computer[3] },
+	                         opt.tail, opt.keep_settings, opt.no_cache, opt.no_audio,
 	                         app.audio_choice >= 0 ? app.devices[app.audio_choice].index : -1,
 	                         (unsigned)block_sizes[app.block_choice] };
 	char err[512];
@@ -1637,17 +1769,17 @@ int main(int argc, char **argv)
 
 	app.window = gtk_window_new();
 	app.scale = gtk_widget_get_scale_factor(app.window);
-	app.pitch = opt.pitch;
+	app.size = opt.size;
 	panel_model_t pm = panel_model_for(machine_model(app.mc));
-	app.panel = panel_create(pm, app.pitch * app.scale);
+	app.panel = panel_create(pm, panel_pitch_for(pm, app.size) * app.scale);
 	if (!app.panel)
 	{
 		app.scale = 1;
-		app.panel = panel_create(pm, app.pitch);
+		app.panel = panel_create(pm, panel_pitch_for(pm, app.size));
 	}
 	if (!app.panel)
 	{
-		fprintf(stderr, "scgui: no panel artwork for size %d\n", opt.pitch);
+		fprintf(stderr, "scgui: no panel artwork for size %d\n", opt.size);
 		machine_stop(app.mc);
 		return 1;
 	}

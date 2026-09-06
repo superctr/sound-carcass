@@ -63,7 +63,25 @@ image is also circulated labelled "Version 1.01"; it is 1.04.)
 The SC-88Pro's wave images are reconstructed from the vegspro dumps — the same sample data, on wider
 chips there.
 
+## SC-8850
+
+Five images: the CPU's internal boot ROM, the program flash the firmware itself lives in, the tone
+flash (its parameter and drum tables) and two 16 MB wave ROMs.
+
+| image | size | CRC32 |
+|---|---|---|
+| CPU ROM, IC1 | 64 KiB | `4b2f36e3` |
+| program flash 1.00, IC9 | 1 MiB | `3ef69f93` |
+| tone flash, IC10 | 2 MiB | `390faa62` |
+| wave ROM IC53 | 16 MiB | `2cfe5aa2` |
+| wave ROM IC54 | 16 MiB | `623015b6` |
+
+The USB controller's mask ROM has never been dumped and is not needed: the machine comes up without
+it, and puts its own "USB Hardware Error" box on the display for a moment while its USB task looks for
+it, as the hardware does with the controller unplugged.
+
 ## The sub-CPU
 
-The panel sub-CPU's internal 8 KiB ROM is not dumped on any of these machines and is not needed: its
-behaviour is emulated at a high level.
+The panel sub-CPU's internal 8 KiB ROM is not dumped on any of the 88-family machines and is not
+needed: its behaviour is emulated at a high level.  The SC-8850 has no sub-CPU — its panel and
+display hang on the main CPU's own bus.

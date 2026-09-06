@@ -28,7 +28,8 @@ typedef struct tui_state
 	const char *model;
 	const char *song;
 	const char *title;   /* the SMF's own track name, if it has one */
-	const scemu_lcd_t *lcd;
+	const scemu_lcd_t *lcd;      /* the character glass, NULL on a model without one */
+	const scemu_glcd_t *glcd;    /* the bitmap glass, NULL on a model without one */
 	uint32_t leds;
 	bool has_efx_led;
 	bool eq_label;               /* the SC-88 calls the SC-88 map button EQ */
