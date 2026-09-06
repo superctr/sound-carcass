@@ -25,11 +25,10 @@
 
 #define MIDI_PORTS_MAX 64
 #define AUDIO_DEVICES_MAX 64
-#define MIDI_SLOTS 5           /* MIDI IN A, MIDI IN B, MIDI OUT, Song A, Song B */
+#define MIDI_SLOTS 9           /* MIDI IN A-D, MIDI OUT, Song A-D; C and D only on an SC-8850 on USB */
 #define COMPUTER_POSITIONS 4   /* the rear switch: MIDI, PC-1, PC-2, Mac (USB on the SC-8850) */
 
-#define KNOB_STEP 0.05f
-#define DIAL_DEGREES (360.0 / PANEL_DIAL_FRAMES)   /* what the pointer turns for one detent */
+#define DIAL_DEGREES (360.0 / PANEL_DIAL_FRAMES)   /* what the hand turns for one detent */
 
 typedef struct app
 {
@@ -63,6 +62,7 @@ typedef struct app
 	double pointer_x, pointer_y;
 	bool dial_drag;            /* the left button is turning the value dial */
 	double dial_angle, dial_rest;   /* where it was last seen, and the part of a detent left over */
+	double wheel_rest;         /* the part of a wheel notch over the dial not yet a detent */
 	midi_port_info_t ports[MIDI_PORTS_MAX];
 	int port_count;
 	audio_device_info_t devices[AUDIO_DEVICES_MAX];
@@ -72,7 +72,7 @@ typedef struct app
 	bool rail_wide;                /* the output rail: 29 bits instead of the unit's 24 */
 	bool system_updating;          /* the radio group is being set from the machine */
 	scemu_model_t shown_model;
-	GtkWidget *midi_drop[MIDI_SLOTS];
+	GtkWidget *midi_drop[MIDI_SLOTS], *midi_label[MIDI_SLOTS];
 	int midi_choice[MIDI_SLOTS];   /* index into ports, or -1 */
 	GtkWidget *combo_popover;
 	GtkWidget *more;               /* the revealer with the less-used settings */
@@ -84,8 +84,11 @@ typedef struct app
 #define MACRO_HOLD_MS 300    /* a held key is seen held before the next goes down */
 #define MACRO_PRESS_MS 150
 
-static const char *const midi_slot_names[MIDI_SLOTS] = { "MIDI IN A", "MIDI IN B", "MIDI OUT", "Song to A", "Song to B" };
-static const bool midi_slot_is_input[MIDI_SLOTS] = { true, true, false, false, false };
+static const char *const midi_slot_names[MIDI_SLOTS] = { "MIDI IN A", "MIDI IN B", "MIDI IN C", "MIDI IN D", "MIDI OUT",
+                                                         "Song to A", "Song to B", "Song to C", "Song to D" };
+static const bool midi_slot_is_input[MIDI_SLOTS] = { true, true, true, true, false, false, false, false, false };
+/* the slots that are only there with four port groups */
+static const bool midi_slot_is_extra[MIDI_SLOTS] = { false, false, true, true, false, false, false, true, true };
 
 /* ---------------------------------------------------------------- options */
 
@@ -106,7 +109,7 @@ static void usage(FILE *fp)
 	        "usage: scgui [options] [file.mid ...]\n"
 	        "  --model NAME        sc88pro (default when its ROMs are found), sc88, sc88vl, sc8850\n"
 	        "  --rom PATH          a zip or directory with the ROM images\n"
-	        "  --map sc55|sc88|sc88pro\n"
+	        "  --map sc55|sc88|sc88pro|sc8850\n"
 	        "                      play every part from that instrument map\n"
 	        "  --midi-rate BAUD    31250 (default), 38400, 0\n"
 	        "  --size 4|8          the window size: 4 the small panel, 8 twice as large\n"
@@ -134,7 +137,8 @@ static int parse_options(int argc, char **argv, options_t *o, GPtrArray *songs)
 		{
 			const char *v = argv[++n];
 			o->map = !strcmp(v, "sc55") ? SCEMU_MAP_SC55 : !strcmp(v, "sc88") ? SCEMU_MAP_SC88
-			         : !strcmp(v, "sc88pro") ? SCEMU_MAP_SC88PRO : SCEMU_MAP_NATIVE;
+			         : !strcmp(v, "sc88pro") ? SCEMU_MAP_SC88PRO : !strcmp(v, "sc8850") ? SCEMU_MAP_SC8850
+			         : SCEMU_MAP_NATIVE;
 		}
 		else if (!strcmp(a, "--midi-rate") && n + 1 < argc)
 			o->midi_rate = (uint32_t)atoi(argv[++n]);
@@ -163,7 +167,7 @@ static int parse_options(int argc, char **argv, options_t *o, GPtrArray *songs)
 /* ---------------------------------------------------------------- the settings file */
 
 static const char *const reset_words[MACHINE_RESET_COUNT] = { "none", "gm", "gs", "gm2", "sc88-single", "sc88-double" };
-static const char *const map_words[] = { "native", "sc55", "sc88", "sc88pro" };
+static const char *const map_words[] = { "native", "sc55", "sc88", "sc88pro", "sc8850" };
 #define MAP_WORDS ((int)(sizeof(map_words) / sizeof(map_words[0])))
 
 static int word_index(const char *const *words, int count, const char *word, int fallback)
@@ -379,7 +383,7 @@ static void midi_apply(app_t *app, int slot)
 	if (midi_slot_is_input[slot])
 		machine_midi_input(app->mc, slot, choice >= 0 ? app->ports[choice].in_id : -1);
 	else
-		machine_midi_output(app->mc, slot - 2, choice >= 0 ? app->ports[choice].out_id : -1);
+		machine_midi_output(app->mc, slot - MIDI_IO_INPUT_COUNT, choice >= 0 ? app->ports[choice].out_id : -1);
 	snprintf(app->cfg.midi[slot], sizeof(app->cfg.midi[slot]), "%s", choice >= 0 ? app->ports[choice].name : "");
 	config_touch(app);
 }
@@ -437,6 +441,19 @@ static void midi_fill(app_t *app)
 	}
 }
 
+/* the rows for port groups C and D come and go with the machine that has them */
+static void midi_rows_show(app_t *app)
+{
+	bool four = machine_midi_ports(app->mc) == 4;
+	for (int slot = 0; slot < MIDI_SLOTS; slot++)
+	{
+		if (!app->midi_label[slot])
+			continue;
+		gtk_widget_set_visible(app->midi_label[slot], four || !midi_slot_is_extra[slot]);
+		gtk_widget_set_visible(app->midi_drop[slot], four || !midi_slot_is_extra[slot]);
+	}
+}
+
 static void on_midi_refresh(GtkButton *b, gpointer user)
 {
 	app_t *app = user;
@@ -478,7 +495,7 @@ static void on_map_selected(GObject *drop, GParamSpec *spec, gpointer user)
 {
 	app_t *app = user;
 	guint sel = gtk_drop_down_get_selected(GTK_DROP_DOWN(drop));
-	if (sel <= SCEMU_MAP_SC88PRO)
+	if (sel <= SCEMU_MAP_SC8850)
 	{
 		app->map = (scemu_map_t)sel;
 		machine_set_map(app->mc, app->map);
@@ -499,13 +516,14 @@ static GtkWidget *settings_grid(void)
 	return grid;
 }
 
-static void grid_row(GtkWidget *grid, int row, const char *name, GtkWidget *widget)
+static GtkWidget *grid_row(GtkWidget *grid, int row, const char *name, GtkWidget *widget)
 {
 	GtkWidget *label = gtk_label_new(name);
 	gtk_label_set_xalign(GTK_LABEL(label), 0);
 	gtk_grid_attach(GTK_GRID(grid), label, 0, row, 1, 1);
 	gtk_widget_set_hexpand(widget, TRUE);
 	gtk_grid_attach(GTK_GRID(grid), widget, 1, row, 1, 1);
+	return label;
 }
 
 static GtkWidget *midi_drop(app_t *app, int slot)
@@ -520,8 +538,8 @@ static GtkWidget *midi_drop(app_t *app, int slot)
 static GtkWidget *midi_section(app_t *app)
 {
 	GtkWidget *grid = settings_grid();
-	for (int slot = 0; slot < 3; slot++)
-		grid_row(grid, slot, midi_slot_names[slot], midi_drop(app, slot));
+	for (int slot = 0; slot <= MIDI_IO_INPUT_COUNT; slot++)
+		app->midi_label[slot] = grid_row(grid, slot, midi_slot_names[slot], midi_drop(app, slot));
 	GtkWidget *refresh = gtk_button_new_from_icon_name("view-refresh-symbolic");
 	gtk_widget_set_tooltip_text(refresh, "Look for ports again");
 	gtk_widget_set_valign(refresh, GTK_ALIGN_START);
@@ -534,21 +552,22 @@ static GtkWidget *midi_section(app_t *app)
 static GtkWidget *more_section(app_t *app)
 {
 	GtkWidget *grid = settings_grid();
-	for (int slot = 3; slot < MIDI_SLOTS; slot++)
-		grid_row(grid, slot - 3, midi_slot_names[slot], midi_drop(app, slot));
+	const int first = MIDI_IO_INPUT_COUNT + 1;
+	for (int slot = first; slot < MIDI_SLOTS; slot++)
+		app->midi_label[slot] = grid_row(grid, slot - first, midi_slot_names[slot], midi_drop(app, slot));
 
 	GtkStringList *resets = gtk_string_list_new(machine_reset_names);
 	GtkWidget *reset = gtk_drop_down_new(G_LIST_MODEL(resets), NULL);
 	gtk_drop_down_set_selected(GTK_DROP_DOWN(reset), app->reset);
 	g_signal_connect(reset, "notify::selected", G_CALLBACK(on_reset_selected), app);
-	grid_row(grid, 2, "Before each song", reset);
+	grid_row(grid, MIDI_IO_OUTPUT_COUNT - 1, "Before each song", reset);
 
-	static const char *const map_names[] = { "as the song selects", "SC-55 map", "SC-88 map", "SC-88Pro map", NULL };
+	static const char *const map_names[] = { "as the song selects", "SC-55 map", "SC-88 map", "SC-88Pro map", "SC-8850 map", NULL };
 	GtkStringList *maps = gtk_string_list_new(map_names);
 	GtkWidget *map = gtk_drop_down_new(G_LIST_MODEL(maps), NULL);
 	gtk_drop_down_set_selected(GTK_DROP_DOWN(map), app->map);
 	g_signal_connect(map, "notify::selected", G_CALLBACK(on_map_selected), app);
-	grid_row(grid, 3, "Instrument map", map);
+	grid_row(grid, MIDI_IO_OUTPUT_COUNT, "Instrument map", map);
 
 	app->more = gtk_revealer_new();
 	gtk_revealer_set_child(GTK_REVEALER(app->more), grid);
@@ -617,6 +636,7 @@ static void playlist_show(app_t *app)
 		gtk_box_append(GTK_BOX(box), midi_section(app));
 		gtk_box_append(GTK_BOX(box), more_section(app));
 		midi_fill(app);
+		midi_rows_show(app);
 		gtk_window_set_child(GTK_WINDOW(w), box);
 		app->playlist_window = w;
 	}
@@ -717,6 +737,16 @@ static void on_audio_refresh(GtkButton *b, gpointer user)
 		audio_apply(app);
 }
 
+static void on_notches_changed(GtkSpinButton *spin, gpointer user)
+{
+	app_t *app = user;
+	int notches = gtk_spin_button_get_value_as_int(spin);
+	if (notches == app->cfg.knob_notches)
+		return;
+	app->cfg.knob_notches = notches;
+	config_touch(app);
+}
+
 static GtkWidget *audio_page(app_t *app)
 {
 	GtkWidget *grid = settings_grid();
@@ -740,10 +770,16 @@ static GtkWidget *audio_page(app_t *app)
 	g_signal_connect(app->block_drop, "notify::selected", G_CALLBACK(on_block_selected), app);
 	grid_row(grid, 1, "Buffer", app->block_drop);
 
+	GtkWidget *notches = gtk_spin_button_new_with_range(5, 200, 5);
+	gtk_spin_button_set_value(GTK_SPIN_BUTTON(notches), app->cfg.knob_notches);
+	gtk_widget_set_tooltip_text(notches, "Notches of the scroll wheel that take the volume knob from silent to full");
+	g_signal_connect(notches, "value-changed", G_CALLBACK(on_notches_changed), app);
+	grid_row(grid, 2, "Knob travel, in notches", notches);
+
 	app->audio_label = gtk_label_new("");
 	gtk_label_set_xalign(GTK_LABEL(app->audio_label), 0);
 	gtk_widget_set_margin_top(app->audio_label, 8);
-	gtk_grid_attach(GTK_GRID(grid), app->audio_label, 0, 2, 3, 1);
+	gtk_grid_attach(GTK_GRID(grid), app->audio_label, 0, 3, 3, 1);
 	audio_fill(app);
 	audio_readout(app);
 	return grid;
@@ -780,6 +816,7 @@ static void system_readout(app_t *app)
 			gtk_check_button_set_active(GTK_CHECK_BUTTON(app->computer_check[n]), TRUE);
 	}
 	app->system_updating = false;
+	midi_rows_show(app);
 }
 
 static void on_model_toggled(GtkCheckButton *b, gpointer user)
@@ -995,8 +1032,8 @@ static void logo_menu(app_t *app, double x, double y)
 		for (int r = MACHINE_RESET_GM; r < MACHINE_RESET_COUNT; r++)
 			menu_append(send, machine_reset_names[r], "logo.send-reset", r);
 		GMenu *maps = g_menu_new();
-		static const char *const map_names[] = { NULL, "SC-55 map", "SC-88 map", "SC-88Pro map" };
-		for (int m = SCEMU_MAP_SC55; m <= SCEMU_MAP_SC88PRO; m++)
+		static const char *const map_names[] = { NULL, "SC-55 map", "SC-88 map", "SC-88Pro map", "SC-8850 map" };
+		for (int m = SCEMU_MAP_SC55; m <= SCEMU_MAP_SC8850; m++)
 		{
 			char label[64];
 			snprintf(label, sizeof(label), "Set all parts to the %s", map_names[m]);
@@ -1490,8 +1527,8 @@ static double dial_angle_at(app_t *app, double x, double y)
 	return atan2(y * app->scale - cy, x * app->scale - cx) * (180 / G_PI);
 }
 
-/* the dial follows the pointer around it, a thirty-sixth of a turn to the
- * detent, so the mark on the panel turns with the hand */
+/* the dial follows the pointer around it, a twenty-fourth of a turn to the
+ * detent, so the knurl on the panel turns with the hand */
 static void dial_turn(app_t *app, double x, double y)
 {
 	double angle = dial_angle_at(app, x, y), turn = angle - app->dial_angle;
@@ -1634,9 +1671,13 @@ static gboolean on_scroll(GtkEventControllerScroll *c, double dx, double dy, gpo
 	int e = panel_hit(app->panel, (int)(app->pointer_x * app->scale), (int)(app->pointer_y * app->scale));
 	if (e == PANEL_DIAL_VALUE || e == PANEL_BUTTON_VALUE)
 	{
-		int steps = dy > 0 ? -1 : dy < 0 ? 1 : 0;
+		/* a notch of the wheel is one detent of the dial, whether the notch
+		 * arrives whole or as the several fractions a smooth wheel sends */
+		app->wheel_rest -= dy;
+		int steps = (int)app->wheel_rest;
 		if (steps)
 		{
+			app->wheel_rest -= steps;
 			machine_dial(app->mc, steps);
 			panel_set_dial(app->panel, steps);
 		}
@@ -1644,7 +1685,7 @@ static gboolean on_scroll(GtkEventControllerScroll *c, double dx, double dy, gpo
 	}
 	if (e != PANEL_KNOB_VOLUME && e != PANEL_BUTTON_PREVIEW)
 		return FALSE;
-	app->knob -= (float)dy * KNOB_STEP;
+	app->knob -= (float)dy / (float)(app->cfg.knob_notches > 0 ? app->cfg.knob_notches : 20);
 	app->knob = app->knob < 0 ? 0 : app->knob > 1 ? 1 : app->knob;
 	panel_set_knob(app->panel, app->knob);
 	machine_set_gain(app->mc, app->knob * app->knob);

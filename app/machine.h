@@ -124,13 +124,16 @@ void machine_send(machine_t *mc, const uint8_t *bytes, size_t count);
 void machine_set_map(machine_t *mc, scemu_map_t map);   /* takes effect at once */
 
 /* Host MIDI devices (midi_io.h): tie one of the machine's inputs (MIDI IN
- * A, B) to a device that feeds it, or one of its outputs (MIDI OUT, the
- * song's ports A and B for a real unit playing along) to a device it feeds;
+ * A-D) to a device that feeds it, or one of its outputs (MIDI OUT, the
+ * song's ports A-D for a real unit playing along) to a device it feeds;
  * id -1 unties.  The list and the rescan are synchronous. */
 void machine_midi_input(machine_t *mc, int which, int id);
 void machine_midi_output(machine_t *mc, int which, int id);
 struct midi_port_info;
 int machine_midi_list(machine_t *mc, struct midi_port_info *out, int max);
 void machine_midi_rescan(machine_t *mc);
+/* the port groups the running machine takes: 4 on an SC-8850 whose switch
+ * is on USB, 2 on everything else; the ports above follow it */
+int machine_midi_ports(machine_t *mc);
 
 #endif

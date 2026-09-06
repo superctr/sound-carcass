@@ -1,11 +1,12 @@
 /* scgui: MIDI ports on the host, through PortMidi.
  *
  * The program has ports of its own that other programs can connect to:
- * two inputs (the machine's MIDI IN A and B), one output (its MIDI OUT)
- * and two more outputs that carry the song being played, for a real unit
- * beside the emulated one.  Besides those, each of the five can be tied to
- * one of the host's devices, so a keyboard feeds an input or a synth hangs
- * off an output without any routing on the host.
+ * an input per port group of the machine (MIDI IN A and B; C and D as well
+ * on an SC-8850 whose switch is on USB), one output (its MIDI OUT) and an
+ * output per group that carries the song being played, for a real unit
+ * beside the emulated one.  Besides those, each of them can be tied to one
+ * of the host's devices, so a keyboard feeds an input or a synth hangs off
+ * an output without any routing on the host.
  *
  * Copyright (c) 2026 ian karlsson
  * SPDX-License-Identifier: BSD-3-Clause
@@ -19,8 +20,8 @@
 
 typedef struct midi_io midi_io_t;
 
-enum { MIDI_IO_IN_A, MIDI_IO_IN_B, MIDI_IO_INPUT_COUNT };
-enum { MIDI_IO_OUT, MIDI_IO_SONG_A, MIDI_IO_SONG_B, MIDI_IO_OUTPUT_COUNT };
+enum { MIDI_IO_IN_A, MIDI_IO_IN_B, MIDI_IO_IN_C, MIDI_IO_IN_D, MIDI_IO_INPUT_COUNT };
+enum { MIDI_IO_OUT, MIDI_IO_SONG_A, MIDI_IO_SONG_B, MIDI_IO_SONG_C, MIDI_IO_SONG_D, MIDI_IO_OUTPUT_COUNT };
 
 typedef struct midi_port_info
 {
@@ -30,8 +31,13 @@ typedef struct midi_port_info
 	bool readable, writable;    /* can feed us / can be fed */
 } midi_port_info_t;
 
-midi_io_t *midi_io_open(const char *client_name);
+/* groups: how many port groups the machine has, 2 or 4; that many inputs
+ * and song outputs are created. */
+midi_io_t *midi_io_open(const char *client_name, int groups);
 void midi_io_close(midi_io_t *io);
+/* Another number of groups: the ports are made again (as a rescan does),
+ * ties kept by name. */
+void midi_io_set_groups(midi_io_t *io, int groups);
 
 /* The host's devices, ours left out; returns how many fit. */
 int midi_io_list(midi_io_t *io, midi_port_info_t *out, int max);

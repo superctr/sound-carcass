@@ -48,12 +48,18 @@ struct midi_io
 {
 	pthread_mutex_t lock;
 	char client[64];
+	int groups;
 	input_t in[MIDI_IO_INPUT_COUNT];
 	output_t out[MIDI_IO_OUTPUT_COUNT];
 };
 
-static const char *const input_names[MIDI_IO_INPUT_COUNT] = { "MIDI IN A", "MIDI IN B" };
-static const char *const output_names[MIDI_IO_OUTPUT_COUNT] = { "MIDI OUT", "Song A", "Song B" };
+static const char *const input_names[MIDI_IO_INPUT_COUNT] = { "MIDI IN A", "MIDI IN B", "MIDI IN C", "MIDI IN D" };
+static const char *const output_names[MIDI_IO_OUTPUT_COUNT] = { "MIDI OUT", "Song A", "Song B", "Song C", "Song D" };
+
+static int clamp_groups(int groups)
+{
+	return groups < 2 ? 2 : groups > MIDI_IO_INPUT_COUNT ? MIDI_IO_INPUT_COUNT : groups;
+}
 
 /* ---------------------------------------------------------------- devices */
 
@@ -91,7 +97,7 @@ typedef struct sysdep
 static void create_ports(midi_io_t *io)
 {
 	sysdep_t sd = { PM_SYSDEPINFO_VERS, 1, { { pmKeyAlsaClientName, io->client } } };
-	for (int n = 0; n < MIDI_IO_INPUT_COUNT; n++)
+	for (int n = 0; n < io->groups; n++)
 	{
 		input_t *in = &io->in[n];
 		in->own_id = Pm_CreateVirtualInput(input_names[n], NULL, &sd);
@@ -100,7 +106,7 @@ static void create_ports(midi_io_t *io)
 		if (in->own_id >= 0 && Pm_OpenInput(&in->own.stream, in->own_id, &sd, READ_EVENTS, NULL, NULL) != pmNoError)
 			in->own.stream = NULL;
 	}
-	for (int n = 0; n < MIDI_IO_OUTPUT_COUNT; n++)
+	for (int n = 0; n <= io->groups; n++)
 	{
 		output_t *out = &io->out[n];
 		out->own_id = Pm_CreateVirtualOutput(output_names[n], NULL, &sd);
@@ -245,12 +251,13 @@ int midi_io_list(midi_io_t *io, midi_port_info_t *out, int max)
 	return count;
 }
 
-midi_io_t *midi_io_open(const char *client_name)
+midi_io_t *midi_io_open(const char *client_name, int groups)
 {
 	midi_io_t *io = calloc(1, sizeof(*io));
 	if (!io)
 		return NULL;
 	snprintf(io->client, sizeof(io->client), "%s", client_name);
+	io->groups = clamp_groups(groups);
 	if (Pm_Initialize() != pmNoError)
 	{
 		free(io);
@@ -279,11 +286,9 @@ void midi_io_close(midi_io_t *io)
 	free(io);
 }
 
-void midi_io_rescan(midi_io_t *io)
+/* the ports again, ties to devices kept by name; the lock is held */
+static void recreate(midi_io_t *io)
 {
-	if (!io)
-		return;
-	pthread_mutex_lock(&io->lock);
 	char in_names[MIDI_IO_INPUT_COUNT][80], out_names[MIDI_IO_OUTPUT_COUNT][80];
 	for (int n = 0; n < MIDI_IO_INPUT_COUNT; n++)
 		memcpy(in_names[n], io->in[n].dev_name, sizeof(in_names[n]));
@@ -299,6 +304,28 @@ void midi_io_rescan(midi_io_t *io)
 	for (int n = 0; n < MIDI_IO_OUTPUT_COUNT; n++)
 		if (out_names[n][0])
 			open_output_device(&io->out[n], find_device(io, out_names[n], false));
+}
+
+void midi_io_rescan(midi_io_t *io)
+{
+	if (!io)
+		return;
+	pthread_mutex_lock(&io->lock);
+	recreate(io);
+	pthread_mutex_unlock(&io->lock);
+}
+
+void midi_io_set_groups(midi_io_t *io, int groups)
+{
+	if (!io)
+		return;
+	groups = clamp_groups(groups);
+	pthread_mutex_lock(&io->lock);
+	if (groups != io->groups)
+	{
+		io->groups = groups;
+		recreate(io);
+	}
 	pthread_mutex_unlock(&io->lock);
 }
 

@@ -313,12 +313,18 @@ const uint8_t *machine_reset_message(machine_reset_t reset, size_t *size)
 	}
 }
 
+/* the SC-8850 takes four port groups when its rear switch is on USB, everything else two */
+static int midi_ports(const machine_t *mc)
+{
+	return mc->roms.model == SCEMU_MODEL_SC8850 && mc->computer == SCEMU_COMPUTER_MAC ? 4 : 2;
+}
+
 static void send_both(machine_t *mc, const uint8_t *msg, size_t size)
 {
-	for (int port = 0; port < 2; port++)
+	for (int port = 0; port < midi_ports(mc); port++)
 	{
 		scemu_midi_write(mc->m, port, msg, size, 0);
-		midi_io_write(mc->midi, port ? MIDI_IO_SONG_B : MIDI_IO_SONG_A, msg, size);
+		midi_io_write(mc->midi, MIDI_IO_SONG_A + port, msg, size);
 	}
 }
 
@@ -352,10 +358,10 @@ static void feed_events(machine_t *mc, size_t n)
 		const smf_event_t *e = &mc->smf.events[mc->next_event++];
 		uint64_t at = e->frame + mc->lead;
 		uint32_t offset = at > mc->pos ? (uint32_t)(at - mc->pos) : 0;
-		if (e->tempo_change || (e->port != SMF_PORT_UNSET && e->port > 1))
+		if (e->tempo_change || (e->port != SMF_PORT_UNSET && e->port >= midi_ports(mc)))
 			continue;
-		int port = e->port == 1 ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A;
-		int song = e->port == 1 ? MIDI_IO_SONG_B : MIDI_IO_SONG_A;
+		int port = e->port == SMF_PORT_UNSET ? SCEMU_MIDI_IN_A : e->port;
+		int song = MIDI_IO_SONG_A + port;
 		if (e->status[0] == 0xf0 && e->bytes)
 		{
 			scemu_midi_write(mc->m, port, e->status, 1, offset);
@@ -377,7 +383,7 @@ static void feed_events(machine_t *mc, size_t n)
 }
 
 static void render_block(machine_t *mc, size_t n);
-static void midi_out(const uint8_t *bytes, size_t count, void *user);
+static void midi_out(int port, const uint8_t *bytes, size_t count, void *user);
 
 /* every note and every sound off on every part of both ports, and time for
  * the firmware to act on it */
@@ -386,12 +392,12 @@ static void quiet(machine_t *mc)
 	/* a stopped stream (a paused song) would never drain the ring */
 	if (mc->audio)
 		audio_pause(mc->audio, false);
-	for (int port = 0; port < 2; port++)
+	for (int port = 0; port < midi_ports(mc); port++)
 		for (int ch = 0; ch < 16; ch++)
 		{
 			uint8_t off[6] = { (uint8_t)(0xb0 | ch), 0x7b, 0x00, (uint8_t)(0xb0 | ch), 0x78, 0x00 };
 			scemu_midi_write(mc->m, port, off, sizeof(off), 0);
-			midi_io_write(mc->midi, port ? MIDI_IO_SONG_B : MIDI_IO_SONG_A, off, sizeof(off));
+			midi_io_write(mc->midi, MIDI_IO_SONG_A + port, off, sizeof(off));
 		}
 	for (size_t done = 0; done < mc->rate / 8; done += mc->block)
 	{
@@ -463,6 +469,7 @@ static void switch_machine(machine_t *mc, scemu_model_t model)
 
 	mc->m = m;
 	mc->computer = computer;
+	midi_io_set_groups(mc->midi, midi_ports(mc));
 	mc->rate = scemu_sample_rate(m);
 	snprintf(mc->model_name, sizeof(mc->model_name), "%s", name);
 	mc->opt.model = mc->model_name;
@@ -572,6 +579,13 @@ static void handle(machine_t *mc, const command_t *c)
 	}
 }
 
+/* the SC-8850's DAC words come out some 8 dB under the SC-88 family's for the
+ * same song; the player makes them up so the knob means the same on every model */
+static float output_trim(scemu_model_t model)
+{
+	return model == SCEMU_MODEL_SC8850 ? 2.5f : 1.0f;
+}
+
 static void to_s16(const int32_t *in, int16_t *out, size_t samples, float gain)
 {
 	const float scale = gain * (1.0f / 256);
@@ -588,7 +602,7 @@ static void render_block(machine_t *mc, size_t n)
 	int16_t pcm[BLOCK_MAX * 2];
 	int32_t *const out[2] = { raw, NULL };
 	scemu_render(mc->m, out, n);
-	to_s16(raw, pcm, n * 2, mc->gain);
+	to_s16(raw, pcm, n * 2, mc->gain * output_trim(mc->roms.model));
 	if (mc->audio)
 	{
 		audio_push(mc->audio, pcm, n);
@@ -645,8 +659,8 @@ static void deliver_midi(machine_t *mc)
 	{
 		double at = (delay - (now - mc->pending[n].t)) * mc->rate;
 		uint32_t offset = at > 0 ? (uint32_t)(at + 0.5) : 0;
-		scemu_midi_write(mc->m, mc->pending[n].which ? SCEMU_MIDI_IN_B : SCEMU_MIDI_IN_A,
-		                 mc->pending_bytes + mc->pending[n].at, mc->pending[n].len, offset);
+		scemu_midi_write(mc->m, mc->pending[n].which, mc->pending_bytes + mc->pending[n].at,
+		                 mc->pending[n].len, offset);
 	}
 	mc->pending_count = 0;
 	mc->pending_used = 0;
@@ -732,9 +746,10 @@ static void *run(void *user)
 
 /* ---------------------------------------------------------------- the front */
 
-static void midi_out(const uint8_t *bytes, size_t count, void *user)
+static void midi_out(int port, const uint8_t *bytes, size_t count, void *user)
 {
 	machine_t *mc = user;
+	(void)port;
 	midi_io_write(mc->midi, MIDI_IO_OUT, bytes, count);
 }
 
@@ -768,7 +783,7 @@ machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size)
 	mc->gain = 0.75f * 0.75f;
 	mc->rail = 24;
 	mc->reset = MACHINE_RESET_GS;
-	mc->midi = midi_io_open("scgui");
+	mc->midi = midi_io_open("scgui", midi_ports(mc));
 	scemu_set_midi_out(mc->m, midi_out, mc);
 	pthread_mutex_init(&mc->lock, NULL);
 	set_rom_info(mc);
@@ -957,4 +972,12 @@ int machine_midi_list(machine_t *mc, struct midi_port_info *out, int max)
 void machine_midi_rescan(machine_t *mc)
 {
 	midi_io_rescan(mc->midi);
+}
+
+int machine_midi_ports(machine_t *mc)
+{
+	pthread_mutex_lock(&mc->lock);
+	int ports = mc->info.model == SCEMU_MODEL_SC8850 && mc->computer == SCEMU_COMPUTER_MAC ? 4 : 2;
+	pthread_mutex_unlock(&mc->lock);
+	return ports;
 }
