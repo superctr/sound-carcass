@@ -20,6 +20,7 @@ struct resample
 {
 	SRC_STATE *src;               /* NULL when the rates are equal */
 	double ratio;                 /* output frames per input frame */
+	int channels;
 	resample_source_fn source;
 	void *user;
 	const float *held;            /* the source's block a pass-through read is inside */
@@ -30,23 +31,24 @@ static long pull(void *user, float **data)
 {
 	resample_t *r = user;
 	const float *block;
-	size_t frames = r->source(r->user, &block);
+	size_t frames = r->source(r->user, &block, 0);
 	*data = (float *)block;
 	return (long)frames;
 }
 
-resample_t *resample_open(uint32_t in_rate, uint32_t out_rate, resample_source_fn source, void *user)
+resample_t *resample_open(uint32_t in_rate, uint32_t out_rate, int channels, resample_source_fn source, void *user)
 {
 	resample_t *r = calloc(1, sizeof(*r));
 	if (!r)
 		return NULL;
+	r->channels = channels;
 	r->source = source;
 	r->user = user;
 	r->ratio = (double)out_rate / in_rate;
 	if (in_rate == out_rate)
 		return r;
 	int error = 0;
-	r->src = src_callback_new(pull, CONVERTER, 2, &error, r);
+	r->src = src_callback_new(pull, CONVERTER, channels, &error, r);
 	if (!r->src)
 	{
 		free(r);
@@ -64,19 +66,19 @@ void resample_close(resample_t *r)
 	free(r);
 }
 
-size_t resample_read(resample_t *r, float *stereo, size_t frames)
+size_t resample_read(resample_t *r, float *out, size_t frames)
 {
 	if (r->src)
 	{
-		long made = src_callback_read(r->src, r->ratio, (long)frames, stereo);
+		long made = src_callback_read(r->src, r->ratio, (long)frames, out);
 		return made < 0 ? 0 : (size_t)made;
 	}
-	size_t done = 0;
+	size_t done = 0, ch = (size_t)r->channels;
 	while (done < frames)
 	{
 		if (r->held_used == r->held_frames)
 		{
-			r->held_frames = r->source(r->user, &r->held);
+			r->held_frames = r->source(r->user, &r->held, frames - done);
 			r->held_used = 0;
 			if (!r->held_frames)
 				break;
@@ -84,7 +86,7 @@ size_t resample_read(resample_t *r, float *stereo, size_t frames)
 		size_t take = r->held_frames - r->held_used;
 		if (take > frames - done)
 			take = frames - done;
-		memcpy(stereo + done * 2, r->held + r->held_used * 2, take * 2 * sizeof(float));
+		memcpy(out + done * ch, r->held + r->held_used * ch, take * ch * sizeof(float));
 		r->held_used += take;
 		done += take;
 	}
