@@ -68,7 +68,8 @@ Without zlib the library and `scemu-cli` still build.
 
 `scemu.clap` is the emulator as a CLAP instrument, one per model, for a DAW: the machine's outputs as
 two stereo ports, its MIDI INs and OUT as note ports, the volume, the map, the MIDI speed and the
-headroom as parameters, the whole machine as the state.  No window yet.  See [docs/plugin.md](docs/plugin.md).
+headroom as parameters, the whole machine as the state, and the front panel as its window.  It needs
+OpenGL and, on Linux, X11.  See [docs/plugin.md](docs/plugin.md).
 
 ## Status
 
@@ -99,6 +100,6 @@ Speed: a 32 kHz frame costs about 2.3 µs when playing on this machine's x86-64 
 now dominates), so a render runs around 12× real time and playback takes a few percent of a core.
 Only 64-bit hosts compile the programs for now.
 
-Not done: the plugin's window, and its VST3 form; a save-state format that survives versions (the current one is a snapshot
+Not done: the plugin's VST3 form; a save-state format that survives versions (the current one is a snapshot
 for the boot cache); 32-bit hosts; the rest of the SC-55 family; and the sound has been compared to
 MAME's renders and to hardware measurements, not yet to a real SC-88Pro side by side.

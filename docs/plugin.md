@@ -41,6 +41,21 @@ The machine boots when the host activates the instrument: about half a second th
 afterwards from the boot cache the players keep too (`~/.cache/scemu`).  The plugin always starts from
 factory settings; it does not keep the unit's settings memory across sessions.
 
+## The window
+
+The instrument's window is the unit's front panel, the one the desktop player shows, worked the same
+way: the keys click under the left button, the right button queues a key to go down with the next
+one and holds it down, the value dial turns under a drag and under the wheel, the wheel over the
+volume knob moves the volume parameter (the host sees it move, and moving it in the host turns the
+knob), and the power switch stands the machine still and, pressed again, boots it cold with the keys
+held, the way the manual's power-on combinations want.  A cold boot takes about a second, during
+which the host hears silence from this instrument.  The window keeps the panel's shape at whatever
+size the host or the user gives it, and a host that scales its interfaces by two gets the larger
+artwork.  On Linux it is an X11 window, embedded in the host's or floating; a Wayland host puts it
+through XWayland like every other plugin's.  Without the ROM set, the window says which set is
+missing and where to put it, instead of the panel.  The combination menu and the jacks' clicks of
+the desktop player are not in it.
+
 ## Not there yet
 
-The window with the front panel; MIDI IN C and D on an SC-8850 on USB; a VST3 build.
+MIDI IN C and D on an SC-8850 on USB; a VST3 build.

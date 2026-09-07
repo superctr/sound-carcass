@@ -7,7 +7,10 @@
  * unit boots when the host activates the instance, from the boot cache
  * when there is one.  Two stereo outputs (OUTPUT 1 and 2), MIDI IN A and B,
  * MIDI OUT; the volume, the map, the MIDI rate and the DAC rail as
- * parameters; the whole machine as the state.
+ * parameters; the whole machine as the state.  The window (window.c) is
+ * the front panel: what it does to the machine goes through a queue the
+ * audio thread drains, what the machine shows comes back as the panel the
+ * audio thread last saw, and the host's timer pumps it.
  *
  * Copyright (c) 2026 ian karlsson
  * SPDX-License-Identifier: BSD-3-Clause
@@ -15,6 +18,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include <pthread.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,15 +27,18 @@
 #include "unit.h"
 #include "resample.h"
 #include "roms.h"
+#include "window.h"
 
 #define VENDOR "SoundCarcass"
 #define URL "https://github.com/superctr/sound-carcass"
 #define PLUGIN_VERSION "0.1.0"
-#define ID_PREFIX "io.github.superctr.scemu."
+#define ID_PREFIX "net.superctr.scemu."
 
 #define SOURCE_BLOCK 64            /* machine frames rendered per pull */
 #define MIDI_OUT_ARENA 4096        /* sysex the machine sends within one process call */
 #define STATE_MAGIC "SCEMUCL1"
+#define COMMANDS 64                /* the window's hand on the machine, queued for the audio thread */
+#define TIMER_MS 16
 
 /* ---------------------------------------------------------------- the models */
 
@@ -81,12 +88,25 @@ static const struct
 
 /* ---------------------------------------------------------------- the instance */
 
+enum { CMD_KEY, CMD_KEY_AFTER, CMD_DIAL };
+
+typedef struct command
+{
+	uint8_t kind;
+	bool down;
+	scemu_button_t button;
+	int steps;
+	unsigned ms;
+} command_t;
+
 typedef struct instance
 {
 	clap_plugin_t plugin;
 	const clap_host_t *host;
 	const clap_host_log_t *log;
 	const clap_host_params_t *host_params;
+	const clap_host_gui_t *host_gui;
+	const clap_host_timer_support_t *host_timer;
 	const model_info_t *info;
 	unit_t *unit;              /* NULL when the ROM set is not there; rom_error says */
 	char rom_error[256];
@@ -118,6 +138,23 @@ typedef struct instance
 	/* a state loaded before the unit was on: applied after the boot */
 	uint8_t *pending_state;
 	size_t pending_state_size;
+	/* the window, pumped by the host's timer */
+	window_t *window;
+	clap_id timer;
+	bool timer_on;
+	_Atomic bool processing;
+	/* what the window does to the machine: the main thread posts, the audio
+	 * thread drains at the start of a process call (the main thread itself
+	 * when the host is not processing) */
+	command_t commands[COMMANDS];
+	_Atomic uint32_t cmd_head, cmd_tail;
+	/* the panel as the machine last showed it, for the window */
+	pthread_mutex_t panel_lock;
+	unit_panel_t panel;
+	uint32_t panel_serial, panel_shown;
+	/* the volume knob turned in the window: the host hears at the next process or flush */
+	_Atomic bool knob_moved;
+	double knob_value;
 } instance_t;
 
 static void logf_(instance_t *in, clap_log_severity severity, const char *fmt, ...)
@@ -173,6 +210,91 @@ static void apply_all_params(instance_t *in)
 {
 	for (int id = 0; id < PARAM_COUNT; id++)
 		apply_param(in, id, in->params[id]);
+}
+
+/* ---------------------------------------------------------------- the window's side */
+
+/* with the unit held: the panel for the window, when it changed or when asked */
+static void publish_panel(instance_t *in, bool force)
+{
+	if (!in->unit)
+		return;
+	unit_panel_t p;
+	bool changed = unit_panel(in->unit, &p);
+	if (!changed && !force)
+		return;
+	pthread_mutex_lock(&in->panel_lock);
+	in->panel = p;
+	in->panel_serial++;
+	pthread_mutex_unlock(&in->panel_lock);
+}
+
+/* with the unit held */
+static void drain_commands(instance_t *in)
+{
+	uint32_t tail = atomic_load_explicit(&in->cmd_tail, memory_order_relaxed);
+	uint32_t head = atomic_load_explicit(&in->cmd_head, memory_order_acquire);
+	while (tail != head)
+	{
+		const command_t *c = &in->commands[tail % COMMANDS];
+		if (in->unit)
+			switch (c->kind)
+			{
+			case CMD_KEY: unit_key(in->unit, c->button, c->down); break;
+			case CMD_KEY_AFTER: unit_key_after(in->unit, c->button, c->down, c->ms); break;
+			case CMD_DIAL: unit_dial(in->unit, c->steps); break;
+			}
+		tail++;
+	}
+	atomic_store_explicit(&in->cmd_tail, tail, memory_order_release);
+}
+
+/* main thread */
+static void post_command(instance_t *in, command_t c)
+{
+	uint32_t head = atomic_load_explicit(&in->cmd_head, memory_order_relaxed);
+	uint32_t tail = atomic_load_explicit(&in->cmd_tail, memory_order_acquire);
+	if (head - tail < COMMANDS)
+	{
+		in->commands[head % COMMANDS] = c;
+		atomic_store_explicit(&in->cmd_head, head + 1, memory_order_release);
+	}
+	if (!atomic_load_explicit(&in->processing, memory_order_acquire))
+	{
+		pthread_mutex_lock(&in->lock);
+		drain_commands(in);
+		publish_panel(in, false);
+		pthread_mutex_unlock(&in->lock);
+	}
+}
+
+/* the knob the window turned, to the host, on the audio thread or in a flush */
+static void report_knob(instance_t *in, const clap_output_events_t *out)
+{
+	if (!out || !atomic_load_explicit(&in->knob_moved, memory_order_acquire))
+		return;
+	atomic_store_explicit(&in->knob_moved, false, memory_order_relaxed);
+	clap_event_param_gesture_t g;
+	memset(&g, 0, sizeof g);
+	g.header.size = sizeof g;
+	g.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+	g.header.type = CLAP_EVENT_PARAM_GESTURE_BEGIN;
+	g.param_id = PARAM_VOLUME;
+	out->try_push(out, &g.header);
+	clap_event_param_value_t e;
+	memset(&e, 0, sizeof e);
+	e.header.size = sizeof e;
+	e.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+	e.header.type = CLAP_EVENT_PARAM_VALUE;
+	e.param_id = PARAM_VOLUME;
+	e.note_id = -1;
+	e.port_index = -1;
+	e.channel = -1;
+	e.key = -1;
+	e.value = in->knob_value;
+	out->try_push(out, &e.header);
+	g.header.type = CLAP_EVENT_PARAM_GESTURE_END;
+	out->try_push(out, &g.header);
 }
 
 /* ---------------------------------------------------------------- MIDI out */
@@ -402,6 +524,8 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin, const cla
 	in->block_start = (double)in->hframes * in->rate / in->host_rate;
 	in->proc = p;
 	in->arena_used = 0;
+	drain_commands(in);
+	report_knob(in, p->out_events);
 	uint32_t n = p->in_events ? p->in_events->size(p->in_events) : 0;
 	for (uint32_t k = 0; k < n; k++)
 		take_event(in, p->in_events->get(p->in_events, k));
@@ -426,6 +550,7 @@ static clap_process_status plugin_process(const clap_plugin_t *plugin, const cla
 	}
 	in->hframes += frames;
 	in->proc = NULL;
+	publish_panel(in, false);
 	pthread_mutex_unlock(&in->lock);
 	return CLAP_PROCESS_CONTINUE;
 }
@@ -437,6 +562,8 @@ static bool plugin_init(const clap_plugin_t *plugin)
 	instance_t *in = plugin->plugin_data;
 	in->log = in->host->get_extension(in->host, CLAP_EXT_LOG);
 	in->host_params = in->host->get_extension(in->host, CLAP_EXT_PARAMS);
+	in->host_gui = in->host->get_extension(in->host, CLAP_EXT_GUI);
+	in->host_timer = in->host->get_extension(in->host, CLAP_EXT_TIMER_SUPPORT);
 	const char *rom_path = getenv("SCEMU_ROMS");
 	in->unit = unit_open(in->info->name, rom_path, plugin_dir[0] ? plugin_dir : NULL, false, false,
 	                     in->rom_error, sizeof in->rom_error);
@@ -453,14 +580,19 @@ static bool plugin_init(const clap_plugin_t *plugin)
 	return true;
 }
 
+static void gui_destroy(const clap_plugin_t *plugin);
+
 static void plugin_destroy(const clap_plugin_t *plugin)
 {
 	instance_t *in = plugin->plugin_data;
+	if (in->window)
+		gui_destroy(plugin);
 	resample_close(in->rs);
 	free(in->out);
 	unit_close(in->unit);
 	free(in->pending_state);
 	pthread_mutex_destroy(&in->lock);
+	pthread_mutex_destroy(&in->panel_lock);
 	free(in);
 }
 
@@ -492,6 +624,7 @@ static bool plugin_activate(const clap_plugin_t *plugin, double sample_rate, uin
 		apply_all_params(in);
 		apply_pending_state(in);
 	}
+	publish_panel(in, true);
 	resample_close(in->rs);
 	free(in->out);
 	in->rs = resample_open(in->rate, (uint32_t)(sample_rate + 0.5), in->channels, source, in);
@@ -513,8 +646,18 @@ static void plugin_deactivate(const clap_plugin_t *plugin)
 	/* the unit stays on: the machine keeps its state and the next activation is instant */
 }
 
-static bool plugin_start_processing(const clap_plugin_t *plugin) { (void)plugin; return true; }
-static void plugin_stop_processing(const clap_plugin_t *plugin) { (void)plugin; }
+static bool plugin_start_processing(const clap_plugin_t *plugin)
+{
+	instance_t *in = plugin->plugin_data;
+	atomic_store_explicit(&in->processing, true, memory_order_release);
+	return true;
+}
+
+static void plugin_stop_processing(const clap_plugin_t *plugin)
+{
+	instance_t *in = plugin->plugin_data;
+	atomic_store_explicit(&in->processing, false, memory_order_release);
+}
 
 static void plugin_reset(const clap_plugin_t *plugin)
 {
@@ -662,7 +805,7 @@ static bool params_text_to_value(const clap_plugin_t *plugin, clap_id id, const 
 static void params_flush(const clap_plugin_t *plugin, const clap_input_events_t *events, const clap_output_events_t *out)
 {
 	instance_t *in = plugin->plugin_data;
-	(void)out;
+	report_knob(in, out);
 	uint32_t n = events ? events->size(events) : 0;
 	if (!n)
 		return;
@@ -784,6 +927,7 @@ static bool state_load(const clap_plugin_t *plugin, const clap_istream_t *stream
 	in->pending_state = state;
 	in->pending_state_size = size;
 	apply_pending_state(in);
+	publish_panel(in, true);
 	pthread_mutex_unlock(&in->lock);
 	if (in->host_params)
 		in->host_params->rescan(in->host, CLAP_PARAM_RESCAN_VALUES);
@@ -791,6 +935,235 @@ static bool state_load(const clap_plugin_t *plugin, const clap_istream_t *stream
 }
 
 static const clap_plugin_state_t state_ext = { state_save, state_load };
+
+/* ---------------------------------------------------------------- the window */
+
+static void act_key(void *user, scemu_button_t b, bool down)
+{
+	post_command(user, (command_t){ .kind = CMD_KEY, .button = b, .down = down });
+}
+
+static void act_key_after(void *user, scemu_button_t b, bool down, unsigned ms)
+{
+	post_command(user, (command_t){ .kind = CMD_KEY_AFTER, .button = b, .down = down, .ms = ms });
+}
+
+static void act_dial(void *user, int steps)
+{
+	post_command(user, (command_t){ .kind = CMD_DIAL, .steps = steps });
+}
+
+/* the hard power switch: off stands the machine still; on is a cold boot,
+ * the keys held, here on the main thread with the audio thread silent
+ * meanwhile */
+static void act_power(void *user, bool on)
+{
+	instance_t *in = user;
+	if (!in->unit)
+		return;
+	pthread_mutex_lock(&in->lock);
+	unit_power(in->unit, on);
+	if (on)
+	{
+		apply_all_params(in);
+		apply_pending_state(in);
+	}
+	publish_panel(in, true);
+	pthread_mutex_unlock(&in->lock);
+	if (on && in->window)
+		window_boot_done(in->window);
+}
+
+static void act_knob(void *user, float turn)
+{
+	instance_t *in = user;
+	in->params[PARAM_VOLUME] = turn;
+	in->gain = turn * turn;
+	in->knob_value = turn;
+	atomic_store_explicit(&in->knob_moved, true, memory_order_release);
+	if (in->host_params && in->host_params->request_flush)
+		in->host_params->request_flush(in->host);
+}
+
+static void act_element(void *user, panel_element_t e, double x, double y) {}
+static void act_combo_menu(void *user, panel_element_t e, double x, double y) {}
+
+static void act_closed(void *user)
+{
+	instance_t *in = user;
+	if (in->host_gui && in->host_gui->closed)
+		in->host_gui->closed(in->host, false);
+}
+
+static const window_actions_t window_actions = {
+	{ act_key, act_key_after, act_dial, act_power, act_knob, act_element, act_combo_menu }, act_closed
+};
+
+static void on_timer(const clap_plugin_t *plugin, clap_id timer_id)
+{
+	instance_t *in = plugin->plugin_data;
+	if (!in->window || timer_id != in->timer)
+		return;
+	pthread_mutex_lock(&in->panel_lock);
+	if (in->panel_shown != in->panel_serial)
+	{
+		unit_panel_t p = in->panel;
+		in->panel_shown = in->panel_serial;
+		pthread_mutex_unlock(&in->panel_lock);
+		window_set_panel(in->window, &p);
+	}
+	else
+		pthread_mutex_unlock(&in->panel_lock);
+	window_set_knob(in->window, (float)in->params[PARAM_VOLUME]);
+	window_tick(in->window);
+}
+
+static const clap_plugin_timer_support_t timer_ext = { on_timer };
+
+static bool gui_is_api_supported(const clap_plugin_t *plugin, const char *api, bool is_floating)
+{
+	return !strcmp(api, window_api());
+}
+
+static bool gui_get_preferred_api(const clap_plugin_t *plugin, const char **api, bool *is_floating)
+{
+	*api = window_api();
+	*is_floating = false;
+	return true;
+}
+
+static bool gui_create(const clap_plugin_t *plugin, const char *api, bool is_floating)
+{
+	instance_t *in = plugin->plugin_data;
+	if (strcmp(api, window_api()) != 0 || in->window)
+		return false;
+	if (!in->host_timer || !in->host_timer->register_timer)
+	{
+		logf_(in, CLAP_LOG_WARNING, "%s: the host has no timers, so no window", in->info->label);
+		return false;
+	}
+	char err[128];
+	in->window = window_create(in->info->model, 1.0, &window_actions, in, err, sizeof err);
+	if (!in->window)
+	{
+		logf_(in, CLAP_LOG_WARNING, "%s: no window: %s", in->info->label, err);
+		return false;
+	}
+	if (!in->unit)
+	{
+		char text[512];
+		snprintf(text, sizeof text, "%s\n\n%s\n\nPut the ROM set beside the plugin or in .mame/roms under your home, or name it in SCEMU_ROMS, and load the plugin again.",
+		         in->info->label, in->rom_error);
+		window_set_message(in->window, text);
+	}
+	else
+	{
+		pthread_mutex_lock(&in->lock);
+		publish_panel(in, true);
+		pthread_mutex_unlock(&in->lock);
+	}
+	in->timer_on = in->host_timer->register_timer(in->host, TIMER_MS, &in->timer);
+	if (!in->timer_on)
+		logf_(in, CLAP_LOG_WARNING, "%s: the host gave no timer: the window will not move", in->info->label);
+	return true;
+}
+
+static void gui_destroy(const clap_plugin_t *plugin)
+{
+	instance_t *in = plugin->plugin_data;
+	if (in->timer_on)
+		in->host_timer->unregister_timer(in->host, in->timer);
+	in->timer_on = false;
+	window_destroy(in->window);
+	in->window = NULL;
+}
+
+static bool gui_set_scale(const clap_plugin_t *plugin, double scale)
+{
+	instance_t *in = plugin->plugin_data;
+	return in->window && window_set_scale(in->window, scale);
+}
+
+static bool gui_get_size(const clap_plugin_t *plugin, uint32_t *width, uint32_t *height)
+{
+	instance_t *in = plugin->plugin_data;
+	if (!in->window)
+		return false;
+	window_size(in->window, width, height);
+	return true;
+}
+
+static bool gui_can_resize(const clap_plugin_t *plugin) { return true; }
+
+static bool gui_get_resize_hints(const clap_plugin_t *plugin, clap_gui_resize_hints_t *hints)
+{
+	instance_t *in = plugin->plugin_data;
+	if (!in->window)
+		return false;
+	uint32_t w, h;
+	window_size(in->window, &w, &h);
+	hints->can_resize_horizontally = true;
+	hints->can_resize_vertically = true;
+	hints->preserve_aspect_ratio = true;
+	hints->aspect_ratio_width = w;
+	hints->aspect_ratio_height = h;
+	return true;
+}
+
+static bool gui_adjust_size(const clap_plugin_t *plugin, uint32_t *width, uint32_t *height)
+{
+	instance_t *in = plugin->plugin_data;
+	if (!in->window)
+		return false;
+	window_fit(in->window, width, height);
+	return true;
+}
+
+static bool gui_set_size(const clap_plugin_t *plugin, uint32_t width, uint32_t height)
+{
+	instance_t *in = plugin->plugin_data;
+	return in->window && window_set_size(in->window, width, height);
+}
+
+static bool gui_set_parent(const clap_plugin_t *plugin, const clap_window_t *window)
+{
+	instance_t *in = plugin->plugin_data;
+	return in->window && !strcmp(window->api, window_api()) && window_set_parent(in->window, (uintptr_t)window->ptr);
+}
+
+static bool gui_set_transient(const clap_plugin_t *plugin, const clap_window_t *window)
+{
+	instance_t *in = plugin->plugin_data;
+	return in->window && !strcmp(window->api, window_api()) && window_set_transient(in->window, (uintptr_t)window->ptr);
+}
+
+static void gui_suggest_title(const clap_plugin_t *plugin, const char *title)
+{
+	instance_t *in = plugin->plugin_data;
+	if (in->window)
+		window_set_title(in->window, title);
+}
+
+static bool gui_show(const clap_plugin_t *plugin)
+{
+	instance_t *in = plugin->plugin_data;
+	return in->window && window_show(in->window);
+}
+
+static bool gui_hide(const clap_plugin_t *plugin)
+{
+	instance_t *in = plugin->plugin_data;
+	if (!in->window)
+		return false;
+	window_hide(in->window);
+	return true;
+}
+
+static const clap_plugin_gui_t gui_ext = {
+	gui_is_api_supported, gui_get_preferred_api, gui_create, gui_destroy, gui_set_scale, gui_get_size,
+	gui_can_resize, gui_get_resize_hints, gui_adjust_size, gui_set_size, gui_set_parent, gui_set_transient,
+	gui_suggest_title, gui_show, gui_hide
+};
 
 /* ---------------------------------------------------------------- extensions */
 
@@ -805,6 +1178,10 @@ static const void *plugin_get_extension(const clap_plugin_t *plugin, const char 
 		return &params_ext;
 	if (!strcmp(id, CLAP_EXT_STATE))
 		return &state_ext;
+	if (!strcmp(id, CLAP_EXT_GUI))
+		return &gui_ext;
+	if (!strcmp(id, CLAP_EXT_TIMER_SUPPORT))
+		return &timer_ext;
 	return NULL;
 }
 
@@ -835,6 +1212,7 @@ static const clap_plugin_t *factory_create(const clap_plugin_factory_t *f, const
 	in->host = host;
 	in->info = info;
 	pthread_mutex_init(&in->lock, NULL);
+	pthread_mutex_init(&in->panel_lock, NULL);
 	for (int n = 0; n < PARAM_COUNT; n++)
 		in->params[n] = param_infos[n].def;
 	in->gain = (float)(in->params[PARAM_VOLUME] * in->params[PARAM_VOLUME]);
