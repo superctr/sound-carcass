@@ -4,8 +4,7 @@ An emulator of the Roland Sound Canvas SC-55mkII, SC-88, SC-88VL, SC-88Pro and S
 with a terminal player and a headless renderer.  It runs the machine's own firmware on an emulated
 board; the H8/510 main CPU (the H8/532 on the SC-55mkII, the SH-2 on the SC-8850), the XP tone
 generator's DSP program and the LSP effect processor's program are all compiled to native code with
-[sljit](https://github.com/zherczeg/sljit).  An audio plugin is planned on top of
-the library.
+[sljit](https://github.com/zherczeg/sljit).  It comes as a library, two players and a CLAP plugin.
 
 Clean-room, BSD-3.  You need your own ROM images: see `docs/roms.md`.
 
@@ -67,6 +66,10 @@ PortMidi, all built from the submodules (`git submodule update --init`).  The li
 at the machine's own rate and resamples nothing.
 Without zlib the library and `scemu-cli` still build.
 
+`scemu.clap` is the emulator as a CLAP instrument, one per model, for a DAW: the machine's outputs as
+two stereo ports, its MIDI INs and OUT as note ports, the volume, the map, the MIDI speed and the
+headroom as parameters, the whole machine as the state.  No window yet.  See [docs/plugin.md](docs/plugin.md).
+
 ## Status
 
 Playable.  The SC-88 and the SC-88Pro boot their real firmware through the display sequence, the
@@ -96,6 +99,6 @@ Speed: a 32 kHz frame costs about 2.3 µs when playing on this machine's x86-64 
 now dominates), so a render runs around 12× real time and playback takes a few percent of a core.
 Only 64-bit hosts compile the programs for now.
 
-Not done: an audio plugin; a save-state format that survives versions (the current one is a snapshot
+Not done: the plugin's window, and its VST3 form; a save-state format that survives versions (the current one is a snapshot
 for the boot cache); 32-bit hosts; the rest of the SC-55 family; and the sound has been compared to
 MAME's renders and to hardware measurements, not yet to a real SC-88Pro side by side.

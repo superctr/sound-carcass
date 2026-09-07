@@ -14,6 +14,7 @@ option(SCEMU_BUILD_TOOLS "Build the command-line tools" ON)
 option(SCEMU_EXTERNAL_EXEC_ALLOCATOR
 	"Do not build sljit's executable-memory allocator; the integrator supplies one through scemu_config" OFF)
 option(SCEMU_H8500_JIT "Build the H8/510 dynamic translator (the interpreter stays the fallback)" ON)
+option(SCEMU_BUILD_PLUGIN "Build the CLAP plugin" ON)
 
 # ---------------------------------------------------------------------------
 # sljit, built from the submodule as a static library
@@ -170,6 +171,23 @@ if(ZLIB_FOUND)
 	if(NOT MSVC)
 		target_compile_options(scemu_play PRIVATE -Wall -Wextra -Wno-unused-parameter)
 	endif()
+endif()
+
+# the CLAP plugin: one instrument per model, in a shared object the host loads
+if(SCEMU_BUILD_PLUGIN AND TARGET scemu_play)
+	add_library(scemu_clap MODULE plugin/scemu_clap.c)
+	set_target_properties(scemu_clap PROPERTIES OUTPUT_NAME scemu PREFIX "" SUFFIX ".clap"
+		C_VISIBILITY_PRESET hidden)
+	target_include_directories(scemu_clap PRIVATE clap/include)
+	target_link_libraries(scemu_clap PRIVATE scemu_play scemu pthread)
+	if(NOT MSVC)
+		target_compile_options(scemu_clap PRIVATE -Wall -Wextra -Wno-unused-parameter)
+	endif()
+	if(CMAKE_SYSTEM_NAME STREQUAL "Linux")   # only clap_entry leaves the shared object
+		target_link_options(scemu_clap PRIVATE -Wl,--exclude-libs,ALL)
+	endif()
+elseif(SCEMU_BUILD_PLUGIN)
+	message(STATUS "the plugin skipped: needs zlib")
 endif()
 
 # scgui, the desktop player: the panel in a GTK 4 window, PortAudio and PortMidi for the outside world
