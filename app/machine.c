@@ -12,14 +12,13 @@
 #include "machine.h"
 #include "audio.h"
 #include "roms.h"
-#include "session.h"
+#include "unit.h"
 #include "smf.h"
 #include "midi_io.h"
 
 #define BLOCK_MAX 1024
 #define BLOCK_DEFAULT 256
 #define QUEUE_SIZE 64
-#define TIMED_KEYS 32
 #define PENDING_MAX 256
 #define PENDING_BYTES 65536
 
@@ -39,14 +38,11 @@ typedef struct command
 
 struct machine
 {
-	scplay_roms_t roms;
-	scemu_t *m;
+	unit_t *unit;
 	uint32_t rate;
-	session_t session;
 	scplay_audio_t *audio;
 	midi_io_t *midi;
 	machine_options_t opt;
-	char model_name[16];      /* opt.model points here once the model has been switched */
 	size_t block;             /* frames per render, the audio device's buffer */
 
 	pthread_t thread;
@@ -56,20 +52,15 @@ struct machine
 	machine_state_t state;
 	machine_rom_info_t info;
 	unsigned models;          /* a bit per scemu_model_t whose ROM set is there */
+	int ports;                /* the port groups the running machine takes */
 
 	/* the thread's own */
 	smf_t smf;
-	bool have_smf, playing, paused, power;
+	bool have_smf, playing, paused;
 	uint64_t pos, end_frame, lead;
 	size_t next_event;
-	bool held[SCEMU_BUTTON_COUNT];
-	struct { scemu_button_t b; bool down; uint64_t due; } timed[TIMED_KEYS];
-	int timed_count;
-	uint64_t frames;          /* rendered since the start; what the timed keys wait on */
 	float gain;
-	int rail;
 	machine_reset_t reset;
-	scemu_computer_switch_t computer;   /* the rear switch the running machine came up with */
 	double clock_start;
 	uint64_t clock_frames;
 	bool started;
@@ -145,29 +136,14 @@ static bool take(machine_t *mc, command_t *c)
 static void publish(machine_t *mc, bool booting)
 {
 	machine_state_t s;
+	unit_panel_t panel;
 	memset(&s, 0, sizeof(s));
-	bool glass_changed = false;
-	if (mc->power)
-	{
-		const scemu_lcd_t *lcd = scemu_lcd(mc->m);
-		const scemu_glcd_t *glcd = scemu_glcd(mc->m);
-		if (lcd)
-			s.lcd = *lcd;
-		s.has_glcd = glcd != NULL;
-		/* the whole bitmap when the last snapshot had no glass of this kind:
-		 * a fresh machine, or one that has just been switched on */
-		if (glcd && (glcd->changed || !mc->state.has_glcd))
-		{
-			s.glcd = *glcd;
-			s.glcd.changed = false;
-			scemu_glcd_ack(mc->m);
-			glass_changed = true;
-		}
-		else if (glcd)
-			s.glcd = mc->state.glcd;
-		s.leds = scemu_leds(mc->m);
-	}
-	s.power = mc->power;
+	bool panel_changed = unit_panel(mc->unit, &panel);
+	s.lcd = panel.lcd;
+	s.glcd = panel.glcd;
+	s.has_glcd = panel.has_glcd;
+	s.leds = panel.leds;
+	s.power = panel.power;
 	s.booting = booting;
 	s.playing = mc->playing;
 	s.paused = mc->paused;
@@ -188,8 +164,7 @@ static void publish(machine_t *mc, bool booting)
 	snprintf(s.title, sizeof(s.title), "%s", mc->state.title);
 	snprintf(s.error, sizeof(s.error), "%s", mc->state.error);
 	s.generation = mc->state.generation;
-	if (glass_changed || memcmp(&s.lcd, &mc->state.lcd, sizeof(s.lcd)) != 0 || s.leds != mc->state.leds || s.power != mc->state.power
-	    || s.booting != mc->state.booting || s.playing != mc->state.playing || s.paused != mc->state.paused
+	if (panel_changed || s.booting != mc->state.booting || s.playing != mc->state.playing || s.paused != mc->state.paused
 	    || s.finished != mc->state.finished || s.position != mc->state.position || s.underruns != mc->state.underruns
 	    || strcmp(s.audio, mc->state.audio) != 0 || s.latency != mc->state.latency)
 		s.generation++;
@@ -221,11 +196,12 @@ static void set_rom_info(machine_t *mc)
 	unsigned models = scplay_roms_available(mc->opt.rom, mc->opt.exe_dir);
 	pthread_mutex_lock(&mc->lock);
 	mc->models = models;
-	mc->info.model = mc->roms.model;
-	mc->info.label = scplay_model_label(mc->roms.model);
-	snprintf(mc->info.version, sizeof(mc->info.version), "%s", mc->roms.version);
-	snprintf(mc->info.origin, sizeof(mc->info.origin), "%s", mc->roms.origin);
+	mc->info.model = unit_model(mc->unit);
+	mc->info.label = unit_model_label(mc->unit);
+	snprintf(mc->info.version, sizeof(mc->info.version), "%s", unit_rom_version(mc->unit));
+	snprintf(mc->info.origin, sizeof(mc->info.origin), "%s", unit_rom_origin(mc->unit));
 	mc->info.rate = mc->rate;
+	mc->ports = unit_midi_ports(mc->unit);
 	mc->state.generation++;
 	pthread_mutex_unlock(&mc->lock);
 }
@@ -247,43 +223,10 @@ static bool boot_progress(void *user, uint64_t frames)
 	return true;
 }
 
-static void key(machine_t *mc, scemu_button_t b, bool down)
-{
-	mc->held[b] = down;
-	if (mc->power)
-		scemu_button(mc->m, b, down);
-}
-
-/* the timed keys, in the order they were posted, once their time has come */
-static void timed_keys(machine_t *mc)
-{
-	int kept = 0;
-	for (int n = 0; n < mc->timed_count; n++)
-	{
-		if (mc->timed[n].due <= mc->frames)
-			key(mc, mc->timed[n].b, mc->timed[n].down);
-		else
-			mc->timed[kept++] = mc->timed[n];
-	}
-	mc->timed_count = kept;
-}
-
-static void hold_keys(machine_t *mc)
-{
-	for (int n = 0; n < SCEMU_BUTTON_COUNT; n++)
-		if (mc->held[n])
-			scemu_button(mc->m, (scemu_button_t)n, true);
-}
-
 static void boot(machine_t *mc, bool use_cache)
 {
-	mc->power = true;
-	hold_keys(mc);
 	publish(mc, true);
-	session_boot(&mc->session, use_cache, boot_progress, mc);
-	scemu_set_map(mc->m, mc->opt.map);
-	scemu_set_midi_rate(mc->m, mc->opt.midi_rate);
-	scemu_set_dac_rail(mc->m, mc->rail);
+	unit_boot(mc->unit, use_cache, boot_progress, mc);
 	publish(mc, false);
 }
 
@@ -314,19 +257,17 @@ const uint8_t *machine_reset_message(machine_reset_t reset, size_t *size)
 	}
 }
 
-/* the SC-8850 takes four port groups when its rear switch is on USB, everything else two */
 static int midi_ports(const machine_t *mc)
 {
-	return mc->roms.model == SCEMU_MODEL_SC8850 && mc->computer == SCEMU_COMPUTER_MAC ? 4 : 2;
+	return unit_midi_ports(mc->unit);
 }
 
+/* to every port group of the machine, and to the song outputs with it */
 static void send_both(machine_t *mc, const uint8_t *msg, size_t size)
 {
+	unit_send(mc->unit, msg, size);
 	for (int port = 0; port < midi_ports(mc); port++)
-	{
-		scemu_midi_write(mc->m, port, msg, size, 0);
 		midi_io_write(mc->midi, MIDI_IO_SONG_A + port, msg, size);
-	}
 }
 
 static void load_song(machine_t *mc, const char *path)
@@ -365,19 +306,19 @@ static void feed_events(machine_t *mc, size_t n)
 		int song = MIDI_IO_SONG_A + port;
 		if (e->status[0] == 0xf0 && e->bytes)
 		{
-			scemu_midi_write(mc->m, port, e->status, 1, offset);
-			scemu_midi_write(mc->m, port, e->bytes, e->length - 1u, offset);
+			scemu_midi_write(unit_machine(mc->unit), port, e->status, 1, offset);
+			scemu_midi_write(unit_machine(mc->unit), port, e->bytes, e->length - 1u, offset);
 			midi_io_write(mc->midi, song, e->status, 1);
 			midi_io_write(mc->midi, song, e->bytes, e->length - 1u);
 		}
 		else if (e->bytes)
 		{
-			scemu_midi_write(mc->m, port, e->bytes, e->length, offset);
+			scemu_midi_write(unit_machine(mc->unit), port, e->bytes, e->length, offset);
 			midi_io_write(mc->midi, song, e->bytes, e->length);
 		}
 		else
 		{
-			scemu_midi_write(mc->m, port, e->status, e->length, offset);
+			scemu_midi_write(unit_machine(mc->unit), port, e->status, e->length, offset);
 			midi_io_write(mc->midi, song, e->status, e->length);
 		}
 	}
@@ -397,7 +338,7 @@ static void quiet(machine_t *mc)
 		for (int ch = 0; ch < 16; ch++)
 		{
 			uint8_t off[6] = { (uint8_t)(0xb0 | ch), 0x7b, 0x00, (uint8_t)(0xb0 | ch), 0x78, 0x00 };
-			scemu_midi_write(mc->m, port, off, sizeof(off), 0);
+			scemu_midi_write(unit_machine(mc->unit), port, off, sizeof(off), 0);
 			midi_io_write(mc->midi, MIDI_IO_SONG_A + port, off, sizeof(off));
 		}
 	for (size_t done = 0; done < mc->rate / 8; done += mc->block)
@@ -425,71 +366,36 @@ static void open_audio(machine_t *mc)
 
 /* Another machine in place of this one -- another model, or the same one with
  * its rear switch in another position, which the firmware only reads at boot.
- * The new ROMs are loaded before the old instance goes, so a set that is not
- * there leaves the old one playing; the same model keeps the images it has. */
+ * The unit loads the new ROMs before the old instance goes, so a set that is
+ * not there leaves the old one playing. */
 static void switch_machine(machine_t *mc, scemu_model_t model)
 {
-	const char *name = scplay_model_name(model);
-	scemu_computer_switch_t computer = computer_of(mc, model);
-	bool same_roms = model == mc->roms.model;
-	if (!name || (same_roms && computer == mc->computer))
-		return;
-	scplay_roms_t roms;
 	char err[256];
-	if (!same_roms && !scplay_roms_load(&roms, name, mc->opt.rom, mc->opt.exe_dir, err, sizeof(err)))
+	if (!unit_prepare(mc->unit, model, computer_of(mc, model), err, sizeof(err)))
 	{
-		set_error(mc, err);
+		if (err[0])
+			set_error(mc, err);
 		return;
 	}
-	scemu_t *m = scemu_create(model, same_roms ? &mc->roms.roms : &roms.roms, NULL);
-	if (!m)
-	{
-		set_error(mc, scemu_error(NULL));
-		if (!same_roms)
-			scplay_roms_free(&roms);
-		return;
-	}
-	scemu_set_computer_switch(m, computer);
-	bool was_on = mc->power;
-	if (was_on)
-	{
-		if (mc->have_smf)
-			quiet(mc);
-		session_save_settings(&mc->session);
-	}
+	bool was_on = unit_power_on(mc->unit);
+	if (was_on && mc->have_smf)
+		quiet(mc);
 	unload_song(mc);
 	set_song(mc, "", "");
-	mc->power = false;
-	session_free(&mc->session);
-	scemu_destroy(mc->m);
-	if (!same_roms)
-	{
-		scplay_roms_free(&mc->roms);
-		mc->roms = roms;
-	}
-
-	mc->m = m;
-	mc->computer = computer;
+	publish(mc, was_on);
+	unit_replace(mc->unit, boot_progress, mc);
 	midi_io_set_groups(mc->midi, midi_ports(mc));
 	uint32_t was_rate = mc->rate;
-	mc->rate = scemu_sample_rate(m);
+	mc->rate = unit_rate(mc->unit);
 	if (mc->rate != was_rate)   /* the stream was opened around the old machine's rate */
 	{
 		audio_close(mc->audio);
 		mc->audio = NULL;
 		open_audio(mc);
 	}
-	snprintf(mc->model_name, sizeof(mc->model_name), "%s", name);
-	mc->opt.model = mc->model_name;
-	session_init(&mc->session, mc->m, mc->roms.model_name, mc->roms.hash, mc->computer,
-	             mc->opt.no_cache, mc->opt.keep_settings);
-	scemu_set_midi_out(mc->m, midi_out, mc);
 	set_error(mc, "");
 	set_rom_info(mc);
-	if (was_on)
-		boot(mc, true);
-	else
-		publish(mc, false);
+	publish(mc, false);
 	mc->clock_start = now_seconds();
 	mc->clock_frames = 0;
 }
@@ -499,44 +405,39 @@ static void handle(machine_t *mc, const command_t *c)
 	switch (c->kind)
 	{
 	case CMD_PLAY:
-		if (mc->power)
+		if (unit_power_on(mc->unit))
 			load_song(mc, c->path);
 		break;
 	case CMD_PAUSE:
-		if (mc->power && c->a && !mc->paused)
+		if (unit_power_on(mc->unit) && c->a && !mc->paused)
 			quiet(mc);
 		mc->paused = c->a != 0;
 		break;
 	case CMD_STOP:
-		if (mc->power && mc->have_smf)
+		if (unit_power_on(mc->unit) && mc->have_smf)
 			quiet(mc);
 		unload_song(mc);
 		set_song(mc, "", "");
 		break;
 	case CMD_BUTTON:
-		if (c->c > 0 && mc->timed_count < TIMED_KEYS)
-		{
-			mc->timed[mc->timed_count].b = (scemu_button_t)c->a;
-			mc->timed[mc->timed_count].down = c->b != 0;
-			mc->timed[mc->timed_count].due = mc->frames + (uint64_t)c->c * mc->rate / 1000;
-			mc->timed_count++;
-		}
+		if (c->c > 0)
+			unit_key_after(mc->unit, (scemu_button_t)c->a, c->b != 0, (unsigned)c->c);
 		else
-			key(mc, (scemu_button_t)c->a, c->b != 0);
+			unit_key(mc->unit, (scemu_button_t)c->a, c->b != 0);
 		break;
 	case CMD_DIAL:
-		if (mc->power)
-			scemu_dial(mc->m, c->a);
+		unit_dial(mc->unit, c->a);
 		break;
 	case CMD_POWER:
-		if (c->a && !mc->power)
+		if (c->a && !unit_power_on(mc->unit))
 		{
-			scemu_reset(mc->m);
-			boot(mc, false);
+			publish(mc, true);
+			unit_power(mc->unit, true);
+			publish(mc, false);
 		}
-		else if (!c->a && mc->power)
+		else if (!c->a && unit_power_on(mc->unit))
 		{
-			mc->power = false;
+			unit_power(mc->unit, false);
 			unload_song(mc);
 			set_song(mc, "", "");
 			publish(mc, false);
@@ -566,17 +467,14 @@ static void handle(machine_t *mc, const command_t *c)
 		mc->reset = (machine_reset_t)c->a;
 		break;
 	case CMD_SEND:
-		if (mc->power)
+		if (unit_power_on(mc->unit))
 			send_both(mc, (const uint8_t *)c->path, (size_t)c->a);
 		break;
 	case CMD_MAP:
-		mc->opt.map = (scemu_map_t)c->a;
-		if (mc->power)
-			scemu_set_map(mc->m, mc->opt.map);
+		unit_set_map(mc->unit, (scemu_map_t)c->a);
 		break;
 	case CMD_RAIL:
-		mc->rail = c->a;
-		scemu_set_dac_rail(mc->m, mc->rail);
+		unit_set_dac_rail(mc->unit, c->a);
 		break;
 	case CMD_MODEL:
 		if (c->b >= 0)
@@ -586,13 +484,6 @@ static void handle(machine_t *mc, const command_t *c)
 	case CMD_QUIT:
 		break;
 	}
-}
-
-/* the SC-8850's DAC words come out some 8 dB under the SC-88 family's for the
- * same song; the player makes them up so the knob means the same on every model */
-static float output_trim(scemu_model_t model)
-{
-	return model == SCEMU_MODEL_SC8850 ? 2.5f : 1.0f;
 }
 
 static void to_s16(const int32_t *in, int16_t *out, size_t samples, float gain)
@@ -610,8 +501,8 @@ static void render_block(machine_t *mc, size_t n)
 	int32_t raw[BLOCK_MAX * 2];
 	int16_t pcm[BLOCK_MAX * 2];
 	int32_t *const out[2] = { raw, NULL };
-	scemu_render(mc->m, out, n);
-	to_s16(raw, pcm, n * 2, mc->gain * output_trim(mc->roms.model));
+	unit_render(mc->unit, out, n);
+	to_s16(raw, pcm, n * 2, mc->gain * unit_output_trim(unit_model(mc->unit)));
 	if (mc->audio)
 	{
 		audio_push(mc->audio, pcm, n);
@@ -624,9 +515,6 @@ static void render_block(machine_t *mc, size_t n)
 			audio_pause(mc->audio, false);
 	}
 	mc->clock_frames += n;
-	mc->frames += n;
-	if (mc->timed_count)
-		timed_keys(mc);
 }
 
 /* Whatever the host's ports hold, stamped with the time it was seen; the
@@ -668,7 +556,7 @@ static void deliver_midi(machine_t *mc)
 	{
 		double at = (delay - (now - mc->pending[n].t)) * mc->rate;
 		uint32_t offset = at > 0 ? (uint32_t)(at + 0.5) : 0;
-		scemu_midi_write(mc->m, mc->pending[n].which, mc->pending_bytes + mc->pending[n].at,
+		scemu_midi_write(unit_machine(mc->unit), mc->pending[n].which, mc->pending_bytes + mc->pending[n].at,
 		                 mc->pending[n].len, offset);
 	}
 	mc->pending_count = 0;
@@ -696,7 +584,7 @@ static void *run(void *user)
 			handle(mc, &c);
 			free(c.path);
 		}
-		if (!mc->power)
+		if (!unit_power_on(mc->unit))
 		{
 			if (mc->audio)
 				audio_pause(mc->audio, true);
@@ -768,32 +656,23 @@ machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size)
 	if (!mc)
 		return NULL;
 	mc->opt = *o;
-	if (!scplay_roms_load(&mc->roms, o->model, o->rom, o->exe_dir, err, err_size))
+	mc->unit = unit_open(o->model, o->rom, o->exe_dir, o->no_cache, o->keep_settings, err, err_size);
+	if (!mc->unit)
 	{
 		free(mc);
 		return NULL;
 	}
-	mc->m = scemu_create(mc->roms.model, &mc->roms.roms, NULL);
-	if (!mc->m)
-	{
-		snprintf(err, err_size, "%s", scemu_error(NULL));
-		scplay_roms_free(&mc->roms);
-		free(mc);
-		return NULL;
-	}
-	mc->computer = computer_of(mc, mc->roms.model);
-	scemu_set_computer_switch(mc->m, mc->computer);
-	mc->rate = scemu_sample_rate(mc->m);
-	snprintf(mc->model_name, sizeof(mc->model_name), "%s", mc->roms.model_name);
-	mc->opt.model = mc->model_name;
-	session_init(&mc->session, mc->m, mc->roms.model_name, mc->roms.hash, mc->computer,
-	             o->no_cache, o->keep_settings);
+	/* the rear switch is the one the options hold for the model the unit picked */
+	unit_set_computer_switch(mc->unit, computer_of(mc, unit_model(mc->unit)));
+	mc->rate = unit_rate(mc->unit);
+	unit_set_map(mc->unit, o->map);
+	unit_set_midi_rate(mc->unit, o->midi_rate);
+	unit_set_dac_rail(mc->unit, 24);
 	open_audio(mc);
 	mc->gain = 0.75f * 0.75f;
-	mc->rail = 24;
 	mc->reset = MACHINE_RESET_GS;
 	mc->midi = midi_io_open("scgui", midi_ports(mc));
-	scemu_set_midi_out(mc->m, midi_out, mc);
+	unit_set_midi_out(mc->unit, midi_out, mc);
 	pthread_mutex_init(&mc->lock, NULL);
 	set_rom_info(mc);
 	if (pthread_create(&mc->thread, NULL, run, mc) != 0)
@@ -815,14 +694,10 @@ void machine_stop(machine_t *mc)
 		post(mc, c);
 		pthread_join(mc->thread, NULL);
 	}
-	if (mc->power)
-		session_save_settings(&mc->session);
 	unload_song(mc);
 	audio_close(mc->audio);
 	midi_io_close(mc->midi);
-	session_free(&mc->session);
-	scemu_destroy(mc->m);
-	scplay_roms_free(&mc->roms);
+	unit_close(mc->unit);
 	pthread_mutex_destroy(&mc->lock);
 	free(mc);
 }
@@ -986,7 +861,7 @@ void machine_midi_rescan(machine_t *mc)
 int machine_midi_ports(machine_t *mc)
 {
 	pthread_mutex_lock(&mc->lock);
-	int ports = mc->info.model == SCEMU_MODEL_SC8850 && mc->computer == SCEMU_COMPUTER_MAC ? 4 : 2;
+	int ports = mc->ports;
 	pthread_mutex_unlock(&mc->lock);
 	return ports;
 }

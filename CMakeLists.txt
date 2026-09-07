@@ -7,6 +7,8 @@ set(CMAKE_C_EXTENSIONS OFF)
 if(NOT CMAKE_BUILD_TYPE)
 	set(CMAKE_BUILD_TYPE RelWithDebInfo)
 endif()
+# everything goes into the plugin, a shared object, as much as into the tools
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(SCEMU_BUILD_TOOLS "Build the command-line tools" ON)
 option(SCEMU_EXTERNAL_EXEC_ALLOCATOR
@@ -158,14 +160,25 @@ if(SCEMU_BUILD_TOOLS)
 	endif()
 endif()
 
+# what the players and the plugin share around the library: the ROM sets, the
+# boot cache and settings memory, a unit short of a clock, MIDI files, the
+# resampler (zlib reads ROM zips)
+if(ZLIB_FOUND)
+	add_library(scemu_play STATIC play/roms.c play/session.c play/unit.c play/smf.c play/sjis.c play/resample.c)
+	target_include_directories(scemu_play PUBLIC play)
+	target_link_libraries(scemu_play PUBLIC scemu ZLIB::ZLIB samplerate)
+	if(NOT MSVC)
+		target_compile_options(scemu_play PRIVATE -Wall -Wextra -Wno-unused-parameter)
+	endif()
+endif()
+
 # scgui, the desktop player: the panel in a GTK 4 window, PortAudio and PortMidi for the outside world
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
 	pkg_check_modules(GTK4 QUIET IMPORTED_TARGET gtk4)
 endif()
 if(SCEMU_BUILD_TOOLS AND TARGET scemu_gui AND TARGET scemu_config AND GTK4_FOUND)
-	add_executable(scgui app/scgui.c app/machine.c app/midi_io.c app/combos.c
-		play/roms.c play/smf.c play/sjis.c play/audio.c play/session.c)
+	add_executable(scgui app/scgui.c app/machine.c app/midi_io.c app/combos.c play/audio.c)
 	add_custom_target(git_version
 		COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
 		        -DOUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/app/git_version.h
@@ -174,8 +187,8 @@ if(SCEMU_BUILD_TOOLS AND TARGET scemu_gui AND TARGET scemu_config AND GTK4_FOUND
 		COMMENT "the build's git version")
 	add_dependencies(scgui git_version)
 	target_include_directories(scgui PRIVATE play ${CMAKE_CURRENT_BINARY_DIR}/app)
-	target_link_libraries(scgui PRIVATE scemu_gui scemu scemu_config ZLIB::ZLIB PkgConfig::GTK4 portaudio portmidi
-		samplerate pthread)
+	target_link_libraries(scgui PRIVATE scemu_gui scemu_play scemu scemu_config ZLIB::ZLIB PkgConfig::GTK4 portaudio
+		portmidi samplerate pthread)
 	if(NOT MSVC)
 		target_compile_options(scgui PRIVATE -Wall -Wextra -Wno-unused-parameter)
 	endif()
@@ -188,8 +201,8 @@ endif()
 if(SCEMU_BUILD_TOOLS)
 	find_package(ZLIB QUIET)
 	if(ZLIB_FOUND)
-		add_executable(scplay play/scplay.c play/roms.c play/smf.c play/sjis.c play/tui.c play/audio.c play/session.c)
-		target_link_libraries(scplay PRIVATE scemu ZLIB::ZLIB portaudio samplerate)
+		add_executable(scplay play/scplay.c play/tui.c play/audio.c)
+		target_link_libraries(scplay PRIVATE scemu_play scemu ZLIB::ZLIB portaudio samplerate)
 		if(NOT MSVC)
 			target_compile_options(scplay PRIVATE -Wall -Wextra -Wno-unused-parameter)
 		endif()
