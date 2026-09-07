@@ -175,6 +175,12 @@ static int midi_ports(const instance_t *in)
 	return in->unit ? unit_midi_ports(in->unit) : 2;
 }
 
+/* the jack, or the four USB streams of an SC-8850 on USB */
+static int midi_outs(const instance_t *in)
+{
+	return midi_ports(in) == 4 ? 4 : 1;
+}
+
 static void apply_param(instance_t *in, int id, double value)
 {
 	if (id < 0 || id >= PARAM_COUNT)
@@ -304,6 +310,8 @@ static void push_message(instance_t *in, int port, const uint8_t *bytes, size_t 
 	const clap_process_t *p = in->proc;
 	if (!p || !p->out_events || !count)
 		return;
+	if (port < 0 || port >= midi_outs(in))
+		port = 0;
 	double t = ((double)in->mframes - in->block_start) * in->host_rate / in->rate;
 	uint32_t time = t <= 0 ? 0 : (uint32_t)t;
 	if (p->frames_count && time >= p->frames_count)
@@ -573,6 +581,9 @@ static bool plugin_init(const clap_plugin_t *plugin)
 		      in->info->label, in->rom_error);
 		return true;   /* the instance stands, silent, and its window will say why */
 	}
+	/* the SC-8850's rear switch on USB: MIDI IN A to D, 64 parts, the way a DAW wants it */
+	if (in->info->model == SCEMU_MODEL_SC8850)
+		unit_set_computer_switch(in->unit, SCEMU_COMPUTER_MAC);
 	in->rate = unit_rate(in->unit);
 	in->channels = scemu_output_count(unit_machine(in->unit)) > 1 ? 4 : 2;
 	unit_set_midi_out(in->unit, midi_out, in);
@@ -706,7 +717,7 @@ static const clap_plugin_audio_ports_t audio_ports_ext = { audio_ports_count, au
 static uint32_t note_ports_count(const clap_plugin_t *plugin, bool is_input)
 {
 	instance_t *in = plugin->plugin_data;
-	return is_input ? (uint32_t)midi_ports(in) : 1;
+	return (uint32_t)(is_input ? midi_ports(in) : midi_outs(in));
 }
 
 static bool note_ports_get(const clap_plugin_t *plugin, uint32_t index, bool is_input, clap_note_port_info_t *info)
@@ -719,9 +730,10 @@ static bool note_ports_get(const clap_plugin_t *plugin, uint32_t index, bool is_
 	info->preferred_dialect = CLAP_NOTE_DIALECT_MIDI;
 	if (is_input)
 		snprintf(info->name, sizeof info->name, "MIDI IN %c", 'A' + (int)index);
+	else if (midi_outs(in) > 1)
+		snprintf(info->name, sizeof info->name, "MIDI OUT %c", 'A' + (int)index);
 	else
 		snprintf(info->name, sizeof info->name, "MIDI OUT");
-	(void)in;
 	return true;
 }
 

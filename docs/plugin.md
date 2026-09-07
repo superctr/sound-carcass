@@ -23,11 +23,12 @@ host's log says which set is missing.
   OUTPUT 2 silent.  The samples are the machine's 24-bit words on the float scale, times the volume.
 - **MIDI IN A and B** as note ports taking MIDI (channel messages and sysex alike; a host that sends
   CLAP note events gets them turned into note on and off).  The SC-88Pro and later play 32 parts over
-  the two.  The input is paced at the cable's speed, as the real MIDI IN is, so a dense block of
+  the two.  The SC-8850 has its rear switch on USB in the plugin, so it offers **MIDI IN A to D** and
+  all 64 parts.  The input is paced at the cable's speed, as the real MIDI IN is, so a dense block of
   sysex at the start of a track takes its wire time before the notes after it sound, exactly as on
   the unit.
-- **MIDI OUT** as a note port out: what the machine sends, an identity reply for instance, comes back
-  as events.
+- **MIDI OUT** as a note port out: what the machine sends, the answer to a data request for instance,
+  comes back as events.  The SC-8850 on USB has four, A to D, answering on the port that asked.
 - **Parameters**: the volume knob; the instrument map (the song's own, or every part forced onto the
   SC-55, SC-88, SC-88Pro or SC-8850 map); the MIDI input speed (31250 baud, the 38400 of the computer
   port, or unlimited, which loses setup messages on some songs); the output headroom, the DAC rail
@@ -51,11 +52,14 @@ knob), and the power switch stands the machine still and, pressed again, boots i
 held, the way the manual's power-on combinations want.  A cold boot takes about a second, during
 which the host hears silence from this instrument.  The window keeps the panel's shape at whatever
 size the host or the user gives it, and a host that scales its interfaces by two gets the larger
-artwork.  On Linux it is an X11 window, embedded in the host's or floating; a Wayland host puts it
-through XWayland like every other plugin's.  Without the ROM set, the window says which set is
-missing and where to put it, instead of the panel.  The combination menu and the jacks' clicks of
-the desktop player are not in it.
+artwork.  The middle button on a key (or the right button with Control) opens the same menu as in
+the desktop player, the combinations from the manual the key takes part in: hovering one lights the
+keys it needs, choosing one plays it on the machine; the wheel scrolls a long list, Escape or a
+click elsewhere closes it.  On Linux it is an X11 window, embedded in the host's or floating; a
+Wayland host puts it through XWayland like every other plugin's.  Without the ROM set, the window
+says which set is missing and where to put it, instead of the panel.  The jacks' clicks of the
+desktop player (its playlist and settings) have no meaning here.
 
 ## Not there yet
 
-MIDI IN C and D on an SC-8850 on USB; a VST3 build.
+A VST3 build.

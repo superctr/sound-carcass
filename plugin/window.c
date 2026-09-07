@@ -9,7 +9,8 @@
 #include <pugl/pugl.h>
 #include <pugl/gl.h>
 #include "window.h"
-#include "lcd_font.h"
+#include "menu.h"
+#include "text.h"
 
 #ifndef GL_BGRA
 #define GL_BGRA 0x80E1
@@ -32,6 +33,9 @@ struct window
 	panel_model_t model;
 	panel_t *panel;
 	controls_t ctl;
+	controls_actions_t inner;   /* the controls call us; we pass the machine's on and keep the menu */
+	menu_t menu;
+	double macro_due;           /* puglGetTime at which a played combination is over, or 0 */
 	uint32_t *frame;            /* the panel's pixels, panel_width x panel_height */
 	int base_w, base_h;         /* the small bake's size: the panel's shape */
 	bool big;                   /* the large bake is the one drawn */
@@ -71,34 +75,25 @@ static bool use_bake(window_t *w, bool big)
 	return true;
 }
 
-static void put_glyph(window_t *w, int x0, int y0, int s, uint32_t color, uint8_t code)
+static text_frame_t frame_of(const window_t *w)
 {
-	const uint8_t *rows = lcd_font_glyph(code);
-	int fw = panel_width(w->panel), fh = panel_height(w->panel);
-	for (int r = 0; r < 7; r++)
-		for (int c = 0; c < 5; c++)
-		{
-			if (!(rows[r] & (0x10 >> c)))
-				continue;
-			for (int dy = 0; dy < s; dy++)
-				for (int dx = 0; dx < s; dx++)
-				{
-					int x = x0 + c * s + dx, y = y0 + r * s + dy;
-					if (x >= 0 && x < fw && y >= 0 && y < fh)
-						w->frame[(size_t)y * fw + x] = color;
-				}
-		}
+	text_frame_t f = { w->frame, (size_t)panel_width(w->panel), panel_width(w->panel), panel_height(w->panel) };
+	return f;
+}
+
+static int text_scale(const window_t *w)
+{
+	int s = panel_pitch(w->panel) / 2;
+	return s < 2 ? 2 : s;
 }
 
 /* the message in the middle of the panel, wrapped by words to its width */
 static void draw_message(window_t *w)
 {
-	int fw = panel_width(w->panel), fh = panel_height(w->panel);
-	int s = panel_pitch(w->panel) / 2;
-	if (s < 2)
-		s = 2;
-	int cw = 6 * s, ch = 10 * s, margin = 4 * cw;
-	int columns = (fw - 2 * margin) / cw;
+	text_frame_t f = frame_of(w);
+	int s = text_scale(w);
+	int cw = TEXT_CELL_W * s, ch = 10 * s, margin = 4 * cw;
+	int columns = (f.width - 2 * margin) / cw;
 	if (columns < 8)
 		return;
 	char lines[16][128];
@@ -137,14 +132,10 @@ static void draw_message(window_t *w)
 		count++;
 	}
 	int box_w = width * cw + 2 * cw, box_h = count * ch + ch;
-	int x0 = (fw - box_w) / 2, y0 = (fh - box_h) / 2;
-	for (int y = y0; y < y0 + box_h; y++)
-		for (int x = x0; x < x0 + box_w; x++)
-			if (x >= 0 && x < fw && y >= 0 && y < fh)
-				w->frame[(size_t)y * fw + x] = 0xff202020;
+	int x0 = (f.width - box_w) / 2, y0 = (f.height - box_h) / 2;
+	text_fill(&f, x0, y0, box_w, box_h, 0xff202020);
 	for (int l = 0; l < count; l++)
-		for (int c = 0; lines[l][c]; c++)
-			put_glyph(w, x0 + cw + c * cw, y0 + ch / 2 + l * ch, s, 0xffe8e8e8, (uint8_t)lines[l][c]);
+		text_draw(&f, x0 + cw, y0 + ch / 2 + l * ch, s, 0xffe8e8e8, lines[l]);
 }
 
 static void render(window_t *w)
@@ -152,6 +143,8 @@ static void render(window_t *w)
 	panel_render(w->panel, w->frame, (size_t)panel_width(w->panel));
 	if (w->message[0])
 		draw_message(w);
+	text_frame_t f = frame_of(w);
+	menu_draw(&w->menu, &f);
 	w->redraw = false;
 }
 
@@ -199,6 +192,90 @@ static void draw(window_t *w)
 	glTexCoord2f(1, 1); glVertex2f(1, 1);
 	glTexCoord2f(0, 1); glVertex2f(0, 1);
 	glEnd();
+}
+
+/* ---------------------------------------------------------------- the menu */
+
+static void menu_dismiss(window_t *w)
+{
+	if (!w->menu.open)
+		return;
+	menu_close(&w->menu);
+	controls_highlight_clear(&w->ctl);
+	w->redraw = true;
+}
+
+/* a combination is playing: the keys shown pressed come up when it is over */
+static void macro_started(window_t *w, unsigned ms)
+{
+	if (ms)
+		w->macro_due = puglGetTime(w->world) + ms / 1000.0;
+}
+
+static void menu_choose(window_t *w, int row)
+{
+	const combo_t *c = menu_combo(&w->menu, row);
+	menu_dismiss(w);
+	if (c)
+		macro_started(w, controls_play_combo(&w->ctl, c));
+}
+
+static void menu_hover(window_t *w, double x, double y)
+{
+	int before = w->menu.hover;
+	if (!menu_motion(&w->menu, x, y))
+		return;
+	if (before >= 0)
+		controls_highlight(&w->ctl, menu_combo(&w->menu, before), false);
+	if (w->menu.hover >= 0)
+		controls_highlight(&w->ctl, menu_combo(&w->menu, w->menu.hover), true);
+	w->redraw = true;
+}
+
+/* the controls' actions: the machine's go on to the plugin, the menu is ours */
+static void inner_key(void *user, scemu_button_t b, bool down)
+{
+	window_t *w = user;
+	w->act->controls.key(w->user, b, down);
+}
+
+static void inner_key_after(void *user, scemu_button_t b, bool down, unsigned ms)
+{
+	window_t *w = user;
+	w->act->controls.key_after(w->user, b, down, ms);
+}
+
+static void inner_dial(void *user, int steps)
+{
+	window_t *w = user;
+	w->act->controls.dial(w->user, steps);
+}
+
+static void inner_power(void *user, bool on)
+{
+	window_t *w = user;
+	w->act->controls.power(w->user, on);
+}
+
+static void inner_knob(void *user, float turn)
+{
+	window_t *w = user;
+	w->act->controls.knob(w->user, turn);
+}
+
+static void inner_element(void *user, panel_element_t e, double x, double y)
+{
+	window_t *w = user;
+	if (w->act->controls.element)
+		w->act->controls.element(w->user, e, x, y);
+}
+
+static void inner_combo_menu(void *user, panel_element_t e, double x, double y)
+{
+	window_t *w = user;
+	menu_dismiss(w);
+	if (menu_open(&w->menu, e, x, y, panel_width(w->panel), panel_height(w->panel), text_scale(w)))
+		w->redraw = true;
 }
 
 /* ---------------------------------------------------------------- events */
@@ -251,20 +328,45 @@ static PuglStatus on_event(PuglView *view, const PuglEvent *e)
 		draw(w);
 		break;
 	case PUGL_BUTTON_PRESS:
-		if (button_of(e->button.button))
+		if (w->menu.open)
+		{
+			double x = to_panel_x(w, e->button.x), y = to_panel_y(w, e->button.y);
+			int row = menu_row_at(&w->menu, x, y);
+			if (row >= 0 && button_of(e->button.button) == CONTROLS_BUTTON_LEFT)
+				menu_choose(w, row);
+			else if (!menu_contains(&w->menu, x, y) || button_of(e->button.button) != CONTROLS_BUTTON_LEFT)
+				menu_dismiss(w);
+		}
+		else if (button_of(e->button.button))
 			controls_press(&w->ctl, button_of(e->button.button), mods_of(e->button.state),
 			               to_panel_x(w, e->button.x), to_panel_y(w, e->button.y));
 		break;
 	case PUGL_BUTTON_RELEASE:
-		if (button_of(e->button.button))
+		if (!w->menu.open && button_of(e->button.button))
 			controls_release(&w->ctl, button_of(e->button.button));
 		break;
 	case PUGL_MOTION:
-		controls_motion(&w->ctl, to_panel_x(w, e->motion.x), to_panel_y(w, e->motion.y));
+		if (w->menu.open)
+			menu_hover(w, to_panel_x(w, e->motion.x), to_panel_y(w, e->motion.y));
+		else
+			controls_motion(&w->ctl, to_panel_x(w, e->motion.x), to_panel_y(w, e->motion.y));
 		break;
 	case PUGL_SCROLL:
 		/* PUGL counts up as positive; the controls take the toolkits' down */
-		controls_scroll(&w->ctl, to_panel_x(w, e->scroll.x), to_panel_y(w, e->scroll.y), -e->scroll.dy);
+		if (w->menu.open)
+		{
+			if (menu_scroll(&w->menu, e->scroll.dy < 0 ? 1 : e->scroll.dy > 0 ? -1 : 0))
+			{
+				menu_hover(w, to_panel_x(w, e->scroll.x), to_panel_y(w, e->scroll.y));
+				w->redraw = true;
+			}
+		}
+		else
+			controls_scroll(&w->ctl, to_panel_x(w, e->scroll.x), to_panel_y(w, e->scroll.y), -e->scroll.dy);
+		break;
+	case PUGL_KEY_PRESS:
+		if (e->key.key == PUGL_KEY_ESCAPE)
+			menu_dismiss(w);
 		break;
 	case PUGL_CLOSE:
 		if (w->act->closed)
@@ -311,7 +413,10 @@ window_t *window_create(scemu_model_t model, double scale, const window_actions_
 		window_destroy(w);
 		return NULL;
 	}
-	controls_init(&w->ctl, w->panel, &act->controls, user);
+	w->inner = (controls_actions_t){ inner_key, inner_key_after, inner_dial, inner_power, inner_knob, inner_element,
+	                                 inner_combo_menu };
+	controls_init(&w->ctl, w->panel, &w->inner, w);
+	w->menu.hover = -1;
 	controls_set_soft_power(&w->ctl, model == SCEMU_MODEL_SC55MK2);
 	w->ctl.power = false;
 	panel_set_standby(w->panel, true);
@@ -461,11 +566,16 @@ void window_set_message(window_t *w, const char *text)
 
 void window_boot_done(window_t *w)
 {
-	controls_boot_done(&w->ctl);
+	macro_started(w, controls_boot_done(&w->ctl));
 }
 
 void window_tick(window_t *w)
 {
+	if (w->macro_due && puglGetTime(w->world) >= w->macro_due)
+	{
+		w->macro_due = 0;
+		controls_macro_done(&w->ctl);
+	}
 	if (w->realized && w->visible && (panel_dirty(w->panel) || w->redraw))
 		puglObscureView(w->view);
 	puglUpdate(w->world, 0);
