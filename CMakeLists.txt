@@ -122,7 +122,7 @@ if(ZLIB_FOUND)
 			COMMENT "embedding ${art}.png")
 		list(APPEND PANEL_EMBEDS ${dst})
 	endforeach()
-	add_library(scemu_gui STATIC gui/panel.c gui/png.c gui/lcd_font.c ${PANEL_EMBEDS})
+	add_library(scemu_gui STATIC gui/panel.c gui/png.c gui/lcd_font.c gui/combos.c gui/controls.c ${PANEL_EMBEDS})
 	target_include_directories(scemu_gui PUBLIC gui)
 	target_link_libraries(scemu_gui PUBLIC scemu PRIVATE ZLIB::ZLIB)
 	if(NOT MSVC)
@@ -178,7 +178,7 @@ if(PkgConfig_FOUND)
 	pkg_check_modules(GTK4 QUIET IMPORTED_TARGET gtk4)
 endif()
 if(SCEMU_BUILD_TOOLS AND TARGET scemu_gui AND TARGET scemu_config AND GTK4_FOUND)
-	add_executable(scgui app/scgui.c app/machine.c app/midi_io.c app/combos.c play/audio.c)
+	add_executable(scgui app/scgui.c app/machine.c app/midi_io.c play/audio.c)
 	add_custom_target(git_version
 		COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
 		        -DOUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/app/git_version.h

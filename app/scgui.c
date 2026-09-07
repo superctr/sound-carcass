@@ -21,14 +21,13 @@
 #include "roms.h"
 #include "config.h"
 #include "combos.h"
+#include "controls.h"
 #include "git_version.h"
 
 #define MIDI_PORTS_MAX 64
 #define AUDIO_DEVICES_MAX 64
 #define MIDI_SLOTS 9           /* MIDI IN A-D, MIDI OUT, Song A-D; C and D only on an SC-8850 on USB */
 #define COMPUTER_POSITIONS 4   /* the rear switch: MIDI, PC-1, PC-2, Mac (USB on the SC-8850) */
-
-#define DIAL_DEGREES (360.0 / PANEL_DIAL_FRAMES)   /* what the hand turns for one detent */
 
 typedef struct app
 {
@@ -47,22 +46,11 @@ typedef struct app
 	GMainLoop *loop;
 	GPtrArray *songs;          /* char * paths */
 	int current;               /* index in songs, or -1 */
-	bool power, paused;
-	float knob;
-	int pressed_element;       /* the element under the held mouse button, or -1 */
-	int opposite_element;      /* the other half of the pair, pressed with the right button meanwhile */
+	bool paused;
+	controls_t ctl;            /* the panel under the pointer; the power switch's state is its */
 	uint64_t seen_generation;
 	machine_state_t state;
-	uint64_t queued;           /* elements queued with the right button: they go down with the next key */
-	uint64_t held;             /* elements the right button holds down right now */
-	bool release_after_boot;   /* the held keys come up when the boot they were held through ends */
-	uint64_t macro_pressed;    /* elements shown pressed while a chosen combination plays out */
-	bool macro_after_boot;
-	unsigned macro_ms;         /* how long it plays after the boot */
 	double pointer_x, pointer_y;
-	bool dial_drag;            /* the left button is turning the value dial */
-	double dial_angle, dial_rest;   /* where it was last seen, and the part of a detent left over */
-	double wheel_rest;         /* the part of a wheel notch over the dial not yet a detent */
 	midi_port_info_t ports[MIDI_PORTS_MAX];
 	int port_count;
 	audio_device_info_t devices[AUDIO_DEVICES_MAX];
@@ -81,9 +69,6 @@ typedef struct app
 	scemu_map_t map;
 	int combo_ids[64];
 } app_t;
-
-#define MACRO_HOLD_MS 300    /* a held key is seen held before the next goes down */
-#define MACRO_PRESS_MS 150
 
 static const char *const midi_slot_names[MIDI_SLOTS] = { "MIDI IN A", "MIDI IN B", "MIDI IN C", "MIDI IN D", "MIDI OUT",
                                                          "Song to A", "Song to B", "Song to C", "Song to D" };
@@ -276,8 +261,6 @@ static void config_touch(app_t *app)
 /* ---------------------------------------------------------------- playlist */
 
 static void play_index(app_t *app, int index);
-static void queued_press(app_t *app);
-static void held_release(app_t *app);
 static void set_title(app_t *app);
 static gboolean macro_done(gpointer user);
 
@@ -790,6 +773,7 @@ static void on_notches_changed(GtkSpinButton *spin, gpointer user)
 	if (notches == app->cfg.knob_notches)
 		return;
 	app->cfg.knob_notches = notches;
+	controls_set_knob_notches(&app->ctl, notches);
 	config_touch(app);
 }
 
@@ -1138,11 +1122,7 @@ static void on_menu_system(GSimpleAction *action, GVariant *parameter, gpointer 
 static void on_menu_reset(GSimpleAction *action, GVariant *parameter, gpointer user)
 {
 	app_t *app = user;
-	if (app->power)
-		machine_power(app->mc, false);
-	app->power = true;
-	machine_power(app->mc, true);
-	set_title(app);
+	controls_power_cycle(&app->ctl);
 }
 
 static void system_menu(app_t *app, double x, double y)
@@ -1233,7 +1213,7 @@ static void panel_switch(app_t *app, panel_model_t model)
 	int w = panel_width(p), h = panel_height(p);
 	free(app->frame);
 	app->frame = calloc((size_t)w * h, sizeof(uint32_t));
-	panel_set_knob(p, app->knob);
+	controls_set_panel(&app->ctl, p);
 	/* the glass and the lamps come with the snapshot, whose generation has
 	 * already passed; give the new panel the last one */
 	panel_glass(p, &app->state);
@@ -1246,9 +1226,9 @@ static void set_title(app_t *app)
 	char title[512];
 	if (app->state.song[0])
 		snprintf(title, sizeof(title), "%s%s%s — %s", app->state.title[0] ? app->state.title : app->state.song,
-		         app->paused ? " (paused)" : "", app->power ? "" : " (off)", machine_model_label(app->mc));
+		         app->paused ? " (paused)" : "", app->ctl.power ? "" : " (off)", machine_model_label(app->mc));
 	else
-		snprintf(title, sizeof(title), "%s%s", machine_model_label(app->mc), app->power ? "" : " (off)");
+		snprintf(title, sizeof(title), "%s%s", machine_model_label(app->mc), app->ctl.power ? "" : " (off)");
 	gtk_window_set_title(GTK_WINDOW(app->window), title);
 }
 
@@ -1274,15 +1254,11 @@ static gboolean on_tick(gpointer user)
 			set_title(app);
 		if (finished_now && app->current >= 0 && app->current + 1 < (int)app->songs->len)
 			play_index(app, app->current + 1);
-		if (app->release_after_boot && !st.booting && st.power)
+		if (!st.booting && st.power)
 		{
-			app->release_after_boot = false;
-			held_release(app);
-		}
-		if (app->macro_after_boot && !st.booting && st.power)
-		{
-			app->macro_after_boot = false;
-			g_timeout_add(app->macro_ms, macro_done, app);
+			unsigned ms = controls_boot_done(&app->ctl);
+			if (ms)
+				g_timeout_add(ms, macro_done, app);
 		}
 	}
 	scemu_model_t model = machine_model(app->mc);
@@ -1292,63 +1268,67 @@ static gboolean on_tick(gpointer user)
 		set_title(app);
 		system_readout(app);
 		panel_switch(app, panel_model_for(model));
+		controls_set_soft_power(&app->ctl, model == SCEMU_MODEL_SC55MK2);
 	}
-	panel_set_standby(app->panel, !app->power);
+	panel_set_standby(app->panel, !app->ctl.power);
 	if (panel_dirty(app->panel))
 		gtk_widget_queue_draw(app->area);
 	return G_SOURCE_CONTINUE;
 }
 
-/* the queued keys go down, in the order they were queued, before the key they modify */
-static void queued_press(app_t *app)
+/* ---------------------------------------------------------------- the panel's actions */
+
+static void act_key(void *user, scemu_button_t b, bool down)
 {
-	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
-		if ((app->queued >> e) & 1)
-			machine_button(app->mc, (scemu_button_t)panel_element_button((panel_element_t)e), true);
-	app->held |= app->queued;
-	app->queued = 0;
+	app_t *app = user;
+	machine_button(app->mc, b, down);
 }
 
-/* everything the right button holds or queues comes up */
-static void held_release(app_t *app)
+static void act_key_after(void *user, scemu_button_t b, bool down, unsigned ms)
 {
-	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
+	app_t *app = user;
+	machine_button_after(app->mc, b, down, ms);
+}
+
+static void act_dial(void *user, int steps)
+{
+	app_t *app = user;
+	machine_dial(app->mc, steps);
+}
+
+static void act_power(void *user, bool on)
+{
+	app_t *app = user;
+	machine_power(app->mc, on);
+	if (!on)
 	{
-		if ((app->held >> e) & 1)
-			machine_button(app->mc, (scemu_button_t)panel_element_button((panel_element_t)e), false);
-		if (((app->held | app->queued) >> e) & 1)
-			panel_set_pressed(app->panel, (panel_element_t)e, false);
+		app->current = -1;
+		list_select(app, -1);
 	}
-	app->held = app->queued = 0;
+	set_title(app);
 }
 
-static void element_action(app_t *app, int e)
+static void act_knob(void *user, float turn)
 {
+	app_t *app = user;
+	machine_set_gain(app->mc, turn * turn);
+	app->cfg.volume = turn;
+	config_touch(app);
+}
+
+static void combo_menu(app_t *app, int element, double x, double y);
+
+static void act_combo_menu(void *user, panel_element_t e, double x, double y)
+{
+	app_t *app = user;
+	combo_menu(app, e, x / app->scale, y / app->scale);
+}
+
+static void act_element(void *user, panel_element_t e, double x, double y)
+{
+	app_t *app = user;
 	switch (e)
 	{
-	case PANEL_SWITCH_POWER:
-		/* the SC-55mkII's is a position in its own switch matrix: the machine puts itself
-		   into standby and keeps running, and its own lamp says so */
-		if (machine_model(app->mc) == SCEMU_MODEL_SC55MK2)
-		{
-			machine_button(app->mc, SCEMU_BUTTON_POWER, true);
-			machine_button_after(app->mc, SCEMU_BUTTON_POWER, false, 100);
-			break;
-		}
-		app->power = !app->power;
-		if (app->power && (app->queued | app->held))
-		{
-			queued_press(app);
-			app->release_after_boot = true;
-		}
-		machine_power(app->mc, app->power);
-		if (!app->power)
-		{
-			app->current = -1;
-			list_select(app, -1);
-		}
-		set_title(app);
-		break;
 	case PANEL_JACK_MIDI_IN_B:
 		playlist_show(app);
 		break;
@@ -1356,135 +1336,46 @@ static void element_action(app_t *app, int e)
 		settings_show(app, SETTINGS_TAB_AUDIO);
 		break;
 	case PANEL_LOGO:
-		logo_menu(app, app->pointer_x, app->pointer_y);
+		logo_menu(app, x / app->scale, y / app->scale);
 		break;
 	case PANEL_LOGO_MODEL:
-		system_menu(app, app->pointer_x, app->pointer_y);
+		system_menu(app, x / app->scale, y / app->scale);
 		break;
 	default:
 		break;
 	}
 }
 
-/* the panel's own words for a key, for the combination menu */
-static const char *const button_label[SCEMU_BUTTON_COUNT] = {
-	[SCEMU_BUTTON_ALL] = "ALL", [SCEMU_BUTTON_MUTE] = "MUTE",
-	[SCEMU_BUTTON_SC55_MAP] = "SC-55 MAP", [SCEMU_BUTTON_SC88_MAP] = "SC-88 MAP",
-	[SCEMU_BUTTON_PREVIEW] = "PREVIEW (push the knob)",
-	[SCEMU_BUTTON_PART_LEFT] = "PART ◀", [SCEMU_BUTTON_PART_RIGHT] = "PART ▶",
-	[SCEMU_BUTTON_INSTRUMENT_LEFT] = "INSTRUMENT ◀", [SCEMU_BUTTON_INSTRUMENT_RIGHT] = "INSTRUMENT ▶",
-	[SCEMU_BUTTON_LEVEL_LEFT] = "LEVEL ◀", [SCEMU_BUTTON_LEVEL_RIGHT] = "LEVEL ▶",
-	[SCEMU_BUTTON_PAN_LEFT] = "PAN ◀", [SCEMU_BUTTON_PAN_RIGHT] = "PAN ▶",
-	[SCEMU_BUTTON_REVERB_LEFT] = "REVERB ◀", [SCEMU_BUTTON_REVERB_RIGHT] = "REVERB ▶",
-	[SCEMU_BUTTON_CHORUS_LEFT] = "CHORUS ◀", [SCEMU_BUTTON_CHORUS_RIGHT] = "CHORUS ▶",
-	[SCEMU_BUTTON_KEY_SHIFT_LEFT] = "KEY SHIFT/DELAY ◀", [SCEMU_BUTTON_KEY_SHIFT_RIGHT] = "KEY SHIFT/DELAY ▶",
-	[SCEMU_BUTTON_MIDI_CH_LEFT] = "MIDI CH ◀", [SCEMU_BUTTON_MIDI_CH_RIGHT] = "MIDI CH ▶",
-	[SCEMU_BUTTON_USER_INST] = "USER INST/EFX", [SCEMU_BUTTON_SELECT] = "SELECT/EFX ON/OFF",
-	[SCEMU_BUTTON_EDIT1_LEFT] = "VIB RATE·ATTACK·EFX TYPE ◀", [SCEMU_BUTTON_EDIT1_RIGHT] = "VIB RATE·ATTACK·EFX TYPE ▶",
-	[SCEMU_BUTTON_EDIT2_LEFT] = "VIB DEPTH·CUTOFF·DECAY·EFX PARAM ◀", [SCEMU_BUTTON_EDIT2_RIGHT] = "VIB DEPTH·CUTOFF·DECAY·EFX PARAM ▶",
-	[SCEMU_BUTTON_EDIT3_LEFT] = "VIB DELAY·RESONANCE·RELEASE·EFX VALUE ◀", [SCEMU_BUTTON_EDIT3_RIGHT] = "VIB DELAY·RESONANCE·RELEASE·EFX VALUE ▶",
+static const controls_actions_t actions = {
+	act_key, act_key_after, act_dial, act_power, act_knob, act_element, act_combo_menu
 };
 
-/* the other half of a ◀ ▶ pair, or -1 */
-static int opposite_button(int b)
-{
-	bool pair = (b >= SCEMU_BUTTON_PART_LEFT && b <= SCEMU_BUTTON_MIDI_CH_RIGHT)
-	            || (b >= SCEMU_BUTTON_EDIT1_LEFT && b <= SCEMU_BUTTON_EDIT3_RIGHT);
-	return pair ? SCEMU_BUTTON_PART_LEFT + ((b - SCEMU_BUTTON_PART_LEFT) ^ 1) : -1;
-}
-
-static int element_for_button(scemu_button_t b)
-{
-	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
-		if (panel_element_button((panel_element_t)e) == (int)b)
-			return e;
-	return -1;
-}
-
-static void combo_text(const combo_t *c, char *out, size_t size)
-{
-	bool together = c->timing == COMBO_TOGETHER && !c->power_on;
-	int first = c->timing == COMBO_HOLD_THEN_PAIR && !c->power_on ? 1 : c->hold_count;
-	size_t n = (size_t)snprintf(out, size, together ? "press " : "hold ");
-	for (int k = 0; k < first && n < size; k++)
-		n += (size_t)snprintf(out + n, size - n, "%s%s", k ? " + " : "", button_label[c->hold[k]]);
-	if (c->power_on && n < size)
-		n += (size_t)snprintf(out + n, size - n, " while switching on");
-	if (c->press == SCEMU_BUTTON_COUNT)
-		return;
-	if (!together && n < size)
-		n += (size_t)snprintf(out + n, size - n, ", then press ");
-	for (int k = first; k < c->hold_count && n < size; k++)
-		n += (size_t)snprintf(out + n, size - n, "%s + ", button_label[c->hold[k]]);
-	if (n < size)
-		n += (size_t)snprintf(out + n, size - n, "%s%s", together ? " + " : "", button_label[c->press]);
-	if ((together || first < c->hold_count) && n < size)
-		snprintf(out + n, size - n, " together");
-}
-
-/* the keys of the combination under the pointer light up on the panel */
-static void combo_highlight(app_t *app, const combo_t *c, bool on)
-{
-	for (int k = 0; k < c->hold_count; k++)
-	{
-		int e = element_for_button(c->hold[k]);
-		if (e >= 0)
-			panel_set_pressed(app->panel, (panel_element_t)e, on);
-	}
-	if (c->press != SCEMU_BUTTON_COUNT)
-	{
-		int e = element_for_button(c->press);
-		if (e >= 0)
-			panel_set_pressed(app->panel, (panel_element_t)e, on);
-	}
-}
+/* ---------------------------------------------------------------- the combination menu */
 
 static void on_combo_enter(GtkEventControllerMotion *m, double x, double y, gpointer user)
 {
 	app_t *app = user;
 	GtkWidget *item = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(m));
-	combo_highlight(app, &combos[GPOINTER_TO_INT(g_object_get_data(G_OBJECT(item), "combo"))], true);
+	controls_highlight(&app->ctl, &combos[GPOINTER_TO_INT(g_object_get_data(G_OBJECT(item), "combo"))], true);
 }
 
 static void on_combo_leave(GtkEventControllerMotion *m, gpointer user)
 {
 	app_t *app = user;
 	GtkWidget *item = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(m));
-	combo_highlight(app, &combos[GPOINTER_TO_INT(g_object_get_data(G_OBJECT(item), "combo"))], false);
+	controls_highlight(&app->ctl, &combos[GPOINTER_TO_INT(g_object_get_data(G_OBJECT(item), "combo"))], false);
 }
 
 static void on_combo_closed(GtkPopover *popover, gpointer user)
 {
 	app_t *app = user;
-	for (int n = 0; n < combo_count; n++)
-		combo_highlight(app, &combos[n], false);
-	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
-		if (((app->queued | app->held | app->macro_pressed) >> e) & 1)
-			panel_set_pressed(app->panel, (panel_element_t)e, true);
-}
-
-/* a combination from the manual plays out on the machine's clock: the held
- * keys go down in order, the pressed one follows (at once when the manual
- * says "simultaneously", after a moment when it says "while holding"), and
- * everything comes up in reverse; the window shows the keys pressed meanwhile */
-static void macro_key(app_t *app, scemu_button_t b, bool down, unsigned ms)
-{
-	machine_button_after(app->mc, b, down, ms);
-	int e = element_for_button(b);
-	if (e >= 0 && down)
-	{
-		app->macro_pressed |= (uint64_t)1 << e;
-		panel_set_pressed(app->panel, (panel_element_t)e, true);
-	}
+	controls_highlight_clear(&app->ctl);
 }
 
 static gboolean macro_done(gpointer user)
 {
 	app_t *app = user;
-	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
-		if ((app->macro_pressed >> e) & 1)
-			panel_set_pressed(app->panel, (panel_element_t)e, ((app->queued | app->held) >> e) & 1);
-	app->macro_pressed = 0;
+	controls_macro_done(&app->ctl);
 	return G_SOURCE_REMOVE;
 }
 
@@ -1493,35 +1384,9 @@ static void on_combo_chosen(GtkButton *b, gpointer user)
 	app_t *app = user;
 	const combo_t *c = &combos[GPOINTER_TO_INT(g_object_get_data(G_OBJECT(b), "combo"))];
 	gtk_popover_popdown(GTK_POPOVER(app->combo_popover));
-	if (app->macro_pressed || app->release_after_boot)
-		return;
-	int first = c->timing == COMBO_HOLD_THEN_PAIR && !c->power_on ? 1 : c->hold_count;
-	for (int n = 0; n < first; n++)
-		macro_key(app, c->hold[n], true, 0);
-	if (c->power_on)
-	{
-		/* the held keys go through a power cycle; the rest follows the boot */
-		if (app->power)
-			machine_power(app->mc, false);
-		app->power = true;
-		machine_power(app->mc, true);
-		set_title(app);
-	}
-	unsigned t = c->timing != COMBO_TOGETHER || c->power_on ? MACRO_HOLD_MS : 0;
-	for (int n = first; n < c->hold_count; n++)
-		macro_key(app, c->hold[n], true, t);
-	if (c->press != SCEMU_BUTTON_COUNT)
-		macro_key(app, c->press, true, t);
-	t += MACRO_PRESS_MS;
-	if (c->press != SCEMU_BUTTON_COUNT)
-		macro_key(app, c->press, false, t);
-	for (int n = c->hold_count - 1; n >= 0; n--)
-		macro_key(app, c->hold[n], false, t);
-	app->macro_ms = t + 50;
-	if (c->power_on)
-		app->macro_after_boot = true;
-	else
-		g_timeout_add(app->macro_ms, macro_done, app);
+	unsigned ms = controls_play_combo(&app->ctl, c);
+	if (ms)
+		g_timeout_add(ms, macro_done, app);
 }
 
 static void combo_menu(app_t *app, int element, double x, double y)
@@ -1584,132 +1449,12 @@ static void combo_menu(app_t *app, int element, double x, double y)
 	gtk_popover_popup(GTK_POPOVER(app->combo_popover));
 }
 
-static double dial_angle_at(app_t *app, double x, double y)
-{
-	const panel_rect_t *r = panel_element_rect(app->panel, PANEL_DIAL_VALUE);
-	double cx = r->x + r->w / 2.0, cy = r->y + r->h / 2.0;
-	return atan2(y * app->scale - cy, x * app->scale - cx) * (180 / G_PI);
-}
-
-/* the dial follows the pointer around it, a twenty-fourth of a turn to the
- * detent, so the knurl on the panel turns with the hand */
-static void dial_turn(app_t *app, double x, double y)
-{
-	double angle = dial_angle_at(app, x, y), turn = angle - app->dial_angle;
-	if (turn > 180)
-		turn -= 360;
-	else if (turn < -180)
-		turn += 360;
-	app->dial_angle = angle;
-	app->dial_rest += turn;
-	int steps = (int)(app->dial_rest / DIAL_DEGREES);
-	if (!steps)
-		return;
-	app->dial_rest -= steps * DIAL_DEGREES;
-	machine_dial(app->mc, steps);
-	panel_set_dial(app->panel, steps);
-}
-
-static void press(app_t *app, guint button, GdkModifierType mods, double x, double y)
-{
-	int e = panel_hit(app->panel, (int)(x * app->scale), (int)(y * app->scale));
-	if (e < 0)
-		return;
-	int b = panel_element_button((panel_element_t)e);
-	if (b >= 0)
-	{
-		if (button == GDK_BUTTON_SECONDARY && app->pressed_element >= 0)
-		{
-			/* the right button while a half of a pair is held: its other half */
-			int held = panel_element_button((panel_element_t)app->pressed_element);
-			int other = opposite_button(held);
-			int oe = other >= 0 ? element_for_button((scemu_button_t)other) : -1;
-			if (oe >= 0 && app->opposite_element < 0)
-			{
-				app->opposite_element = oe;
-				machine_button(app->mc, (scemu_button_t)other, true);
-				panel_set_pressed(app->panel, (panel_element_t)oe, true);
-			}
-		}
-		else if (button == GDK_BUTTON_MIDDLE || (button == GDK_BUTTON_SECONDARY && (mods & GDK_CONTROL_MASK)))
-			combo_menu(app, e, x, y);
-		else if (button == GDK_BUTTON_SECONDARY)
-		{
-			/* the right button queues a key for the next one, or with Shift
-			 * holds it down from now; either again lets it go */
-			uint64_t bit = (uint64_t)1 << e;
-			if ((app->held | app->queued) & bit)
-			{
-				if (app->held & bit)
-					machine_button(app->mc, (scemu_button_t)b, false);
-				app->held &= ~bit;
-				app->queued &= ~bit;
-			}
-			else if (mods & GDK_SHIFT_MASK)
-			{
-				app->held |= bit;
-				machine_button(app->mc, (scemu_button_t)b, true);
-			}
-			else
-				app->queued |= bit;
-			panel_set_pressed(app->panel, (panel_element_t)e, ((app->held | app->queued) & bit) != 0);
-		}
-		else
-		{
-			if (app->queued)
-				queued_press(app);
-			app->pressed_element = e;
-			machine_button(app->mc, (scemu_button_t)b, true);
-			panel_set_pressed(app->panel, (panel_element_t)e, true);
-		}
-	}
-	else if (button == GDK_BUTTON_PRIMARY)
-	{
-		if (e == PANEL_DIAL_VALUE)
-		{
-			app->dial_drag = true;
-			app->dial_angle = dial_angle_at(app, x, y);
-			app->dial_rest = 0;
-		}
-		else
-			element_action(app, e);
-	}
-}
-
-static void release(app_t *app, guint button)
-{
-	if (button == GDK_BUTTON_SECONDARY)
-	{
-		int oe = app->opposite_element;
-		if (oe >= 0)
-		{
-			app->opposite_element = -1;
-			machine_button(app->mc, (scemu_button_t)panel_element_button((panel_element_t)oe), false);
-			panel_set_pressed(app->panel, (panel_element_t)oe, false);
-		}
-		return;
-	}
-	if (button != GDK_BUTTON_PRIMARY)
-		return;
-	app->dial_drag = false;
-	int e = app->pressed_element;
-	if (e < 0)
-		return;
-	app->pressed_element = -1;
-	int b = panel_element_button((panel_element_t)e);
-	machine_button(app->mc, (scemu_button_t)b, false);
-	panel_set_pressed(app->panel, (panel_element_t)e, false);
-	if (app->held | app->queued)
-		held_release(app);
-}
-
 static void on_motion(GtkEventControllerMotion *c, double x, double y, gpointer user)
 {
 	app_t *app = user;
 	app->pointer_x = x;
 	app->pointer_y = y;
-	if (app->dial_drag)
-		dial_turn(app, x, y);
+	controls_motion(&app->ctl, x * app->scale, y * app->scale);
 }
 
 /* the raw button events: the toolkit's click gestures track one button at
@@ -1723,39 +1468,20 @@ static gboolean on_button_event(GtkEventControllerLegacy *c, GdkEvent *event, gp
 		return FALSE;
 	guint button = gdk_button_event_get_button(event);
 	if (type == GDK_BUTTON_PRESS)
-		press(app, button, gdk_event_get_modifier_state(event), app->pointer_x, app->pointer_y);
+	{
+		GdkModifierType gdk = gdk_event_get_modifier_state(event);
+		unsigned mods = (gdk & GDK_SHIFT_MASK ? CONTROLS_SHIFT : 0) | (gdk & GDK_CONTROL_MASK ? CONTROLS_CONTROL : 0);
+		controls_press(&app->ctl, (int)button, mods, app->pointer_x * app->scale, app->pointer_y * app->scale);
+	}
 	else
-		release(app, button);
+		controls_release(&app->ctl, (int)button);
 	return TRUE;
 }
 
 static gboolean on_scroll(GtkEventControllerScroll *c, double dx, double dy, gpointer user)
 {
 	app_t *app = user;
-	int e = panel_hit(app->panel, (int)(app->pointer_x * app->scale), (int)(app->pointer_y * app->scale));
-	if (e == PANEL_DIAL_VALUE || e == PANEL_BUTTON_VALUE)
-	{
-		/* a notch of the wheel is one detent of the dial, whether the notch
-		 * arrives whole or as the several fractions a smooth wheel sends */
-		app->wheel_rest -= dy;
-		int steps = (int)app->wheel_rest;
-		if (steps)
-		{
-			app->wheel_rest -= steps;
-			machine_dial(app->mc, steps);
-			panel_set_dial(app->panel, steps);
-		}
-		return TRUE;
-	}
-	if (e != PANEL_KNOB_VOLUME && e != PANEL_BUTTON_PREVIEW)
-		return FALSE;
-	app->knob -= (float)dy / (float)(app->cfg.knob_notches > 0 ? app->cfg.knob_notches : 20);
-	app->knob = app->knob < 0 ? 0 : app->knob > 1 ? 1 : app->knob;
-	panel_set_knob(app->panel, app->knob);
-	machine_set_gain(app->mc, app->knob * app->knob);
-	app->cfg.volume = app->knob;
-	config_touch(app);
-	return TRUE;
+	return controls_scroll(&app->ctl, app->pointer_x * app->scale, app->pointer_y * app->scale, dy) ? TRUE : FALSE;
 }
 
 static gboolean on_key(GtkEventControllerKey *c, guint keyval, guint keycode, GdkModifierType mods, gpointer user)
@@ -1801,11 +1527,8 @@ int main(int argc, char **argv)
 	memset(&app, 0, sizeof(app));
 	app.songs = g_ptr_array_new_with_free_func(g_free);
 	app.current = -1;
-	app.pressed_element = -1;
-	app.opposite_element = -1;
 	for (int n = 0; n < MIDI_SLOTS; n++)
 		app.midi_choice[n] = -1;
-	app.power = true;
 	app.audio_choice = -1;
 
 	config_defaults(&app.cfg);
@@ -1823,7 +1546,6 @@ int main(int argc, char **argv)
 	if (rc <= 0)
 		return rc == 0 ? 0 : 2;
 
-	app.knob = app.cfg.volume;
 	app.reset = (machine_reset_t)word_index(reset_words, MACHINE_RESET_COUNT, app.cfg.reset, MACHINE_RESET_GS);
 	app.rate_choice = nearest_index(output_rates, RATE_CHOICES, (int)opt.audio_rate);
 	app.block_choice = nearest_index(block_sizes, BLOCK_CHOICES, app.cfg.audio_block);
@@ -1917,8 +1639,11 @@ int main(int argc, char **argv)
 	g_signal_connect(app.window, "close-request", G_CALLBACK(on_close), &app);
 
 	app.map = opt.map;
-	panel_set_knob(app.panel, app.knob);
-	machine_set_gain(app.mc, app.knob * app.knob);
+	controls_init(&app.ctl, app.panel, &actions, &app);
+	controls_set_knob_notches(&app.ctl, app.cfg.knob_notches);
+	controls_set_knob(&app.ctl, app.cfg.volume);
+	controls_set_soft_power(&app.ctl, app.shown_model == SCEMU_MODEL_SC55MK2);
+	machine_set_gain(app.mc, app.ctl.knob * app.ctl.knob);
 	gtk_window_present(GTK_WINDOW(app.window));
 	if (app.songs->len)
 		play_index(&app, 0);

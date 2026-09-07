@@ -1,4 +1,4 @@
-/* scgui: the front-panel button combinations the SC-88Pro understands.
+/* scemu GUI: the front-panel button combinations the SC-88Pro understands.
  *
  * One mouse cannot hold two keys, so a right-click on a panel button offers
  * the combinations that button takes part in.  The table is compiled from the
@@ -8,10 +8,11 @@
  * Copyright (c) 2026 ian karlsson
  * SPDX-License-Identifier: BSD-3-Clause
  */
-#ifndef SCGUI_COMBOS_H
-#define SCGUI_COMBOS_H
+#ifndef SCEMU_COMBOS_H
+#define SCEMU_COMBOS_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include "scemu.h"
 
 /* How the firmware wants the keys: the manual's [A]*[B] means both keys are
@@ -43,5 +44,7 @@ extern const combo_t combos[];
 extern const int combo_count;
 /* combos involving a button, in `out` (indexes into combos), at most `max`; returns how many */
 int combos_for(scemu_button_t button, int *out, int max);
+/* the keys of a combination in the panel's own words, for a menu: "hold ALL, then press MUTE" */
+void combo_text(const combo_t *c, char *out, size_t size);
 
 #endif

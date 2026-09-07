@@ -1,8 +1,9 @@
-/* scgui: the front-panel button combinations the SC-88Pro understands.
+/* scemu GUI: the front-panel button combinations the SC-88Pro understands.
  *
  * Copyright (c) 2026 ian karlsson
  * SPDX-License-Identifier: BSD-3-Clause
  */
+#include <stdio.h>
 #include "combos.h"
 
 #define B(x) SCEMU_BUTTON_##x
@@ -338,4 +339,44 @@ int combos_for(scemu_button_t button, int *out, int max)
 		n++;
 	}
 	return n > max ? max : n;
+}
+
+/* the panel's own words for a key */
+static const char *const button_label[SCEMU_BUTTON_COUNT] = {
+	[SCEMU_BUTTON_ALL] = "ALL", [SCEMU_BUTTON_MUTE] = "MUTE",
+	[SCEMU_BUTTON_SC55_MAP] = "SC-55 MAP", [SCEMU_BUTTON_SC88_MAP] = "SC-88 MAP",
+	[SCEMU_BUTTON_PREVIEW] = "PREVIEW (push the knob)",
+	[SCEMU_BUTTON_PART_LEFT] = "PART ◀", [SCEMU_BUTTON_PART_RIGHT] = "PART ▶",
+	[SCEMU_BUTTON_INSTRUMENT_LEFT] = "INSTRUMENT ◀", [SCEMU_BUTTON_INSTRUMENT_RIGHT] = "INSTRUMENT ▶",
+	[SCEMU_BUTTON_LEVEL_LEFT] = "LEVEL ◀", [SCEMU_BUTTON_LEVEL_RIGHT] = "LEVEL ▶",
+	[SCEMU_BUTTON_PAN_LEFT] = "PAN ◀", [SCEMU_BUTTON_PAN_RIGHT] = "PAN ▶",
+	[SCEMU_BUTTON_REVERB_LEFT] = "REVERB ◀", [SCEMU_BUTTON_REVERB_RIGHT] = "REVERB ▶",
+	[SCEMU_BUTTON_CHORUS_LEFT] = "CHORUS ◀", [SCEMU_BUTTON_CHORUS_RIGHT] = "CHORUS ▶",
+	[SCEMU_BUTTON_KEY_SHIFT_LEFT] = "KEY SHIFT/DELAY ◀", [SCEMU_BUTTON_KEY_SHIFT_RIGHT] = "KEY SHIFT/DELAY ▶",
+	[SCEMU_BUTTON_MIDI_CH_LEFT] = "MIDI CH ◀", [SCEMU_BUTTON_MIDI_CH_RIGHT] = "MIDI CH ▶",
+	[SCEMU_BUTTON_USER_INST] = "USER INST/EFX", [SCEMU_BUTTON_SELECT] = "SELECT/EFX ON/OFF",
+	[SCEMU_BUTTON_EDIT1_LEFT] = "VIB RATE·ATTACK·EFX TYPE ◀", [SCEMU_BUTTON_EDIT1_RIGHT] = "VIB RATE·ATTACK·EFX TYPE ▶",
+	[SCEMU_BUTTON_EDIT2_LEFT] = "VIB DEPTH·CUTOFF·DECAY·EFX PARAM ◀", [SCEMU_BUTTON_EDIT2_RIGHT] = "VIB DEPTH·CUTOFF·DECAY·EFX PARAM ▶",
+	[SCEMU_BUTTON_EDIT3_LEFT] = "VIB DELAY·RESONANCE·RELEASE·EFX VALUE ◀", [SCEMU_BUTTON_EDIT3_RIGHT] = "VIB DELAY·RESONANCE·RELEASE·EFX VALUE ▶",
+};
+
+void combo_text(const combo_t *c, char *out, size_t size)
+{
+	bool together = c->timing == COMBO_TOGETHER && !c->power_on;
+	int first = c->timing == COMBO_HOLD_THEN_PAIR && !c->power_on ? 1 : c->hold_count;
+	size_t n = (size_t)snprintf(out, size, together ? "press " : "hold ");
+	for (int k = 0; k < first && n < size; k++)
+		n += (size_t)snprintf(out + n, size - n, "%s%s", k ? " + " : "", button_label[c->hold[k]]);
+	if (c->power_on && n < size)
+		n += (size_t)snprintf(out + n, size - n, " while switching on");
+	if (c->press == SCEMU_BUTTON_COUNT)
+		return;
+	if (!together && n < size)
+		n += (size_t)snprintf(out + n, size - n, ", then press ");
+	for (int k = first; k < c->hold_count && n < size; k++)
+		n += (size_t)snprintf(out + n, size - n, "%s + ", button_label[c->hold[k]]);
+	if (n < size)
+		n += (size_t)snprintf(out + n, size - n, "%s%s", together ? " + " : "", button_label[c->press]);
+	if ((together || first < c->hold_count) && n < size)
+		snprintf(out + n, size - n, " together");
 }
