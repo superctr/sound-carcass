@@ -10,3 +10,9 @@
 [submodule "libsamplerate"]
 	path = libsamplerate
 	url = https://github.com/libsndfile/libsamplerate
+[submodule "clap"]
+	path = clap
+	url = https://github.com/free-audio/clap
+[submodule "pugl"]
+	path = pugl
+	url = https://github.com/lv2/pugl
