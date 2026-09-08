@@ -14,6 +14,10 @@
 
 #define BLOCK_MAX_INSNS 64
 #define SLOT_CHUNK 1024
+/* what the cache holds before it is thrown away and built again: the firmware
+   settles well inside this, a run that has left the firmware does not */
+#define CACHE_CODE_MAX (128u << 20)
+#define CACHE_BLOCK_MAX 262144u
 #define PAGE_SHIFT 16
 #define PAGE_SIZE (1u << PAGE_SHIFT)
 #define PAGE_COUNT (1u << (32 - PAGE_SHIFT))
@@ -205,7 +209,10 @@ int sh2_jit_run(sh2_t *cpu, int cycles)
 		}
 
 		{
-			block_t *b = lookup(j, cpu->pc);
+			block_t *b;
+			if (j->count >= CACHE_BLOCK_MAX || j->code_size >= CACHE_CODE_MAX)
+				sh2_jit_flush(cpu);
+			b = lookup(j, cpu->pc);
 			if (b->key == KEY_NONE)
 				b = translate(cpu, cpu->pc);
 			if (b && b->fn)

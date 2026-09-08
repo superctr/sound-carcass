@@ -14,6 +14,10 @@
 
 #define BLOCK_MAX_INSNS 48
 #define SLOT_CHUNK 1024
+/* what the cache holds before it is thrown away and built again: the firmware
+   settles well inside this, a run that has left the firmware does not */
+#define CACHE_CODE_MAX (32u << 20)
+#define CACHE_BLOCK_MAX 65536u
 #define PAGE_SHIFT 12
 #define PAGE_COUNT (1u << (24 - PAGE_SHIFT))
 
@@ -189,7 +193,10 @@ int h8500_jit_run(h8500_t *cpu, int cycles)
 
 		{
 			uint32_t key = ((uint32_t)cpu->cp << 16) | cpu->pc;
-			block_t *b = lookup(j, key);
+			block_t *b;
+			if (j->count >= CACHE_BLOCK_MAX || j->code_size >= CACHE_CODE_MAX)
+				h8500_jit_flush(cpu);
+			b = lookup(j, key);
 			if (b->key == KEY_NONE)
 				b = translate(cpu, key);
 			if (b && b->fn)
