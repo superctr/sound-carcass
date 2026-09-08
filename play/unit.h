@@ -104,9 +104,9 @@ bool unit_panel(unit_t *u, unit_panel_t *out);
 bool unit_prepare(unit_t *u, scemu_model_t model, scemu_computer_switch_t computer, char *err, size_t err_size);
 void unit_replace(unit_t *u, session_progress_fn progress, void *user);
 
-/* The models play at their own levels for the same song -- the SC-88 family
- * 6 dB under the SC-55mkII, the SC-8850 8 dB under it; a host makes them up so
- * a level means the same on every model. */
+/* The factor a host puts on the words: 2 on every model, so the levels the
+ * models play at for the same song stay as they are between them -- the SC-88
+ * family 6 dB under the SC-55mkII, the SC-8850 8 dB under it. */
 float unit_output_trim(scemu_model_t model);
 
 #endif
