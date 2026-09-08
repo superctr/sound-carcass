@@ -329,6 +329,7 @@ void unit_replace(unit_t *u, session_progress_fn progress, void *user)
 	if (!u->next.ready)
 		return;
 	bool was_on = u->power;
+	bool other_machine = !u->next.same_roms;
 	if (was_on)
 		session_save_settings(&u->session);
 	u->power = false;
@@ -343,6 +344,14 @@ void unit_replace(unit_t *u, session_progress_fn progress, void *user)
 	u->computer = u->next.computer;
 	u->next.ready = false;
 	memset(&u->last, 0, sizeof(u->last));
+	if (other_machine)
+	{
+		/* the keys down, and the ones waiting for their moment, were pressed
+		   on another machine's panel; the rear switch keeps its own, which the
+		   panel still shows held */
+		memset(u->held, 0, sizeof(u->held));
+		u->timed_count = 0;
+	}
 	begin(u);
 	if (was_on)
 		unit_boot(u, true, progress, user);

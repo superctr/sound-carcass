@@ -383,6 +383,8 @@ static void switch_machine(machine_t *mc, scemu_model_t model)
 	unload_song(mc);
 	set_song(mc, "", "");
 	publish(mc, was_on);
+	mc->pending_count = 0;   /* stamped against the clock of the machine that goes */
+	mc->pending_used = 0;
 	unit_replace(mc->unit, boot_progress, mc);
 	midi_io_set_groups(mc->midi, midi_ports(mc));
 	uint32_t was_rate = mc->rate;
