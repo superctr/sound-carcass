@@ -42,6 +42,7 @@ typedef struct controls_actions
 typedef struct controls
 {
 	panel_t *panel;
+	panel_model_t model;
 	const controls_actions_t *act;
 	void *user;
 	bool power;

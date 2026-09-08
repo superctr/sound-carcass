@@ -1493,19 +1493,21 @@ static void panel_glass(panel_t *p, const machine_state_t *st)
 	panel_set_leds(p, st->leds);
 }
 
-/* another model's panel, or the same one at the other size: the keys held come up with the old one */
+/* another model's panel, or the same one at the other size: the old one goes
+ * once nothing points at it any more */
 static void panel_rebuild(app_t *app, panel_model_t model, int size)
 {
 	panel_t *p = panel_create(model, panel_pitch_for(model, size) * app->scale);
 	if (!p)
 		return;
+	panel_t *old = app->panel;
 	app->size = size;
-	panel_destroy(app->panel);
 	app->panel = p;
 	int w = panel_width(p), h = panel_height(p);
 	free(app->frame);
 	app->frame = calloc((size_t)w * h, sizeof(uint32_t));
 	controls_set_panel(&app->ctl, p);
+	panel_destroy(old);
 	/* the glass and the lamps come with the snapshot, whose generation has
 	 * already passed; give the new panel the last one */
 	panel_glass(p, &app->state);

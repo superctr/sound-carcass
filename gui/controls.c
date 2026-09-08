@@ -17,6 +17,7 @@ void controls_init(controls_t *c, panel_t *panel, const controls_actions_t *act,
 {
 	*c = (controls_t){ 0 };
 	c->panel = panel;
+	c->model = panel_model(panel);
 	c->act = act;
 	c->user = user;
 	c->power = true;
@@ -25,8 +26,23 @@ void controls_init(controls_t *c, panel_t *panel, const controls_actions_t *act,
 
 void controls_set_panel(controls_t *c, panel_t *panel)
 {
+	bool same_machine = panel_model(panel) == c->model;
 	c->panel = panel;
+	c->model = panel_model(panel);
 	panel_set_knob(panel, c->knob);
+	if (!same_machine)
+	{
+		c->held = c->queued = c->macro_pressed = 0;
+		c->release_after_boot = c->macro_after_boot = false;
+		c->macro_ms = 0;
+		c->pressed_element = c->opposite_element = -1;
+		c->dial_drag = false;
+		c->dial_rest = c->wheel_rest = 0;
+		return;
+	}
+	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
+		if (((c->queued | c->held | c->macro_pressed) >> e) & 1)
+			panel_set_pressed(panel, (panel_element_t)e, true);
 }
 
 void controls_set_soft_power(controls_t *c, bool soft) { c->soft_power = soft; }
