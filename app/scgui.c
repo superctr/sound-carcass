@@ -36,7 +36,7 @@ typedef struct app
 	int size, scale;           /* the window size setting (4 or 8) and the screen's scale factor */
 	uint32_t *frame;
 	GtkWidget *window, *area, *playlist_window, *list;
-	GtkWidget *settings_window, *notebook, *audio_label, *audio_drop, *rate_drop, *block_drop;
+	GtkWidget *settings_window, *notebook, *audio_label, *audio_drop, *rate_drop, *block_drop, *volume_scale;
 	GtkWidget *system_label, *model_check[MACHINE_SYSTEMS], *computer_check[COMPUTER_POSITIONS], *cache_label;
 	GtkWidget *size_drop, *swap_check;
 	GtkWidget *logo_popover, *system_popover, *list_popover;
@@ -982,15 +982,26 @@ static void on_audio_refresh(GtkButton *b, gpointer user)
 		audio_apply(app);
 }
 
-static void on_notches_changed(GtkSpinButton *spin, gpointer user)
+static void on_volume_changed(GtkRange *range, gpointer user)
 {
 	app_t *app = user;
-	int notches = gtk_spin_button_get_value_as_int(spin);
-	if (notches == app->cfg.knob_notches)
+	float turn = (float)(gtk_range_get_value(range) / 100);
+	if (turn == app->ctl.knob)
 		return;
-	app->cfg.knob_notches = notches;
-	controls_set_knob_notches(&app->ctl, notches);
+	controls_set_knob(&app->ctl, turn);
+	machine_set_gain(app->mc, app->ctl.knob * app->ctl.knob);
+	app->cfg.volume = app->ctl.knob;
 	config_touch(app);
+}
+
+/* the knob turned on the panel: the slider follows without answering back */
+static void volume_readout(app_t *app)
+{
+	if (!app->volume_scale)
+		return;
+	g_signal_handlers_block_by_func(app->volume_scale, on_volume_changed, app);
+	gtk_range_set_value(GTK_RANGE(app->volume_scale), app->ctl.knob * 100);
+	g_signal_handlers_unblock_by_func(app->volume_scale, on_volume_changed, app);
 }
 
 static GtkWidget *audio_page(app_t *app)
@@ -1026,11 +1037,15 @@ static GtkWidget *audio_page(app_t *app)
 	g_signal_connect(app->block_drop, "notify::selected", G_CALLBACK(on_block_selected), app);
 	grid_row(grid, 2, "Buffer", app->block_drop);
 
-	GtkWidget *notches = gtk_spin_button_new_with_range(5, 200, 5);
-	gtk_spin_button_set_value(GTK_SPIN_BUTTON(notches), app->cfg.knob_notches);
-	gtk_widget_set_tooltip_text(notches, "Notches of the scroll wheel that take the volume knob from silent to full");
-	g_signal_connect(notches, "value-changed", G_CALLBACK(on_notches_changed), app);
-	grid_row(grid, 3, "Knob travel, in notches", notches);
+	app->volume_scale = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0, 100, 1);
+	gtk_scale_set_draw_value(GTK_SCALE(app->volume_scale), TRUE);
+	gtk_scale_set_value_pos(GTK_SCALE(app->volume_scale), GTK_POS_RIGHT);
+	gtk_scale_set_digits(GTK_SCALE(app->volume_scale), 0);
+	gtk_range_set_value(GTK_RANGE(app->volume_scale), app->ctl.knob * 100);
+	gtk_widget_set_tooltip_text(app->volume_scale, "The volume knob, the program's output gain; it turns"
+	                                               " with the scroll wheel over the panel too");
+	g_signal_connect(app->volume_scale, "value-changed", G_CALLBACK(on_volume_changed), app);
+	grid_row(grid, 3, "Volume", app->volume_scale);
 
 	app->audio_label = gtk_label_new("");
 	gtk_label_set_xalign(GTK_LABEL(app->audio_label), 0);
@@ -1596,6 +1611,7 @@ static void act_knob(void *user, float turn)
 	app_t *app = user;
 	machine_set_gain(app->mc, turn * turn);
 	app->cfg.volume = turn;
+	volume_readout(app);
 	config_touch(app);
 }
 
@@ -1922,7 +1938,6 @@ int main(int argc, char **argv)
 
 	app.map = opt.map;
 	controls_init(&app.ctl, app.panel, &actions, &app);
-	controls_set_knob_notches(&app.ctl, app.cfg.knob_notches);
 	controls_set_swap_buttons(&app.ctl, app.cfg.swap_buttons);
 	controls_set_knob(&app.ctl, app.cfg.volume);
 	controls_set_soft_power(&app.ctl, app.shown_model == SCEMU_MODEL_SC55MK2);

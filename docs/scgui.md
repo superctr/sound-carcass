@@ -36,8 +36,9 @@ machine.  Files on the command line become the playlist and the first one plays.
   While the left button holds one half of a ◀ ▶ pair, the right button presses the other half, which
   is how the unit steps a value quickly -- that one is the right button whether or not the Interface
   tab has swapped the two.
-- **The volume knob** turns with the scroll wheel over it; it is the program's output gain, the
-  machine itself has no volume control in software.  The knob's push switch (PREVIEW) is a button.
+- **The volume knob** turns with the scroll wheel over it, twenty notches from silent to full; it is
+  the program's output gain, the machine itself has no volume control in software.  The Audio tab has
+  the same gain as a slider, for a pointer with no wheel.  The knob's push switch (PREVIEW) is a button.
 - **The SC-8850's value dial** turns two ways: drag its outer ring with the left button and it follows
   the pointer round, a thirty-sixth of a turn to a detent, so the mark on the panel stays under the
   hand; or roll the scroll wheel over it, one detent to a notch.  Its centre is the push switch
@@ -127,8 +128,8 @@ The PHONES jack opens the Settings window, which has three tabs.
 
 **Audio**: the output device (every device PortAudio finds, on every host API it was built with -- on
 Linux ALSA, JACK and PulseAudio -- or the host's default), the rate to ask it for, the device's buffer
-(64 to 1024 frames, 2 to 32 ms at 32 kHz; 256 by default), the volume knob's travel in notches of the
-scroll wheel (5 to 200 from silent to full; 20 by default), and a readout of the device in use, the
+(64 to 1024 frames, 2 to 32 ms at 32 kHz; 256 by default), the volume as a slider -- the knob on the
+panel, which follows it and is followed by it -- and a readout of the device in use, the
 latency from the machine to the jack and the underruns so far.  Changing the device or the rate
 reopens the stream where it stands, as changing the buffer does.  The machine keeps two buffers ahead
 of the device -- two of the buffer chosen, or of the period the host actually takes when that is
@@ -185,7 +186,7 @@ one no longer matches.
 machine and where its ROMs are, the window size (`size`) and whether the pointer's buttons are swapped
 (`swap_buttons`), the output device, the rate asked of it (`audio_rate`,
 0 for the machine's own) and its buffer, the volume knob,
-its travel in notches, the nine MIDI ties by the device's name, the message before each song, the instrument
+the nine MIDI ties by the device's name, the message before each song, the instrument
 map, the MIDI speed, the computer switch of each system (`computer_sc88`, `computer_sc88vl`,
 `computer_sc88pro`, `computer_sc8850` and `computer_sc55mk2`, each `midi`, `pc1`, `pc2` or `mac`, with
 `usb` taken as the SC-8850's word for the last), whether the settings memory is kept, and the tail.

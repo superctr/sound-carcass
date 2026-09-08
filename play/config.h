@@ -77,7 +77,6 @@ typedef struct scgui_config
 	bool keep_settings;      /* keep the machine's own settings memory across sessions */
 	bool swap_buttons;       /* the pointer's right and middle buttons change places on the panel */
 	float volume;            /* the knob, 0..1 */
-	int knob_notches;        /* notches of the scroll wheel from silent to full: 5..200 */
 	float tail;              /* seconds after a song's last event */
 } scgui_config_t;
 

@@ -11,7 +11,7 @@
 #define DIAL_DEGREES (360.0 / PANEL_DIAL_FRAMES)   /* what the hand turns for one detent */
 #define MACRO_HOLD_MS 300    /* a held key is seen held before the next goes down */
 #define MACRO_PRESS_MS 150
-#define KNOB_NOTCHES_DEFAULT 20
+#define KNOB_NOTCHES 20    /* wheel notches from silent to full */
 
 void controls_init(controls_t *c, panel_t *panel, const controls_actions_t *act, void *user)
 {
@@ -20,7 +20,6 @@ void controls_init(controls_t *c, panel_t *panel, const controls_actions_t *act,
 	c->act = act;
 	c->user = user;
 	c->power = true;
-	c->knob_notches = KNOB_NOTCHES_DEFAULT;
 	c->pressed_element = c->opposite_element = -1;
 }
 
@@ -38,7 +37,6 @@ void controls_set_knob(controls_t *c, float turn)
 	panel_set_knob(c->panel, c->knob);
 }
 
-void controls_set_knob_notches(controls_t *c, int notches) { c->knob_notches = notches; }
 void controls_set_swap_buttons(controls_t *c, bool swap) { c->swap_buttons = swap; }
 
 static int mapped_button(const controls_t *c, int button)
@@ -275,7 +273,7 @@ bool controls_scroll(controls_t *c, double x, double y, double dy)
 	}
 	if (e != PANEL_KNOB_VOLUME && e != PANEL_BUTTON_PREVIEW)
 		return false;
-	c->knob -= (float)dy / (float)(c->knob_notches > 0 ? c->knob_notches : KNOB_NOTCHES_DEFAULT);
+	c->knob -= (float)dy / (float)KNOB_NOTCHES;
 	c->knob = c->knob < 0 ? 0 : c->knob > 1 ? 1 : c->knob;
 	panel_set_knob(c->panel, c->knob);
 	c->act->knob(c->user, c->knob);

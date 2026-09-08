@@ -47,8 +47,8 @@ static const char group_machine[] = "the machine: which module, where its ROMs a
 static const char group_window[] = "the window: 4 the small panel, 8 twice as large, and what the"
                                   " pointer's buttons do";
 static const char group_computer[] = "the rear COMPUTER switch of each system: midi, pc1, pc2, mac (usb on the SC-8850)";
-static const char group_audio[] = "audio: the output device, the rate asked of it (0 the machine's own), its buffer,"
-                                  " the knob and its wheel travel";
+static const char group_audio[] = "audio: the output device, the rate asked of it (0 the machine's own), its buffer"
+                                  " and the knob";
 static const char group_midi[] = "MIDI: the host ports (C and D only on an SC-8850 on USB), and the speed of the inputs";
 static const char group_song[] = "each song: the reset that precedes it and the tail that follows it";
 
@@ -70,7 +70,6 @@ static const config_key_t keys[] = {
 	{ "audio_rate",       SLOT_INT,  FIELD(audio_rate),    0, 0,     NULL,     audio_rate_numbers, group_audio },
 	{ "audio_block",      SLOT_INT,  FIELD(audio_block),   64, 1024, NULL,           NULL,         group_audio },
 	{ "volume",           SLOT_REAL, FIELD(volume),        0, 1,     NULL,           NULL,         group_audio },
-	{ "knob_notches",     SLOT_INT,  FIELD(knob_notches),  5, 200,   NULL,           NULL,         group_audio },
 	{ "midi_in_a",        SLOT_TEXT, FIELD(midi[0]),       0, 0,     NULL,           NULL,         group_midi },
 	{ "midi_in_b",        SLOT_TEXT, FIELD(midi[1]),       0, 0,     NULL,           NULL,         group_midi },
 	{ "midi_in_c",        SLOT_TEXT, FIELD(midi[2]),       0, 0,     NULL,           NULL,         group_midi },
@@ -99,7 +98,6 @@ void config_defaults(scgui_config_t *c)
 	snprintf(c->computer[CONFIG_ROW_SC8850], sizeof(c->computer[CONFIG_ROW_SC8850]), "usb");
 	c->midi_rate = 31250;
 	c->volume = 0.75f;
-	c->knob_notches = 20;
 	c->swap_buttons = false;
 	c->tail = 4;
 }
@@ -110,6 +108,17 @@ static const config_key_t *find_key(const char *name)
 		if (!strcmp(keys[i].name, name))
 			return &keys[i];
 	return NULL;
+}
+
+/* keys a file written by an older build may still carry: taken and dropped */
+static const char *const retired_keys[] = { "knob_notches", NULL };
+
+static bool retired_key(const char *name)
+{
+	for (int n = 0; retired_keys[n]; n++)
+		if (!strcmp(retired_keys[n], name))
+			return true;
+	return false;
 }
 
 /* -------------------------------------------------- numbers without a locale */
@@ -472,7 +481,7 @@ static bool parse(scgui_config_t *c, const char *body, char *err, size_t err_siz
 		const config_key_t *key = find_key(name);
 		if (key)
 			apply(c, key, &tok, line, err, err_size);
-		else
+		else if (!retired_key(name))
 			complain(err, err_size, line, "unknown key '%s'", name);
 
 		kind = lex(&lx, &tok);
