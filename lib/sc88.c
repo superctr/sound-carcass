@@ -320,6 +320,8 @@ static uint8_t bus_read_port(void *user, int port)
 	sc88_t *b = user;
 	if (port == H8500_PORT8)
 		return b->xp_int ? 0xfd : 0xff;
+	if (port == H8500_PORT5)
+		return 0x2d;
 	return 0xff;
 }
 
@@ -385,7 +387,6 @@ bool sc88_init(sc88_t *b, scemu_model_t model, const scemu_roms_t *roms, const s
 	b->map = sc88 ? MAP_SC88 : MAP_PRO;
 	b->has_lsp = !sc88;
 	b->has_panel = (model != SCEMU_MODEL_VEGSPRO);
-	b->dac_right = model == SCEMU_MODEL_SC88 ? 3 : 4;
 
 	uint64_t id = 0xcbf29ce484222325ull;
 	id = hash_add(id, roms->program_rom, roms->program_rom_size);
@@ -568,17 +569,13 @@ static uint64_t ops_rom_id(const void *b) { return ((const sc88_t *)b)->rom_id; 
 static uint32_t ops_sample_rate(const void *b) { (void)b; return SC88_SAMPLE_RATE; }
 static int ops_output_count(const void *b) { return ((const sc88_t *)b)->has_lsp ? 2 : 1; }
 
-/* the SC-88's one DAC on SDOC, the frame half picking left or right; the SC-88Pro's two, SDOC carrying
-   both left channels and SDOD both right, the half picking the DAC; the SC-88VL's one DAC on SDOC, its
-   right word the position after the left, as the Pro's */
+/* one DAC on SDOC, the frame half picking left or right; the Pro's OUTPUT2 is the pair after it, on SDOD */
 static int32_t ops_output(const void *board, int pair, int channel)
 {
 	const sc88_t *b = board;
 	if (b->mute)
 		return 0;
-	if (pair == 0)
-		return xp_output(&b->xp, channel ? b->dac_right : 2);
-	return xp_output(&b->xp, channel ? 5 : 3);
+	return xp_output(&b->xp, (pair ? 4 : 2) + channel);
 }
 
 static midi_queue_t *ops_midi(void *b) { return &((sc88_t *)b)->midi; }
