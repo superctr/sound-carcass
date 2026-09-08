@@ -14,12 +14,11 @@
  *     # the rear COMPUTER switch, one position per system
  *     computer_sc88pro = midi
  *
- *     # audio: the output device, its rate and buffer, the knob and the DSP rail
+ *     # audio: the output device, its rate and buffer, and the knob
  *     audio_device = "HDA Intel PCH: ALC295 Analog"
  *     audio_rate = 0
  *     audio_block = 256
  *     volume = 0.75
- *     dac_rail = 24
  *
  * A value is an integer, a decimal, a boolean (`yes`/`no`, `true`/`false`,
  * `on`/`off`, in any case), or a string.  A string is double-quoted and takes
@@ -36,7 +35,7 @@
  * leaves that key alone, except that a number outside its range (audio_block,
  * volume, tail) is clamped to the range: a range has a nearest usable value, a
  * fixed set of words or numbers (model, size, reset, map, audio_rate, midi_rate,
- * dac_rail, the computer switches) has none.  A string longer than its field is truncated, and said
+ * the computer switches) has none.  A string longer than its field is truncated, and said
  * to be.
  *
  * Copyright (c) 2026 ian karlsson
@@ -78,7 +77,6 @@ typedef struct scgui_config
 	bool keep_settings;      /* keep the machine's own settings memory across sessions */
 	float volume;            /* the knob, 0..1 */
 	int knob_notches;        /* notches of the scroll wheel from silent to full: 5..200 */
-	int dac_rail;            /* the DSP output rail in bits: 24, the unit's, or 29, the wide one */
 	float tail;              /* seconds after a song's last event */
 } scgui_config_t;
 

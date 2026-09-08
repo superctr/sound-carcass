@@ -57,9 +57,7 @@ int unit_midi_ports(const unit_t *u);
 /* The host's settings the machine keeps: applied now and again after every boot. */
 void unit_set_map(unit_t *u, scemu_map_t map);
 void unit_set_midi_rate(unit_t *u, uint32_t baud);
-void unit_set_dac_rail(unit_t *u, int bits);
 scemu_map_t unit_map(const unit_t *u);
-int unit_dac_rail(const unit_t *u);
 /* the machine's MIDI OUT, kept across a replacement */
 void unit_set_midi_out(unit_t *u, scemu_midi_out_fn fn, void *user);
 
@@ -106,8 +104,9 @@ bool unit_panel(unit_t *u, unit_panel_t *out);
 bool unit_prepare(unit_t *u, scemu_model_t model, scemu_computer_switch_t computer, char *err, size_t err_size);
 void unit_replace(unit_t *u, session_progress_fn progress, void *user);
 
-/* The SC-8850's DAC words come out some 8 dB under the SC-88 family's for
- * the same song; a host makes them up so a level means the same on every model. */
+/* The models play at their own levels for the same song -- the SC-88 family
+ * 6 dB under the SC-55mkII, the SC-8850 8 dB under it; a host makes them up so
+ * a level means the same on every model. */
 float unit_output_trim(scemu_model_t model);
 
 #endif

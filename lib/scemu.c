@@ -195,16 +195,6 @@ void scemu_set_midi_out(scemu_t *m, scemu_midi_out_fn fn, void *user)
 	m->ops->set_midi_out(&m->board, fn, user);
 }
 
-void scemu_set_dac_rail(scemu_t *m, int bits)
-{
-	m->ops->set_rail(&m->board, bits);
-}
-
-int scemu_dac_rail(const scemu_t *m)
-{
-	return m->ops->rail(&m->board);
-}
-
 void scemu_button(scemu_t *m, scemu_button_t button, bool down)
 {
 	m->ops->button(&m->board, button, down);
@@ -263,11 +253,9 @@ size_t scemu_state_save(const scemu_t *m, void *buffer, size_t size)
 bool scemu_state_load(scemu_t *m, const void *buffer, size_t size)
 {
 	const uint32_t baud = m->ops->midi(&m->board)->baud;
-	const int rail = m->ops->rail(&m->board);
 	if (!m->ops->state_load(&m->board, buffer, size))
 		return false;
 	m->ops->midi(&m->board)->baud = baud;
-	m->ops->set_rail(&m->board, rail);
 	scemu_set_map(m, (scemu_map_t)m->map.map);
 	return true;
 }

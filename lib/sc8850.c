@@ -938,8 +938,6 @@ static void ops_set_midi_out(void *board, scemu_midi_out_fn fn, void *user)
 	b->midi_out = fn;
 	b->midi_out_user = user;
 }
-static void ops_set_rail(void *b, int bits) { xp_set_rail(&((sc8850_t *)b)->master, bits); }
-static int ops_rail(const void *b) { return ((const sc8850_t *)b)->master.rail_bits; }
 static void ops_button(void *b, scemu_button_t button, bool down) { sc8850_button(b, button, down); }
 static void ops_set_computer_switch(void *b, scemu_computer_switch_t sw) { ((sc8850_t *)b)->computer_switch = sw; }
 static uint32_t ops_leds(const void *b) { return ((const sc8850_t *)b)->ga.leds; }
@@ -975,7 +973,7 @@ const board_ops_t sc8850_board_ops =
 {
 	ops_validate_roms, ops_init, ops_release, ops_reset, ops_run_frame, ops_idle, ops_frame, ops_rom_id, ops_sample_rate,
 	ops_output_count, ops_output,
-	ops_midi, ops_set_midi_out, ops_set_rail, ops_rail,
+	ops_midi, ops_set_midi_out,
 	ops_button, ops_set_computer_switch, ops_leds, NULL, ops_glcd, ops_dial,
 	ops_nvram_size, ops_nvram_get, ops_nvram_set,
 	ops_state_size, ops_state_save, ops_state_load,

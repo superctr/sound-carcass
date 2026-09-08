@@ -153,22 +153,20 @@ MIDI there is the two jacks, groups A and B, and PC-1 and PC-2 take the parts of
 for a serial host, which is not answered here, so the machine plays nothing.  This is not the MIDI
 speed: a computer port also runs at 38400 baud, which is `--midi-rate`.
 
-The **wide output rail** is a box on the same tab.  The unit's DSP saturates the words it hands the
-converters at 24 bits, and a busy song runs into that ceiling and clips there, as it does on the real
-thing.  Ticking the box gives those words 29 bits -- the width of the DSP's own accumulator, 30 dB
-above the ceiling -- and changes nothing below it, so the sound stays the unit's and only what would
-have been chopped off is kept.  It takes effect at once, also mid-song.  The level does not move: the volume knob has the same scale on
-either rail, and what the wide rail keeps is only lost again where the knob leaves it above full
-scale at the sound card, so turn the knob down for a song that used to clip.  The SC-55mkII has no
-such rail -- its output comes out of the GP chip's own saturating adder -- and the box does nothing
-there.
+**Clear cache** is a button on the same tab.  The players keep a boot snapshot per machine, ROM set and
+COMPUTER position in `~/.cache/scemu`, with the factory settings image the firmware wrote on its first
+run, so a machine comes up instantly instead of running its boot again.  The button throws those away
+and says how many files went; the next start of a machine boots the firmware for real and writes a fresh
+snapshot.  What a machine remembers -- its own settings memory, kept when `keep_settings` is on -- is not
+a cache and is left alone.  Use it after a new build of scemu, whose machine a snapshot taken by the old
+one no longer matches.
 
 ## The settings file
 
 `$XDG_CONFIG_HOME/scemu/scgui.conf`, or `~/.config/scemu/scgui.conf`, keeps what the windows set: the
 machine and where its ROMs are, the window size, the output device, the rate asked of it (`audio_rate`,
 0 for the machine's own) and its buffer, the volume knob,
-its travel in notches and the rail, the nine MIDI ties by the device's name, the message before each song, the instrument
+its travel in notches, the nine MIDI ties by the device's name, the message before each song, the instrument
 map, the MIDI speed, the computer switch of each system (`computer_sc88`, `computer_sc88vl`,
 `computer_sc88pro`, `computer_sc8850` and `computer_sc55mk2`, each `midi`, `pc1`, `pc2` or `mac`, with
 `usb` taken as the SC-8850's word for the last), whether the settings memory is kept, and the tail.

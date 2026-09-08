@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 #define _POSIX_C_SOURCE 200809L
+#include <dirent.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -193,6 +194,40 @@ bool session_boot(session_t *s, bool use_cache, session_progress_fn progress, vo
 bool session_restore(session_t *s)
 {
 	return s->have_cache && s->use_state && load_state(s->m, s->state_file);
+}
+
+/* the cache holds a boot state per model, ROM set and switch position, and the
+ * factory settings image the firmware wrote on its first run; the user's own
+ * settings memory is not a cache and stays */
+static bool cached_file(const char *name)
+{
+	const size_t n = strlen(name);
+	const char *state = ".state", *factory = "-factory.nvram";
+	return (n > strlen(state) && !strcmp(name + n - strlen(state), state))
+	       || (n > strlen(factory) && !strcmp(name + n - strlen(factory), factory));
+}
+
+int session_clear_cache(void)
+{
+	char root[1024];
+	if (!cache_dir(root, sizeof(root)))
+		return -1;
+	DIR *dir = opendir(root);
+	if (!dir)
+		return -1;
+	int gone = 0;
+	const struct dirent *entry;
+	while ((entry = readdir(dir)))
+	{
+		char path[1200];
+		if (!cached_file(entry->d_name))
+			continue;
+		snprintf(path, sizeof(path), "%s/%s", root, entry->d_name);
+		if (unlink(path) == 0)
+			gone++;
+	}
+	closedir(dir);
+	return gone;
 }
 
 bool session_save_settings(session_t *s)

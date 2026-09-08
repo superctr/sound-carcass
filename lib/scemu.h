@@ -258,16 +258,6 @@ scemu_map_t scemu_map(const scemu_t *m);
  * returns the byte count, 0 if the buffer is too small or the map is NATIVE. */
 size_t scemu_map_selection(scemu_map_t map, uint8_t *out, size_t size);
 
-/* The width of the rail the DSP program's output words saturate at, in bits:
- * 24 is the chip's, and a busy song clips on it as the unit does; up to 29,
- * the accumulator's own width, gives the words up to 30 dB of headroom above
- * it.  The rendered words are then `bits` wide, full scale 2^(bits-1), and
- * the host scales them.  Only words the program never reads back are
- * widened; everything it computes with stays the chip's, so below the rail
- * the sound is the unit's.  Kept across a state load, like the MIDI rate. */
-void scemu_set_dac_rail(scemu_t *m, int bits);
-int scemu_dac_rail(const scemu_t *m);
-
 /* Panel. */
 void scemu_button(scemu_t *m, scemu_button_t button, bool down);
 void scemu_set_computer_switch(scemu_t *m, scemu_computer_switch_t sw);
@@ -286,8 +276,8 @@ void scemu_dial(scemu_t *m, int steps);
  * the ROM set, then tagged chunks (docs/scemu_design.md, "State").  It is
  * only valid for the same model and ROM set, which scemu_state_load checks;
  * it returns false and leaves the machine unchanged if the buffer is not
- * such a state.  Host settings (the MIDI rate, the map, the DAC rail) are
- * not part of it.  The same stream serves as a save state and as the boot
+ * such a state.  Host settings (the MIDI rate and the map) are not part
+ * of it.  The same stream serves as a save state and as the boot
  * snapshot a host loads for an instant start. */
 size_t scemu_state_size(const scemu_t *m);
 size_t scemu_state_save(const scemu_t *m, void *buffer, size_t size);

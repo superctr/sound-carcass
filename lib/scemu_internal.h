@@ -28,8 +28,6 @@ typedef struct board_ops
 
 	midi_queue_t *(*midi)(void *board);
 	void (*set_midi_out)(void *board, scemu_midi_out_fn fn, void *user);
-	void (*set_rail)(void *board, int bits);
-	int (*rail)(const void *board);
 
 	void (*button)(void *board, scemu_button_t button, bool down);
 	void (*set_computer_switch)(void *board, scemu_computer_switch_t sw);

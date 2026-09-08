@@ -31,9 +31,7 @@ host's log says which set is missing.
   comes back as events.  The SC-8850 on USB has four, A to D, answering on the port that asked.
 - **Parameters**: the volume knob; the instrument map (the song's own, or every part forced onto the
   SC-55, SC-88, SC-88Pro or SC-8850 map); the MIDI input speed (31250 baud, the 38400 of the computer
-  port, or unlimited, which loses setup messages on some songs); the output headroom, the DAC rail
-  in bits (24 is the unit's, which busy songs clip on; up to 29 gives 30 dB above it, the samples then
-  going above 0 dBFS as float allows).
+  port, or unlimited, which loses setup messages on some songs).
 - **State**: the whole machine is the plugin's state, every part exactly as the track's sysex left
   it, so a project reopens sounding as it was saved, with the notes that were held still held.  A state
   from another model is refused.

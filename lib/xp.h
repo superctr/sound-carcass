@@ -131,8 +131,6 @@ typedef struct xp_sched
 	uint8_t strobe_a;     /* the ordinal of an `ext=1` strobe, else 0xff */
 	uint8_t strobe_bcd;   /* the ordinal of an `ext=2` strobe, else 0xff */
 	uint8_t position;     /* the word position a strobe clocks out */
-	uint8_t eram_rail;    /* an ERAM write saturates at these bits instead of 24; 0 = 24 */
-	uint8_t latch_clamp;  /* an ERAM read is saturated to 24 bits as it lands */
 } xp_sched_t;
 
 struct xp;
@@ -175,8 +173,6 @@ typedef struct xp
 	int strobe_count;
 	uint32_t compiles;
 	uint8_t parity;
-	int rail_bits;
-	uint64_t wide[4];             /* the words whose store saturates at the rail instead of 24 bits */
 	int32_t port_word[XP_OUTPUT_PORTS][2];
 	int32_t port_a_out[XP_STROBES];
 
@@ -192,9 +188,6 @@ void xp_reset(xp_t *xp);
 /* The host window: offset is the word index in the 16 KB window. */
 uint16_t xp_read(xp_t *xp, uint32_t offset);
 void xp_write(xp_t *xp, uint32_t offset, uint16_t data, uint16_t mask);
-
-/* the saturation width of the words the DACs take, 24 (the chip's) to 29 bits */
-void xp_set_rail(xp_t *xp, int bits);
 
 void xp_run_frame(xp_t *xp);
 /* a port's word for the stream: port * 2 + half */

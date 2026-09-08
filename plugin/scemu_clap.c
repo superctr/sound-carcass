@@ -6,7 +6,7 @@
  * scemu_midi_write; the machine's MIDI OUT comes back as note events.  The
  * unit boots when the host activates the instance, from the boot cache
  * when there is one.  Two stereo outputs (OUTPUT 1 and 2), MIDI IN A and B,
- * MIDI OUT; the volume, the map, the MIDI rate and the DAC rail as
+ * MIDI OUT; the volume, the map and the MIDI rate as
  * parameters; the whole machine as the state.  The window (window.c) is
  * the front panel: what it does to the machine goes through a queue the
  * audio thread drains, what the machine shows comes back as the panel the
@@ -68,7 +68,7 @@ static char plugin_dir[1024];    /* where the host loaded us from: ROMs are look
 
 /* ---------------------------------------------------------------- parameters */
 
-enum { PARAM_VOLUME, PARAM_MAP, PARAM_MIDI_RATE, PARAM_RAIL, PARAM_COUNT };
+enum { PARAM_VOLUME, PARAM_MAP, PARAM_MIDI_RATE, PARAM_COUNT };
 
 static const char *const map_names[] = { "the song's own", "SC-55", "SC-88", "SC-88Pro", "SC-8850" };
 static const char *const midi_rate_names[] = { "31250 baud (MIDI)", "38400 baud (computer port)", "unlimited" };
@@ -83,7 +83,6 @@ static const struct
 	[PARAM_VOLUME] = { "Volume", 0, 1, 0.75, CLAP_PARAM_IS_AUTOMATABLE },
 	[PARAM_MAP] = { "Instrument map", 0, 4, 0, CLAP_PARAM_IS_STEPPED | CLAP_PARAM_IS_ENUM | CLAP_PARAM_IS_AUTOMATABLE },
 	[PARAM_MIDI_RATE] = { "MIDI input speed", 0, 2, 0, CLAP_PARAM_IS_STEPPED | CLAP_PARAM_IS_ENUM },
-	[PARAM_RAIL] = { "Output headroom (DAC rail bits)", 24, 29, 24, CLAP_PARAM_IS_STEPPED },
 };
 
 /* ---------------------------------------------------------------- the instance */
@@ -204,10 +203,6 @@ static void apply_param(instance_t *in, int id, double value)
 	case PARAM_MIDI_RATE:
 		if (in->unit)
 			unit_set_midi_rate(in->unit, midi_rates[(int)value]);
-		break;
-	case PARAM_RAIL:
-		if (in->unit)
-			unit_set_dac_rail(in->unit, (int)value);
 		break;
 	}
 }
@@ -781,9 +776,6 @@ static bool params_value_to_text(const clap_plugin_t *plugin, clap_id id, double
 		return true;
 	case PARAM_MIDI_RATE:
 		snprintf(out, size, "%s", midi_rate_names[v < 0 ? 0 : v > 2 ? 2 : v]);
-		return true;
-	case PARAM_RAIL:
-		snprintf(out, size, v <= 24 ? "%d bits (the unit's)" : "%d bits (+%d dB)", v, (v - 24) * 6);
 		return true;
 	default:
 		return false;

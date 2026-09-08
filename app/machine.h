@@ -93,7 +93,6 @@ void machine_dial(machine_t *mc, int steps);           /* the value dial, positi
 void machine_button_after(machine_t *mc, scemu_button_t b, bool down, unsigned ms);
 void machine_power(machine_t *mc, bool on);            /* off: silence; on: reset and boot, keys held */
 void machine_set_gain(machine_t *mc, float gain);       /* 0..1, applied to the output */
-void machine_set_dac_rail(machine_t *mc, int bits);     /* 24..29, kept across boots */
 /* Another machine, in place: the song is unloaded, the old instance goes and
  * the new one boots from its cache.  On a failure the old one keeps running
  * and the snapshot's error says why. */

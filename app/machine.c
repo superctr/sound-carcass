@@ -25,7 +25,7 @@
 typedef enum command_kind
 {
 	CMD_PLAY, CMD_PAUSE, CMD_STOP, CMD_BUTTON, CMD_DIAL, CMD_POWER, CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT,
-	CMD_RESET, CMD_MAP, CMD_RAIL, CMD_MODEL, CMD_SEND, CMD_QUIT
+	CMD_RESET, CMD_MAP, CMD_MODEL, CMD_SEND, CMD_QUIT
 } command_kind_t;
 
 typedef struct command
@@ -473,9 +473,6 @@ static void handle(machine_t *mc, const command_t *c)
 	case CMD_MAP:
 		unit_set_map(mc->unit, (scemu_map_t)c->a);
 		break;
-	case CMD_RAIL:
-		unit_set_dac_rail(mc->unit, c->a);
-		break;
 	case CMD_MODEL:
 		if (c->b >= 0)
 			mc->opt.computer[c->b] = (scemu_computer_switch_t)c->c;
@@ -667,7 +664,6 @@ machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size)
 	mc->rate = unit_rate(mc->unit);
 	unit_set_map(mc->unit, o->map);
 	unit_set_midi_rate(mc->unit, o->midi_rate);
-	unit_set_dac_rail(mc->unit, 24);
 	open_audio(mc);
 	mc->gain = 0.75f * 0.75f;
 	mc->reset = MACHINE_RESET_GS;
@@ -778,12 +774,6 @@ void machine_power(machine_t *mc, bool on)
 void machine_set_gain(machine_t *mc, float gain)
 {
 	command_t c = { CMD_GAIN, 0, 0, 0, gain, NULL };
-	post(mc, c);
-}
-
-void machine_set_dac_rail(machine_t *mc, int bits)
-{
-	command_t c = { CMD_RAIL, bits < 24 ? 24 : bits > 29 ? 29 : bits, 0, 0, 0, NULL };
 	post(mc, c);
 }
 

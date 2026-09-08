@@ -129,7 +129,6 @@ bool xp_init(xp_t *xp, const xp_link_t *link, jit_alloc_t *jit, const uint8_t *w
 	xp->wave = wave;
 	xp->wave_size = wave_size;
 	xp->wave_chip_size = chip_size;
-	xp->rail_bits = 24;
 	xp->eram = calloc(XP_ERAM_SIZE, sizeof(int32_t));
 	if (!xp->eram)
 		return false;
@@ -790,8 +789,6 @@ static void clear_named_words(xp_t *xp)
 			for (int bank = 0; bank < 4; bank++)
 				xp->named_words |= (uint64_t)1 << (send(xp, n, bank) & 63);
 		xp->sends_dirty = false;
-		if (xp->named_words & (xp->wide[0] | xp->wide[1]))
-			xp->program_dirty = true;
 	}
 	for (uint64_t named = xp->named_words; named; named &= named - 1)
 		xp->iram[cell_of(0x40 + __builtin_ctzll(named), xp->parity ^ 1)] = 0;
@@ -1175,8 +1172,6 @@ void xp_schedule(xp_t *xp)
 		o[i].strobe_a = 0xff;
 		o[i].strobe_bcd = 0xff;
 		o[i].position = 0xff;
-		o[i].eram_rail = 0;
-		o[i].latch_clamp = 0;
 		if (s[i].ext == 1)
 		{
 			o[i].strobe_a = (uint8_t)(strobes_a++ & (XP_STROBES - 1));
@@ -1190,12 +1185,6 @@ void xp_schedule(xp_t *xp)
 	}
 }
 
-static int32_t clamp_rail(const xp_t *xp, int32_t word)
-{
-	const int32_t top = (1 << (xp->rail_bits - 1)) - 1;
-	return word > top ? top : word < -top - 1 ? -top - 1 : word;
-}
-
 static int32_t wire_word(const xp_t *xp, int32_t word)
 {
 	return word & (bit(xp->regs[XP_SERIAL_FORMAT >> 1], 5) ? ~0x3ff : ~0x3f);
@@ -1206,7 +1195,7 @@ static void emit_port(xp_t *xp, int position, int k)
 {
 	const int port = k % 3;
 	const int32_t cell = xp->iram[cell_of(position, xp->parity ^ 1)];
-	const int32_t word = port == XP_PORT_B ? clamp24(cell) : clamp_rail(xp, cell);
+	const int32_t word = clamp24(cell);
 	const int half = (k / 3) & 1;
 	const int descriptor = port == XP_PORT_B ? (xp->regs[XP_SERIAL_CONFIG >> 1] >> 8) : (xp->regs[XP_DSP_CONFIG >> 1] & 0xff);
 	const int32_t out = (descriptor & 0xc0) ? wire_word(xp, word) : 0;
@@ -1274,82 +1263,6 @@ static void clock_strobe_bcd(xp_t *xp)
 		d->port_b_in = take_port_b(xp, d->strobe_bcd / 3);
 	d->strobe_bcd++;
 	d->position++;
-}
-
-/* the words a store may widen past the chip's rail: no cell of theirs is read by the program at either
-   parity or deposited into by a voice, and they are not the IRAM3 cells */
-static bool consumes_latch(const xp_slot_t *s)
-{
-	if (s->input != 3)
-		return false;
-	return special(s, XP_SPECIAL_PARALLEL) || (s->function >= 1 && s->function <= 0xc);
-}
-
-static bool unread_word(const uint8_t *read, int w)
-{
-	return w < 0xc0 && !read[cell_of(w, 0)] && !read[cell_of(w, 1)];
-}
-
-static bool landing_ports_only(const xp_t *xp, const uint8_t *read, int landing, uint64_t *ports)
-{
-	const int n = slot_count(xp);
-	if (xp->branching || landing >= n)
-		return false;
-	for (int step = 0; step < n; step++)
-	{
-		const int j = (landing + step) % n;
-		if (step && xp->sched[j].lands)
-			return true;
-		const xp_slot_t *s = &xp->slots[j];
-		if (consumes_latch(s))
-			return false;
-		if (s->st == 2)
-		{
-			if (!unread_word(read, s->word))
-				return false;
-			ports[s->word >> 6] |= (uint64_t)1 << (s->word & 63);
-		}
-	}
-	return true;
-}
-
-static void plan_rail_eram(xp_t *xp, const uint8_t *read)
-{
-	const int n = slot_count(xp);
-	for (int i = 0; i < n; i++)
-	{
-		const xp_slot_t *s = &xp->slots[i];
-		if (s->eram_op == 3)
-			xp->sched[i].eram_rail = (uint8_t)xp->rail_bits;
-		if (s->eram_op == 1 || (special(s, XP_SPECIAL_INDEXED_READ) && !s->eram_second))
-			xp->sched[i].latch_clamp = !landing_ports_only(xp, read, i + 2, xp->wide);
-	}
-}
-
-static void plan_rail(xp_t *xp)
-{
-	memset(xp->wide, 0, sizeof(xp->wide));
-	if (xp->rail_bits <= 24)
-		return;
-	uint8_t read[XP_IRAM_CELLS] = { 0 };
-	for (int i = 0; i < XP_DSP_SLOTS; i++)
-		if (xp->slots[i].st == 1)
-			read[cell_of(xp->slots[i].word, 0)] = read[cell_of(xp->slots[i].word, 1)] = 1;
-	for (int n = 0; n < 64; n++)
-		if ((xp->named_words >> n) & 1)
-			read[cell_of(0x40 + n, 0)] = read[cell_of(0x40 + n, 1)] = 1;
-	for (int i = 0; i < slot_count(xp); i++)
-	{
-		const int w = xp->slots[i].word;
-		if (xp->slots[i].st == 3 && unread_word(read, w))
-			xp->wide[w >> 6] |= (uint64_t)1 << (w & 63);
-	}
-	plan_rail_eram(xp, read);
-}
-
-static int store_rail(const xp_t *xp, const xp_slot_t *s)
-{
-	return (xp->wide[s->word >> 6] >> (s->word & 63)) & 1 ? xp->rail_bits : 0;
 }
 
 #if (defined SLJIT_64BIT_ARCHITECTURE && SLJIT_64BIT_ARCHITECTURE)
@@ -1767,7 +1680,7 @@ static int e_execute(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched
 	return issued ? 1 : 0;
 }
 
-static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t *o, int parity, bool by_pc, int live, int rail)
+static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t *o, int parity, bool by_pc, int live)
 {
 	e_mov(b, XP_REG_ABEF, XP_REG_ACC, 0);
 
@@ -1796,8 +1709,6 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 	{
 		e_eram_index(b, i, s, live_offset);
 		e_load(b, SLJIT_R3, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0);
-		if (o->latch_clamp)
-			e_clamp24(b, SLJIT_R3);
 		e_store(b, CELL(dsp.pend[pend]), SLJIT_R3);
 		reads = true;
 	}
@@ -1809,8 +1720,6 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 		sljit_emit_op2(b->c, SLJIT_AND, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 0xffff);
 		sljit_emit_op2(b->c, SLJIT_SHL, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 2);
 		e_load(b, SLJIT_R3, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0);
-		if (o->latch_clamp)
-			e_clamp24(b, SLJIT_R3);
 		e_store(b, CELL(dsp.pend[pend]), SLJIT_R3);
 		reads = true;
 	}
@@ -1839,20 +1748,14 @@ static void e_slot(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched_t
 	else if (s->st == 3)
 	{
 		e_mov(b, SLJIT_R3, XP_REG_ABEF, 0);
-		if (rail)
-			e_clamp(b, SLJIT_R3, -((sljit_sw)1 << (rail - 1)), ((sljit_sw)1 << (rail - 1)) - 1);
-		else
-			e_clamp24(b, SLJIT_R3);
+		e_clamp24(b, SLJIT_R3);
 		e_store(b, IRAM_CELL(cell_of(s->word, parity)), SLJIT_R3);
 	}
 	if (s->eram_op == 3)
 	{
 		e_eram_index(b, i, s, live_offset);
 		e_mov(b, SLJIT_R4, XP_REG_ABEF, 0);
-		if (o->eram_rail)
-			e_clamp(b, SLJIT_R4, -((sljit_sw)1 << (o->eram_rail - 1)), ((sljit_sw)1 << (o->eram_rail - 1)) - 1);
-		else
-			e_clamp24(b, SLJIT_R4);
+		e_clamp24(b, SLJIT_R4);
 		e_store(b, SLJIT_MEM2(XP_REG_ERAM, SLJIT_R3), 0, SLJIT_R4);
 	}
 	else if (s->eram_op == 2)
@@ -1941,7 +1844,7 @@ static bool compile_by_pc(xp_t *xp, int parity)
 	{
 		const xp_slot_t *s = &xp->slots[pc];
 		labels[pc] = sljit_emit_label(b.c);
-		e_slot(&b, pc, s, &xp->sched[pc], parity, true, xp->live[pc], store_rail(xp, s));
+		e_slot(&b, pc, s, &xp->sched[pc], parity, true, xp->live[pc]);
 
 		e_load(&b, SLJIT_R3, CELL(dsp.cycle));
 		sljit_emit_op2(b.c, SLJIT_ADD, SLJIT_R3, 0, SLJIT_R3, 0, SLJIT_IMM, 1);
@@ -1981,7 +1884,7 @@ static bool compile_parity(xp_t *xp, int parity)
 
 	e_prologue(&b);
 	for (int i = 0; i < slot_count(xp); i++)
-		e_slot(&b, i, &xp->slots[i], &xp->sched[i], parity, false, xp->live[i], store_rail(xp, &xp->slots[i]));
+		e_slot(&b, i, &xp->slots[i], &xp->sched[i], parity, false, xp->live[i]);
 	e_store(&b, CELL(dsp.acc), XP_REG_ACC);
 
 	if (!jit_end(&b, xp->jit, code))
@@ -1993,7 +1896,6 @@ static bool compile_parity(xp_t *xp, int parity)
 static bool compile_program(xp_t *xp)
 {
 	xp_schedule(xp);
-	plan_rail(xp);
 	xp->compiles++;
 	if (xp->branching)
 		return compile_by_pc(xp, 0) && compile_by_pc(xp, 1);
@@ -2062,16 +1964,6 @@ void xp_run_frame(xp_t *xp)
 	run_dsp(xp);
 	xp->parity ^= 1;
 	xp->frame_counter++;
-}
-
-void xp_set_rail(xp_t *xp, int bits)
-{
-	bits = bits < 24 ? 24 : bits > 29 ? 29 : bits;
-	if (bits != xp->rail_bits)
-	{
-		xp->rail_bits = bits;
-		xp->program_dirty = true;
-	}
 }
 
 int32_t xp_output(const xp_t *xp, int channel)

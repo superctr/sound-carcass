@@ -37,7 +37,7 @@ typedef struct app
 	uint32_t *frame;
 	GtkWidget *window, *area, *playlist_window, *list;
 	GtkWidget *settings_window, *notebook, *audio_label, *audio_drop, *rate_drop, *block_drop;
-	GtkWidget *system_label, *model_check[MACHINE_SYSTEMS], *computer_check[COMPUTER_POSITIONS], *rail_check;
+	GtkWidget *system_label, *model_check[MACHINE_SYSTEMS], *computer_check[COMPUTER_POSITIONS], *cache_label;
 	GtkWidget *logo_popover, *system_popover;
 	GSimpleAction *system_model_action;   /* the system menu's radio state */
 	scgui_config_t cfg;
@@ -58,7 +58,6 @@ typedef struct app
 	int audio_choice;              /* index into devices, or -1 for the default */
 	int rate_choice;               /* index into output_rates */
 	int block_choice;
-	bool rail_wide;                /* the output rail: 29 bits instead of the unit's 24 */
 	bool system_updating;          /* the radio group is being set from the machine */
 	scemu_model_t shown_model;
 	GtkWidget *midi_drop[MIDI_SLOTS], *midi_label[MIDI_SLOTS];
@@ -827,9 +826,6 @@ static GtkWidget *audio_page(app_t *app)
 
 /* ---------------------------------------------------------------- system settings */
 
-#define RAIL_NARROW 24
-#define RAIL_WIDE 29
-
 static void system_readout(app_t *app)
 {
 	if (!app->system_label)
@@ -887,16 +883,17 @@ static void on_computer_toggled(GtkCheckButton *b, gpointer user)
 	machine_set_computer_switch(app->mc, sw);
 }
 
-static void on_rail_toggled(GtkCheckButton *b, gpointer user)
+static void on_clear_cache(GtkButton *button, gpointer user)
 {
 	app_t *app = user;
-	bool wide = gtk_check_button_get_active(b);
-	if (wide == app->rail_wide)
-		return;
-	app->rail_wide = wide;
-	app->cfg.dac_rail = wide ? RAIL_WIDE : RAIL_NARROW;
-	machine_set_dac_rail(app->mc, app->cfg.dac_rail);
-	config_touch(app);
+	(void)button;
+	int gone = session_clear_cache();
+	char text[80];
+	if (gone < 0)
+		snprintf(text, sizeof(text), "No cache to clear");
+	else
+		snprintf(text, sizeof(text), gone == 1 ? "%d file cleared" : "%d files cleared", gone);
+	gtk_label_set_text(GTK_LABEL(app->cache_label), text);
 }
 
 static GtkWidget *system_page(app_t *app)
@@ -952,16 +949,18 @@ static GtkWidget *system_page(app_t *app)
 	gtk_widget_set_margin_bottom(app->system_label, 8);
 	gtk_grid_attach(GTK_GRID(grid), app->system_label, 0, 2, 3, 1);
 
-	GtkWidget *rail_label = gtk_label_new("Wide output rail: 29 bits, 30 dB of headroom above the unit's 24"
-	                                      " (busy songs no longer clip; the knob sets the level)");
-	gtk_label_set_xalign(GTK_LABEL(rail_label), 0);
-	gtk_label_set_wrap(GTK_LABEL(rail_label), TRUE);
-	gtk_label_set_max_width_chars(GTK_LABEL(rail_label), 52);
-	app->rail_check = gtk_check_button_new();
-	gtk_check_button_set_child(GTK_CHECK_BUTTON(app->rail_check), rail_label);
-	gtk_check_button_set_active(GTK_CHECK_BUTTON(app->rail_check), app->rail_wide);
-	g_signal_connect(app->rail_check, "toggled", G_CALLBACK(on_rail_toggled), app);
-	gtk_grid_attach(GTK_GRID(grid), app->rail_check, 0, 3, 3, 1);
+	GtkWidget *cache = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	GtkWidget *clear = gtk_button_new_with_label("Clear cache");
+	gtk_widget_set_halign(clear, GTK_ALIGN_START);
+	g_signal_connect(clear, "clicked", G_CALLBACK(on_clear_cache), app);
+	app->cache_label = gtk_label_new("");
+	gtk_label_set_xalign(GTK_LABEL(app->cache_label), 0);
+	gtk_box_append(GTK_BOX(cache), clear);
+	gtk_box_append(GTK_BOX(cache), app->cache_label);
+	gtk_widget_set_tooltip_text(cache, "Throws away the boot snapshots and factory settings kept in"
+	                                   " ~/.cache/scemu: the firmware boots again the next time a machine"
+	                                   " starts.  What a machine remembers is not touched.");
+	grid_row(grid, 3, "Boot cache", cache);
 	system_readout(app);
 	return grid;
 }
@@ -1549,7 +1548,6 @@ int main(int argc, char **argv)
 	app.reset = (machine_reset_t)word_index(reset_words, MACHINE_RESET_COUNT, app.cfg.reset, MACHINE_RESET_GS);
 	app.rate_choice = nearest_index(output_rates, RATE_CHOICES, (int)opt.audio_rate);
 	app.block_choice = nearest_index(block_sizes, BLOCK_CHOICES, app.cfg.audio_block);
-	app.rail_wide = app.cfg.dac_rail >= RAIL_WIDE;
 	app.device_count = audio_list(app.devices, AUDIO_DEVICES_MAX);
 	for (int n = 0; n < app.device_count; n++)
 		if (app.cfg.audio_device[0] && !strcmp(app.devices[n].name, app.cfg.audio_device))
@@ -1580,7 +1578,6 @@ int main(int argc, char **argv)
 
 	app.shown_model = machine_model(app.mc);
 	machine_set_reset(app.mc, app.reset);
-	machine_set_dac_rail(app.mc, app.rail_wide ? RAIL_WIDE : RAIL_NARROW);
 	/* the ties the file remembers, by the device's name; one whose device is
 	 * not here now keeps its place in the file for the next time */
 	app.port_count = machine_midi_list(app.mc, app.ports, MIDI_PORTS_MAX);

@@ -102,7 +102,7 @@ static int write_raw(const char *path, const int32_t *stereo, size_t frames)
 	return 1;
 }
 
-static int write_wav(const char *path, const int32_t *stereo, size_t frames, uint32_t rate, int shift)
+static int write_wav(const char *path, const int32_t *stereo, size_t frames, uint32_t rate)
 {
 	FILE *fp = fopen(path, "wb");
 	if (!fp)
@@ -114,7 +114,7 @@ static int write_wav(const char *path, const int32_t *stereo, size_t frames, uin
 	fwrite("data", 1, 4, fp); write_u32(fp, data_size);
 	for (size_t n = 0; n < frames * 2; n++)
 	{
-		int32_t v = stereo[n] >> shift;
+		int32_t v = stereo[n] >> 8;
 		if (v > 32767) v = 32767;
 		if (v < -32768) v = -32768;
 		write_u16(fp, (uint16_t)(int16_t)v);
@@ -298,7 +298,7 @@ static int smf_load(smf_t *s, const uint8_t *data, size_t size, uint32_t rate)
 
 static void usage(const char *argv0)
 {
-	fprintf(stderr, "usage: %s <sc88|sc88vl|sc88pro|sc8850|sc55mk2> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--tail N] [--state boot.state] [--map sc55|sc88|sc88pro|sc8850] [--midi-rate BAUD] [--computer midi|pc1|pc2|usb] [--rail BITS] [--raw words.bin] [--no-jit]\n", argv0);
+	fprintf(stderr, "usage: %s <sc88|sc88vl|sc88pro|sc8850|sc55mk2> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--tail N] [--state boot.state] [--map sc55|sc88|sc88pro|sc8850] [--midi-rate BAUD] [--computer midi|pc1|pc2|usb] [--raw words.bin] [--no-jit]\n", argv0);
 }
 
 int main(int argc, char **argv)
@@ -320,7 +320,6 @@ int main(int argc, char **argv)
 
 	const char *midi_path = NULL, *state_path = NULL, *raw_path = NULL;
 	double seconds = 0, tail = 2.0;
-	int rail = 24;
 	scemu_config_t config = { 0 };
 	scemu_map_t map = SCEMU_MAP_NATIVE;
 	uint32_t midi_rate = 31250;
@@ -338,8 +337,6 @@ int main(int argc, char **argv)
 			state_path = argv[++n];
 		else if (!strcmp(argv[n], "--no-jit"))
 			config.h8500_interpreter = config.sh2_interpreter = true;
-		else if (!strcmp(argv[n], "--rail") && n + 1 < argc)
-			rail = atoi(argv[++n]);
 		else if (!strcmp(argv[n], "--raw") && n + 1 < argc)
 			raw_path = argv[++n];
 		else if (!strcmp(argv[n], "--midi-rate") && n + 1 < argc)
@@ -458,8 +455,6 @@ int main(int argc, char **argv)
 
 	scemu_set_map(m, map);
 	scemu_set_midi_rate(m, midi_rate);
-	scemu_set_dac_rail(m, rail);
-	rail = scemu_dac_rail(m);
 
 	smf_t smf = { 0 };
 	uint8_t *midi_data = NULL;
@@ -513,7 +508,7 @@ int main(int argc, char **argv)
 		fprintf(stderr, "cannot write %s\n", raw_path);
 		return 1;
 	}
-	if (!write_wav(argv[3], buf, frames, rate, rail - 16))
+	if (!write_wav(argv[3], buf, frames, rate))
 	{
 		fprintf(stderr, "cannot write %s\n", argv[3]);
 		return 1;

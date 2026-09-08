@@ -25,7 +25,6 @@ struct unit
 
 	scemu_map_t map;
 	uint32_t midi_rate;
-	int rail;
 	scemu_midi_out_fn midi_out;
 	void *midi_out_user;
 
@@ -55,7 +54,6 @@ static void apply_settings(unit_t *u)
 {
 	scemu_set_map(u->m, u->map);
 	scemu_set_midi_rate(u->m, u->midi_rate);
-	scemu_set_dac_rail(u->m, u->rail);
 }
 
 static void hold_keys(unit_t *u)
@@ -131,7 +129,6 @@ unit_t *unit_open(const char *model_name, const char *rom_path, const char *exe_
 	u->keep_settings = keep_settings;
 	u->map = SCEMU_MAP_NATIVE;
 	u->midi_rate = scemu_midi_rate(u->m);
-	u->rail = scemu_dac_rail(u->m);
 	begin(u);
 	return u;
 }
@@ -187,14 +184,7 @@ void unit_set_midi_rate(unit_t *u, uint32_t baud)
 	scemu_set_midi_rate(u->m, baud);
 }
 
-void unit_set_dac_rail(unit_t *u, int bits)
-{
-	u->rail = bits < 24 ? 24 : bits > 29 ? 29 : bits;
-	scemu_set_dac_rail(u->m, u->rail);
-}
-
 scemu_map_t unit_map(const unit_t *u) { return u->map; }
-int unit_dac_rail(const unit_t *u) { return u->rail; }
 
 void unit_set_midi_out(unit_t *u, scemu_midi_out_fn fn, void *user)
 {
@@ -360,5 +350,13 @@ void unit_replace(unit_t *u, session_progress_fn progress, void *user)
 
 float unit_output_trim(scemu_model_t model)
 {
-	return model == SCEMU_MODEL_SC8850 ? 2.5f : 1.0f;
+	switch (model)
+	{
+	case SCEMU_MODEL_SC8850:
+		return 2.5f;
+	case SCEMU_MODEL_SC55MK2:
+		return 1.0f;
+	default:
+		return 2.0f;
+	}
 }

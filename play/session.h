@@ -44,6 +44,11 @@ bool session_boot(session_t *s, bool use_cache, session_progress_fn progress, vo
  * false if there is none. */
 bool session_restore(session_t *s);
 
+/* Throws away the cached boot states and factory settings images of every
+ * model, so the next boot runs the firmware again; the machines' own settings
+ * memory stays.  Returns how many files went, -1 without a cache directory. */
+int session_clear_cache(void);
+
 /* Writes the settings memory when keep_settings; true if it did. */
 bool session_save_settings(session_t *s);
 void session_free(session_t *s);
