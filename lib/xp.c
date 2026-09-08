@@ -637,8 +637,8 @@ typedef struct address_step
 
 typedef struct reader_bounds
 {
-	uint32_t loop, end, start;
-	bool looping, alternate, reverse;
+	uint32_t loop, end;
+	bool looping, alternate;
 } reader_bounds_t;
 
 static reader_bounds_t reader_bounds(const xp_t *xp, int n, uint32_t control)
@@ -646,10 +646,8 @@ static reader_bounds_t reader_bounds(const xp_t *xp, int n, uint32_t control)
 	reader_bounds_t b;
 	b.loop = page(xp, n, XP_PAGE_LOOP) & 0xfffff;
 	b.end = page(xp, n, XP_PAGE_END) & 0xfffff;
-	b.start = xp->voices[n].start;
 	b.looping = b.loop < b.end;
 	b.alternate = bit(control, 12);
-	b.reverse = bit(control, 11);
 	return b;
 }
 
@@ -706,9 +704,6 @@ static void launch(xp_t *xp, int n)
 	const uint32_t control = page(xp, n, XP_PAGE_CONTROL);
 
 	v->format = (uint8_t)((bit(control, 9) << 1) | bit(control, 7));
-	v->start = page(xp, n, XP_PAGE_ADDRESS) & 0xfffff;
-	if (bit(control, 11))
-		set_page(xp, n, XP_PAGE_ADDRESS, page(xp, n, XP_PAGE_END) & 0xfffff);
 	set_page(xp, n, XP_PAGE_CONTROL, control | 0x80);
 
 	const uint32_t address = page(xp, n, XP_PAGE_ADDRESS) & 0xfffff;
@@ -722,7 +717,6 @@ static inline address_step_t advance(const reader_bounds_t *b, address_step_t s)
 	const uint32_t end = b->end;
 	const bool looping = b->looping;
 	const bool alternate = b->alternate;
-	const bool reverse = b->reverse;
 
 	if (!s.backward)
 	{
@@ -733,8 +727,7 @@ static inline address_step_t advance(const reader_bounds_t *b, address_step_t s)
 		return (address_step_t){ s.address + 1, false };
 	}
 
-	const uint32_t bound = (alternate && looping) ? loop : (reverse && !looping) ? b->start : loop;
-	if (s.address <= bound)
+	if (s.address <= loop)
 	{
 		if (alternate && looping)
 			return (address_step_t){ s.address, false };

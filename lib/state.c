@@ -134,7 +134,6 @@ void state_put_xp(state_writer_t *w, const xp_t *x)
 		put8(w, x->voices[n].phase);
 		put8(w, x->voices[n].format);
 		put8(w, x->voices[n].fade_entry);
-		put32(w, x->voices[n].start);
 	}
 	put_bytes(w, x->still, XP_VOICES);
 	put64(w, x->run_mask);
@@ -182,7 +181,6 @@ void state_get_xp(state_reader_t *r, xp_t *x)
 		x->voices[n].phase = get8(r);
 		x->voices[n].format = get8(r);
 		x->voices[n].fade_entry = get8(r);
-		x->voices[n].start = get32(r);
 	}
 	get_bytes(r, x->still, XP_VOICES);
 	x->run_mask = get64(r);

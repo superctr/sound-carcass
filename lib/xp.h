@@ -74,7 +74,6 @@ typedef struct xp_voice
 	uint8_t phase;
 	uint8_t format;
 	uint8_t fade_entry;
-	uint32_t start;
 } xp_voice_t;
 
 /* the multiply input a slot's col[5:4] selects, and what it selects instead when the function is 0 */
