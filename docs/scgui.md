@@ -34,7 +34,8 @@ machine.  Files on the command line become the playlist and the first one plays.
   where the firmware must see the hold before the second key.  Either kind comes up when the
   left-clicked key does, or with another right-click on it, and both are held through a power-on.
   While the left button holds one half of a ◀ ▶ pair, the right button presses the other half, which
-  is how the unit steps a value quickly.
+  is how the unit steps a value quickly.  The Interface tab swaps the right and the middle button for
+  a hand that would rather right-click the combination menu.
 - **The volume knob** turns with the scroll wheel over it; it is the program's output gain, the
   machine itself has no volume control in software.  The knob's push switch (PREVIEW) is a button.
 - **The SC-8850's value dial** turns two ways: drag its outer ring with the left button and it follows
@@ -58,7 +59,8 @@ machine.  Files on the command line become the playlist and the first one plays.
   on the SC-55, SC-88, SC-88Pro or SC-8850 map -- the one-off form of the map override, and the way to reach
   those on a machine with no panel of its own.
 
-- **Combinations from the manual**: a middle-click (or Ctrl and the right button) on a key opens a
+- **Combinations from the manual**: a middle-click (or Ctrl and the right button, or a plain
+  right-click when the buttons are swapped on the Interface tab) on a key opens a
   menu of every multi-key operation the owner's manual and the service notes list for that key, each
   with its keys spelled out and the mode it applies in; the keys light up on the panel while the
   pointer is over an entry, and choosing one plays it for you on the machine's own clock: keys the
@@ -113,7 +115,7 @@ jitter is the polling, about a millisecond, instead of a whole buffer.
 
 ## Settings
 
-The PHONES jack opens the Settings window, which has two tabs.
+The PHONES jack opens the Settings window, which has three tabs.
 
 **Audio**: the output device (every device PortAudio finds, on every host API it was built with -- on
 Linux ALSA, JACK and PulseAudio -- or the host's default), the rate to ask it for, the device's buffer
@@ -129,6 +131,13 @@ The rate is the machine's own, 32 kHz and the SC-55mkII's 66206 Hz, or 32000, 44
 device that will not open at the one asked for runs at one of its own.  The machine always renders at
 its own rate, and whatever the device opens at, the output is converted to it with libsamplerate's
 medium sinc.
+
+**Interface**: how the panel is drawn and what the pointer's buttons do.  The **panel size** is the
+artwork's two bakes -- the small panel, or twice as large -- and changing it redraws the window at
+once, keys held and all; it is `--size 4|8` on the command line.  **Swapping the right and middle
+mouse buttons** puts the combination menu on a plain right-click and moves the queue-and-hold gesture
+(and the other half of a ◀ ▶ pair) to the middle button, for a mouse whose middle button is a wheel to
+press or none at all.  Ctrl and the right button open the menu either way round.
 
 **System**: which machine this is -- SC-88, SC-88VL, SC-88Pro, SC-8850 or SC-55mkII.  A model whose
 ROM images were not found is greyed out.  Choosing another one switches at once: the song is
@@ -164,7 +173,8 @@ one no longer matches.
 ## The settings file
 
 `$XDG_CONFIG_HOME/scemu/scgui.conf`, or `~/.config/scemu/scgui.conf`, keeps what the windows set: the
-machine and where its ROMs are, the window size, the output device, the rate asked of it (`audio_rate`,
+machine and where its ROMs are, the window size (`size`) and whether the pointer's buttons are swapped
+(`swap_buttons`), the output device, the rate asked of it (`audio_rate`,
 0 for the machine's own) and its buffer, the volume knob,
 its travel in notches, the nine MIDI ties by the device's name, the message before each song, the instrument
 map, the MIDI speed, the computer switch of each system (`computer_sc88`, `computer_sc88vl`,

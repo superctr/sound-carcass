@@ -75,6 +75,7 @@ typedef struct scgui_config
 	int midi_rate;           /* baud of the MIDI input: 31250, 38400, 0 */
 	char computer[CONFIG_SYSTEMS][8];  /* the rear switch of each system: "midi", "pc1", "pc2", "mac" ("usb" on the SC-8850) */
 	bool keep_settings;      /* keep the machine's own settings memory across sessions */
+	bool swap_buttons;       /* the pointer's right and middle buttons change places on the panel */
 	float volume;            /* the knob, 0..1 */
 	int knob_notches;        /* notches of the scroll wheel from silent to full: 5..200 */
 	float tail;              /* seconds after a song's last event */

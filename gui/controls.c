@@ -39,6 +39,18 @@ void controls_set_knob(controls_t *c, float turn)
 }
 
 void controls_set_knob_notches(controls_t *c, int notches) { c->knob_notches = notches; }
+void controls_set_swap_buttons(controls_t *c, bool swap) { c->swap_buttons = swap; }
+
+static int mapped_button(const controls_t *c, int button)
+{
+	if (!c->swap_buttons)
+		return button;
+	if (button == CONTROLS_BUTTON_RIGHT)
+		return CONTROLS_BUTTON_MIDDLE;
+	if (button == CONTROLS_BUTTON_MIDDLE)
+		return CONTROLS_BUTTON_RIGHT;
+	return button;
+}
 
 /* the other half of a ◀ ▶ pair, or -1 */
 static int opposite_button(int b)
@@ -146,6 +158,7 @@ static void dial_turn(controls_t *c, double x, double y)
 
 void controls_press(controls_t *c, int button, unsigned mods, double x, double y)
 {
+	button = mapped_button(c, button);
 	int e = panel_hit(c->panel, (int)x, (int)y);
 	if (e < 0)
 		return;
@@ -212,6 +225,7 @@ void controls_press(controls_t *c, int button, unsigned mods, double x, double y
 
 void controls_release(controls_t *c, int button)
 {
+	button = mapped_button(c, button);
 	if (button == CONTROLS_BUTTON_RIGHT)
 	{
 		int oe = c->opposite_element;

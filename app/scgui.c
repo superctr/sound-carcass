@@ -38,6 +38,7 @@ typedef struct app
 	GtkWidget *window, *area, *playlist_window, *list;
 	GtkWidget *settings_window, *notebook, *audio_label, *audio_drop, *rate_drop, *block_drop;
 	GtkWidget *system_label, *model_check[MACHINE_SYSTEMS], *computer_check[COMPUTER_POSITIONS], *cache_label;
+	GtkWidget *size_drop, *swap_check;
 	GtkWidget *logo_popover, *system_popover;
 	GSimpleAction *system_model_action;   /* the system menu's radio state */
 	scgui_config_t cfg;
@@ -262,6 +263,7 @@ static void config_touch(app_t *app)
 static void play_index(app_t *app, int index);
 static void set_title(app_t *app);
 static gboolean macro_done(gpointer user);
+static void panel_rebuild(app_t *app, panel_model_t model, int size);
 
 static const char *song_label(const char *path, char *buf, size_t size)
 {
@@ -824,6 +826,61 @@ static GtkWidget *audio_page(app_t *app)
 	return grid;
 }
 
+/* ---------------------------------------------------------------- the interface */
+
+#define SIZE_SMALL 4
+#define SIZE_LARGE 8
+
+static void on_size_selected(GObject *drop, GParamSpec *spec, gpointer user)
+{
+	app_t *app = user;
+	(void)spec;
+	int size = gtk_drop_down_get_selected(GTK_DROP_DOWN(drop)) ? SIZE_LARGE : SIZE_SMALL;
+	if (size == app->size)
+		return;
+	app->cfg.size = size;
+	panel_rebuild(app, panel_model(app->panel), size);
+	config_touch(app);
+}
+
+static void on_swap_toggled(GtkCheckButton *b, gpointer user)
+{
+	app_t *app = user;
+	bool swap = gtk_check_button_get_active(b);
+	if (swap == app->cfg.swap_buttons)
+		return;
+	app->cfg.swap_buttons = swap;
+	controls_set_swap_buttons(&app->ctl, swap);
+	config_touch(app);
+}
+
+static GtkWidget *interface_page(app_t *app)
+{
+	GtkWidget *grid = settings_grid();
+	GtkStringList *sizes = gtk_string_list_new(NULL);
+	gtk_string_list_append(sizes, "Small");
+	gtk_string_list_append(sizes, "Large, twice the size");
+	app->size_drop = gtk_drop_down_new(G_LIST_MODEL(sizes), NULL);
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(app->size_drop), app->size >= SIZE_LARGE ? 1 : 0);
+	gtk_widget_set_tooltip_text(app->size_drop, "The panel is drawn from artwork baked at two sizes;"
+	                                            " the window follows at once");
+	g_signal_connect(app->size_drop, "notify::selected", G_CALLBACK(on_size_selected), app);
+	grid_row(grid, 0, "Panel size", app->size_drop);
+
+	GtkWidget *swap_label = gtk_label_new("Swap the right and middle mouse buttons: the combination menu"
+	                                      " opens on a right-click, and the right button's queue-and-hold"
+	                                      " gesture moves to the middle one");
+	gtk_label_set_xalign(GTK_LABEL(swap_label), 0);
+	gtk_label_set_wrap(GTK_LABEL(swap_label), TRUE);
+	gtk_label_set_max_width_chars(GTK_LABEL(swap_label), 52);
+	app->swap_check = gtk_check_button_new();
+	gtk_check_button_set_child(GTK_CHECK_BUTTON(app->swap_check), swap_label);
+	gtk_check_button_set_active(GTK_CHECK_BUTTON(app->swap_check), app->cfg.swap_buttons);
+	g_signal_connect(app->swap_check, "toggled", G_CALLBACK(on_swap_toggled), app);
+	gtk_grid_attach(GTK_GRID(grid), app->swap_check, 0, 1, 3, 1);
+	return grid;
+}
+
 /* ---------------------------------------------------------------- system settings */
 
 static void system_readout(app_t *app)
@@ -968,7 +1025,8 @@ static GtkWidget *system_page(app_t *app)
 /* ---------------------------------------------------------------- the settings window */
 
 #define SETTINGS_TAB_AUDIO 0
-#define SETTINGS_TAB_SYSTEM 1
+#define SETTINGS_TAB_INTERFACE 1
+#define SETTINGS_TAB_SYSTEM 2
 
 static void settings_show(app_t *app, int tab)
 {
@@ -982,6 +1040,7 @@ static void settings_show(app_t *app, int tab)
 
 		app->notebook = gtk_notebook_new();
 		gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), audio_page(app), gtk_label_new("Audio"));
+		gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), interface_page(app), gtk_label_new("Interface"));
 		gtk_notebook_append_page(GTK_NOTEBOOK(app->notebook), system_page(app), gtk_label_new("System"));
 		gtk_window_set_child(GTK_WINDOW(w), app->notebook);
 		app->settings_window = w;
@@ -1017,6 +1076,8 @@ static void on_menu_open(GSimpleAction *a, GVariant *parameter, gpointer user)
 		playlist_show(app);
 	else if (!strcmp(what, "audio"))
 		settings_show(app, SETTINGS_TAB_AUDIO);
+	else if (!strcmp(what, "interface"))
+		settings_show(app, SETTINGS_TAB_INTERFACE);
 	else if (!strcmp(what, "system"))
 		settings_show(app, SETTINGS_TAB_SYSTEM);
 	else
@@ -1057,6 +1118,7 @@ static void logo_menu(app_t *app, double x, double y)
 		{
 			{ "playlist", on_menu_open, NULL, NULL, NULL, { 0 } },
 			{ "audio", on_menu_open, NULL, NULL, NULL, { 0 } },
+			{ "interface", on_menu_open, NULL, NULL, NULL, { 0 } },
 			{ "system", on_menu_open, NULL, NULL, NULL, { 0 } },
 			{ "about", on_menu_open, NULL, NULL, NULL, { 0 } },
 			{ "send-reset", on_menu_send_reset, "i", NULL, NULL, { 0 } },
@@ -1085,6 +1147,7 @@ static void logo_menu(app_t *app, double x, double y)
 		GMenu *windows = g_menu_new();
 		menu_append(windows, "Playlist and MIDI", "logo.playlist", -1);
 		menu_append(windows, "Audio", "logo.audio", -1);
+		menu_append(windows, "Interface", "logo.interface", -1);
 		menu_append(windows, "System", "logo.system", -1);
 		g_menu_append_submenu(windows, "Send", G_MENU_MODEL(send));
 		g_menu_append_section(menu, NULL, G_MENU_MODEL(windows));
@@ -1199,14 +1262,13 @@ static void panel_glass(panel_t *p, const machine_state_t *st)
 	panel_set_leds(p, st->leds);
 }
 
-/* the panel of another model: the same size, the keys held come up with the old one */
-static void panel_switch(app_t *app, panel_model_t model)
+/* another model's panel, or the same one at the other size: the keys held come up with the old one */
+static void panel_rebuild(app_t *app, panel_model_t model, int size)
 {
-	if (model == panel_model(app->panel))
-		return;
-	panel_t *p = panel_create(model, panel_pitch_for(model, app->size) * app->scale);
+	panel_t *p = panel_create(model, panel_pitch_for(model, size) * app->scale);
 	if (!p)
 		return;
+	app->size = size;
 	panel_destroy(app->panel);
 	app->panel = p;
 	int w = panel_width(p), h = panel_height(p);
@@ -1218,6 +1280,12 @@ static void panel_switch(app_t *app, panel_model_t model)
 	panel_glass(p, &app->state);
 	gtk_widget_set_size_request(app->area, w / app->scale, h / app->scale);
 	gtk_widget_queue_draw(app->area);
+}
+
+static void panel_switch(app_t *app, panel_model_t model)
+{
+	if (model != panel_model(app->panel))
+		panel_rebuild(app, model, app->size);
 }
 
 static void set_title(app_t *app)
@@ -1638,6 +1706,7 @@ int main(int argc, char **argv)
 	app.map = opt.map;
 	controls_init(&app.ctl, app.panel, &actions, &app);
 	controls_set_knob_notches(&app.ctl, app.cfg.knob_notches);
+	controls_set_swap_buttons(&app.ctl, app.cfg.swap_buttons);
 	controls_set_knob(&app.ctl, app.cfg.volume);
 	controls_set_soft_power(&app.ctl, app.shown_model == SCEMU_MODEL_SC55MK2);
 	machine_set_gain(app.mc, app.ctl.knob * app.ctl.knob);

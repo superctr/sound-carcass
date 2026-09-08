@@ -2,7 +2,7 @@
  *
  * What a click, a drag and the wheel mean on the panel: which key an
  * element is and the other half of its pair, the keys the right button
- * queues or holds down, the value dial turned by hand, the wheel over the
+ * queues or holds down (the middle one when the two are swapped), the value dial turned by hand, the wheel over the
  * dial and the volume knob, the power switch with keys held through the
  * boot, and the button combinations from the manual played out on the
  * machine's clock.  No toolkit: the host feeds it pointer events in panel
@@ -48,6 +48,7 @@ typedef struct controls
 	bool soft_power;           /* the power key is a position in the machine's own matrix (the SC-55mkII) */
 	float knob;
 	int knob_notches;          /* wheel notches from silent to full */
+	bool swap_buttons;         /* the right button opens the combination menu, the middle one queues keys */
 	int pressed_element;       /* the element under the held left button, or -1 */
 	int opposite_element;      /* the other half of the pair, pressed with the right button meanwhile */
 	uint64_t queued;           /* elements queued with the right button: they go down with the next key */
@@ -67,6 +68,9 @@ void controls_set_panel(controls_t *c, panel_t *panel);
 void controls_set_soft_power(controls_t *c, bool soft);
 void controls_set_knob(controls_t *c, float turn);
 void controls_set_knob_notches(controls_t *c, int notches);
+/* the right button and the middle one change places, so the combination menu
+ * is a right-click and the queue-and-hold gesture a middle-click */
+void controls_set_swap_buttons(controls_t *c, bool swap);
 
 /* Pointer events in panel pixels.  A scroll returns true when the panel took it. */
 void controls_press(controls_t *c, int button, unsigned mods, double x, double y);

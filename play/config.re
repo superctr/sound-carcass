@@ -44,7 +44,8 @@ static const int audio_rate_numbers[] = { 0, 32000, 44100, 48000, -1 };
 static const char *const computer_words[] = { "midi", "pc1", "pc2", "mac", "usb", NULL };
 
 static const char group_machine[] = "the machine: which module, where its ROMs are, and what it remembers";
-static const char group_window[] = "the window: 4 the small panel, 8 twice as large";
+static const char group_window[] = "the window: 4 the small panel, 8 twice as large, and what the"
+                                  " pointer's buttons do";
 static const char group_computer[] = "the rear COMPUTER switch of each system: midi, pc1, pc2, mac (usb on the SC-8850)";
 static const char group_audio[] = "audio: the output device, the rate asked of it (0 the machine's own), its buffer,"
                                   " the knob and its wheel travel";
@@ -64,6 +65,7 @@ static const config_key_t keys[] = {
 	{ "computer_sc88pro", SLOT_TEXT, FIELD(computer[CONFIG_ROW_SC88PRO]), 0, 0, computer_words, NULL, group_computer },
 	{ "computer_sc8850",  SLOT_TEXT, FIELD(computer[CONFIG_ROW_SC8850]),  0, 0, computer_words, NULL, group_computer },
 	{ "size",             SLOT_INT,  FIELD(size),          0, 0,     NULL,           size_numbers, group_window },
+	{ "swap_buttons",     SLOT_BOOL, FIELD(swap_buttons),  0, 0,     NULL,           NULL,         group_window },
 	{ "audio_device",     SLOT_TEXT, FIELD(audio_device),  0, 0,     NULL,           NULL,         group_audio },
 	{ "audio_rate",       SLOT_INT,  FIELD(audio_rate),    0, 0,     NULL,     audio_rate_numbers, group_audio },
 	{ "audio_block",      SLOT_INT,  FIELD(audio_block),   64, 1024, NULL,           NULL,         group_audio },
@@ -98,6 +100,7 @@ void config_defaults(scgui_config_t *c)
 	c->midi_rate = 31250;
 	c->volume = 0.75f;
 	c->knob_notches = 20;
+	c->swap_buttons = false;
 	c->tail = 4;
 }
 
