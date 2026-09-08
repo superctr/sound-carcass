@@ -25,7 +25,7 @@
 typedef enum command_kind
 {
 	CMD_PLAY, CMD_PAUSE, CMD_STOP, CMD_BUTTON, CMD_DIAL, CMD_POWER, CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT,
-	CMD_RESET, CMD_MAP, CMD_MODEL, CMD_SEND, CMD_QUIT
+	CMD_RESET, CMD_MAP, CMD_MODEL, CMD_SEND, CMD_ANIMATE, CMD_QUIT
 } command_kind_t;
 
 typedef struct command
@@ -144,7 +144,7 @@ static void publish(machine_t *mc, bool booting)
 	s.has_glcd = panel.has_glcd;
 	s.leds = panel.leds;
 	s.power = panel.power;
-	s.booting = booting;
+	s.booting = booting || unit_booting(mc->unit);
 	s.playing = mc->playing;
 	s.paused = mc->paused;
 	s.finished = mc->have_smf && !mc->playing && mc->pos >= mc->end_frame;
@@ -227,6 +227,16 @@ static void boot(machine_t *mc, bool use_cache)
 {
 	publish(mc, true);
 	unit_boot(mc->unit, use_cache, boot_progress, mc);
+	publish(mc, false);
+}
+
+/* A song asked for while the firmware is still animating its boot: the rest of
+ * the boot runs at once, so the song starts on a machine that is listening. */
+static void finish_boot(machine_t *mc)
+{
+	if (!unit_booting(mc->unit))
+		return;
+	unit_boot_finish(mc->unit);
 	publish(mc, false);
 }
 
@@ -408,7 +418,10 @@ static void handle(machine_t *mc, const command_t *c)
 	{
 	case CMD_PLAY:
 		if (unit_power_on(mc->unit))
+		{
+			finish_boot(mc);
 			load_song(mc, c->path);
+		}
 		break;
 	case CMD_PAUSE:
 		if (unit_power_on(mc->unit) && c->a && !mc->paused)
@@ -474,6 +487,10 @@ static void handle(machine_t *mc, const command_t *c)
 		break;
 	case CMD_MAP:
 		unit_set_map(mc->unit, (scemu_map_t)c->a);
+		break;
+	case CMD_ANIMATE:
+		mc->opt.boot_animation = c->a != 0;
+		unit_set_boot_live(mc->unit, mc->opt.boot_animation);
 		break;
 	case CMD_MODEL:
 		if (c->b >= 0)
@@ -666,6 +683,7 @@ machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size)
 	mc->rate = unit_rate(mc->unit);
 	unit_set_map(mc->unit, o->map);
 	unit_set_midi_rate(mc->unit, o->midi_rate);
+	unit_set_boot_live(mc->unit, o->boot_animation);
 	open_audio(mc);
 	mc->gain = 0.75f * 0.75f;
 	mc->reset = MACHINE_RESET_GS;
@@ -776,6 +794,12 @@ void machine_power(machine_t *mc, bool on)
 void machine_set_gain(machine_t *mc, float gain)
 {
 	command_t c = { CMD_GAIN, 0, 0, 0, gain, NULL };
+	post(mc, c);
+}
+
+void machine_set_boot_animation(machine_t *mc, bool on)
+{
+	command_t c = { CMD_ANIMATE, on, 0, 0, 0, NULL };
 	post(mc, c);
 }
 

@@ -15,7 +15,7 @@
 typedef struct session
 {
 	scemu_t *m;
-	bool have_cache, have_seed, seed_is_user, use_state, keep_settings;
+	bool have_cache, have_seed, seed_is_user, use_state, keep_settings, live;
 	char state_file[1100], factory_file[1100], settings_file[1100];
 	uint8_t *nvram;
 	size_t nvram_size;
@@ -39,6 +39,16 @@ void session_init(session_t *s, scemu_t *m, const char *model_name, uint64_t rom
  * state instead when use_cache and there is one.  Returns true when the
  * machine came up; s->from_cache and s->boot_frames say how. */
 bool session_boot(session_t *s, bool use_cache, session_progress_fn progress, void *user);
+
+/* The boot the caller renders itself, so a host can animate the display: the
+ * machine is left where the reset put it and comes up over the caller's own
+ * scemu_render calls.  session_booting takes the frames just rendered and is
+ * true until the firmware has let the mute go, keeping what a boot is worth
+ * keeping the moment it does; session_boot_finish runs what is left of one at
+ * once, for a caller that has run out of patience. */
+void session_boot_live(session_t *s);
+bool session_booting(session_t *s, size_t frames);
+bool session_boot_finish(session_t *s);
 
 /* Loads the cached boot state again, for a fresh machine without a boot;
  * false if there is none. */

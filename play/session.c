@@ -155,17 +155,41 @@ void session_init(session_t *s, scemu_t *m, const char *model_name, uint64_t rom
 	s->use_state = !s->seed_is_user;
 }
 
+/* A blank settings memory sends the firmware through a first power-on
+ * initialisation that takes a longer path than any later start.  Keep what
+ * that boot wrote -- it is the firmware's own factory image, not anyone's
+ * settings -- and let the next run, which starts from a machine that has been
+ * switched on before, be the one that is cached. */
+static void keep_boot(session_t *s)
+{
+	if (!s->have_cache)
+		return;
+	if (!s->have_seed && scemu_nvram_get(s->m, s->nvram, s->nvram_size) == s->nvram_size)
+	{
+		session_write_file(s->factory_file, s->nvram, s->nvram_size);
+		s->have_seed = true;
+	}
+	else if (s->use_state)
+		save_state(s->m, s->state_file);
+}
+
+/* the frames a boot is given before it is taken as one that will never come up */
+static uint64_t boot_limit(const session_t *s)
+{
+	return (uint64_t)BOOT_LIMIT_SECONDS * scemu_sample_rate(s->m);
+}
+
 bool session_boot(session_t *s, bool use_cache, session_progress_fn progress, void *user)
 {
-	uint32_t rate = scemu_sample_rate(s->m);
 	s->from_cache = use_cache && s->have_cache && s->use_state && load_state(s->m, s->state_file);
 	s->boot_frames = 0;
+	s->live = false;
 	if (s->from_cache)
 		return true;
 
 	int32_t *const out[2] = { NULL, NULL };
 	bool released = false;
-	while (!released && s->boot_frames < (uint64_t)BOOT_LIMIT_SECONDS * rate)
+	while (!released && s->boot_frames < boot_limit(s))
 	{
 		scemu_render(s->m, out, BLOCK);
 		s->boot_frames += BLOCK;
@@ -173,21 +197,45 @@ bool session_boot(session_t *s, bool use_cache, session_progress_fn progress, vo
 		if (progress && !progress(user, s->boot_frames))
 			return false;
 	}
-	/* A blank settings memory sends the firmware through a first power-on
-	 * initialisation that takes a longer path than any later start.  Keep
-	 * what that boot wrote -- it is the firmware's own factory image, not
-	 * anyone's settings -- and let the next run, which starts from a machine
-	 * that has been switched on before, be the one that is cached. */
-	if (s->have_cache && released && use_cache)
+	if (released && use_cache)
+		keep_boot(s);
+	return released;
+}
+
+void session_boot_live(session_t *s)
+{
+	s->from_cache = false;
+	s->boot_frames = 0;
+	s->live = true;
+}
+
+bool session_booting(session_t *s, size_t frames)
+{
+	if (!s->live)
+		return false;
+	s->boot_frames += frames;
+	if (scemu_muted(s->m) && s->boot_frames < boot_limit(s))
+		return true;
+	s->live = false;
+	if (!scemu_muted(s->m))
+		keep_boot(s);
+	return false;
+}
+
+bool session_boot_finish(session_t *s)
+{
+	if (!s->live)
+		return !scemu_muted(s->m);
+	int32_t *const out[2] = { NULL, NULL };
+	while (scemu_muted(s->m) && s->boot_frames < boot_limit(s))
 	{
-		if (!s->have_seed && scemu_nvram_get(s->m, s->nvram, s->nvram_size) == s->nvram_size)
-		{
-			session_write_file(s->factory_file, s->nvram, s->nvram_size);
-			s->have_seed = true;
-		}
-		else if (s->use_state)
-			save_state(s->m, s->state_file);
+		scemu_render(s->m, out, BLOCK);
+		s->boot_frames += BLOCK;
 	}
+	s->live = false;
+	bool released = !scemu_muted(s->m);
+	if (released)
+		keep_boot(s);
 	return released;
 }
 

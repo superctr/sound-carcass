@@ -36,6 +36,7 @@ typedef struct machine_options
 	scemu_computer_switch_t computer[MACHINE_SYSTEMS];  /* the rear switch of each system */
 	double tail;              /* seconds after a song's last event */
 	bool keep_settings, no_cache, no_audio;
+	bool boot_animation;      /* the firmware boots in the machine's own time, animation and all */
 	int audio_device;         /* an index from audio_list (audio.h), or -1 for the default */
 	unsigned audio_block;     /* the device's buffer in frames; 0 for the default */
 	unsigned audio_rate;      /* the rate the device is asked for; 0 the machine's own */
@@ -88,11 +89,14 @@ void machine_pause(machine_t *mc, bool paused);
 void machine_stop_song(machine_t *mc);
 void machine_button(machine_t *mc, scemu_button_t b, bool down);
 void machine_dial(machine_t *mc, int steps);           /* the value dial, positive clockwise */
-/* the same, ms of the machine's own time later (it stands still while the
- * machine boots), in the order posted; for the panel's key combinations */
+/* the same, ms of the machine's own time later (a boot the host does not
+ * render takes none of it), in the order posted; for the panel's key combinations */
 void machine_button_after(machine_t *mc, scemu_button_t b, bool down, unsigned ms);
 void machine_power(machine_t *mc, bool on);            /* off: silence; on: reset and boot, keys held */
 void machine_set_gain(machine_t *mc, float gain);       /* 0..1, applied to the output */
+/* The firmware's boot runs at the machine's own speed instead of as fast as
+ * the host can, so the display animates; it takes hold at the next start. */
+void machine_set_boot_animation(machine_t *mc, bool on);
 /* Another machine, in place: the song is unloaded, the old instance goes and
  * the new one boots from its cache.  On a failure the old one keeps running
  * and the snapshot's error says why. */

@@ -65,6 +65,13 @@ void unit_set_midi_out(unit_t *u, scemu_midi_out_fn fn, void *user);
  * one, else the firmware boots here, calling progress every block.  The
  * keys held are down through it.  Returns true when the machine came up. */
 bool unit_boot(unit_t *u, bool use_cache, session_progress_fn progress, void *user);
+/* The boot the caller renders itself: with this set the unit comes up over the
+ * caller's own unit_render calls, cache or no cache, so the host sees the
+ * firmware's boot animation.  unit_booting is true until it is up; a caller
+ * that wants the machine now finishes what is left of it at once. */
+void unit_set_boot_live(unit_t *u, bool live);
+bool unit_booting(const unit_t *u);
+bool unit_boot_finish(unit_t *u);
 /* Off: the machine stands still and renders silence.  On again: a power-on
  * reset and a boot from cold, the keys held. */
 void unit_power(unit_t *u, bool on);
@@ -75,8 +82,9 @@ uint64_t unit_boot_frames(const unit_t *u);
 
 /* A key: remembered while the unit is off, so it is held through the boot. */
 void unit_key(unit_t *u, scemu_button_t b, bool down);
-/* The same, ms of the machine's own time later (it stands still while the
- * machine boots), in the order posted; for the panel's key combinations. */
+/* The same, ms of the machine's own time later (a boot the caller does not
+ * render takes none of it), in the order posted; for the panel's key
+ * combinations. */
 void unit_key_after(unit_t *u, scemu_button_t b, bool down, unsigned ms);
 void unit_dial(unit_t *u, int steps);
 /* one message to every port group the machine takes, now */

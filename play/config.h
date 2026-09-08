@@ -10,6 +10,7 @@
  *     rom = "/home/me/roms/sc88pro.zip"
  *     map = "native"
  *     keep_settings = no
+ *     boot_animation = no
  *
  *     # the rear COMPUTER switch, one position per system
  *     computer_sc88pro = midi
@@ -75,6 +76,7 @@ typedef struct scgui_config
 	int midi_rate;           /* baud of the MIDI input: 31250, 38400, 0 */
 	char computer[CONFIG_SYSTEMS][8];  /* the rear switch of each system: "midi", "pc1", "pc2", "mac" ("usb" on the SC-8850) */
 	bool keep_settings;      /* keep the machine's own settings memory across sessions */
+	bool boot_animation;     /* boot the firmware in the machine's own time, so the display animates */
 	bool swap_buttons;       /* the pointer's right and middle buttons change places on the panel */
 	float volume;            /* the knob, 0..1 */
 	float tail;              /* seconds after a song's last event */

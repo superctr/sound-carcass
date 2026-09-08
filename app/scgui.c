@@ -38,7 +38,7 @@ typedef struct app
 	GtkWidget *window, *area, *playlist_window, *list;
 	GtkWidget *settings_window, *notebook, *audio_label, *audio_drop, *rate_drop, *block_drop, *volume_scale;
 	GtkWidget *system_label, *model_check[MACHINE_SYSTEMS], *computer_check[COMPUTER_POSITIONS], *cache_label;
-	GtkWidget *size_drop, *swap_check;
+	GtkWidget *size_drop, *swap_check, *skip_boot_check;
 	GtkWidget *logo_popover, *system_popover, *list_popover;
 	int menu_index;            /* the song the right-click menu is on, or -1 */
 	GSimpleAction *system_model_action;   /* the system menu's radio state */
@@ -86,7 +86,7 @@ typedef struct options
 	uint32_t midi_rate;
 	int size;
 	scemu_computer_switch_t computer[MACHINE_SYSTEMS];
-	bool keep_settings, no_cache, no_audio;
+	bool keep_settings, no_cache, no_audio, boot_animation;
 	double tail;
 	unsigned audio_rate;
 } options_t;
@@ -240,6 +240,7 @@ static void options_from_config(const scgui_config_t *c, options_t *o)
 	o->midi_rate = (uint32_t)c->midi_rate;
 	o->audio_rate = (unsigned)c->audio_rate;
 	o->keep_settings = c->keep_settings;
+	o->boot_animation = c->boot_animation;
 	o->tail = c->tail;
 }
 
@@ -1171,6 +1172,18 @@ static void on_computer_toggled(GtkCheckButton *b, gpointer user)
 	machine_set_computer_switch(app->mc, sw);
 }
 
+/* the box is the other way round: the machine starts at once unless it is cleared */
+static void on_skip_boot_toggled(GtkCheckButton *b, gpointer user)
+{
+	app_t *app = user;
+	bool animate = !gtk_check_button_get_active(b);
+	if (animate == app->cfg.boot_animation)
+		return;
+	app->cfg.boot_animation = animate;
+	machine_set_boot_animation(app->mc, animate);
+	config_touch(app);
+}
+
 static void on_clear_cache(GtkButton *button, gpointer user)
 {
 	app_t *app = user;
@@ -1249,6 +1262,17 @@ static GtkWidget *system_page(app_t *app)
 	                                   " ~/.cache/scemu: the firmware boots again the next time a machine"
 	                                   " starts.  What a machine remembers is not touched.");
 	grid_row(grid, 3, "Boot cache", cache);
+
+	app->skip_boot_check = gtk_check_button_new_with_label("Skip boot animation");
+	gtk_check_button_set_active(GTK_CHECK_BUTTON(app->skip_boot_check), !app->cfg.boot_animation);
+	g_signal_connect(app->skip_boot_check, "toggled", G_CALLBACK(on_skip_boot_toggled), app);
+	gtk_widget_set_tooltip_text(app->skip_boot_check, "The firmware's boot otherwise runs as fast as the host can,"
+	                                                  " or comes out of the snapshot in the cache, and the panel"
+	                                                  " lights up at once.  Clear this and it runs in the machine's"
+	                                                  " own time, animation and all, from the next start on: a power"
+	                                                  " cycle, another system, another position of the rear switch."
+	                                                  "  A song asked for while a boot is playing cuts it short.");
+	gtk_grid_attach(GTK_GRID(grid), app->skip_boot_check, 0, 4, 3, 1);
 	system_readout(app);
 	return grid;
 }
@@ -1862,7 +1886,7 @@ int main(int argc, char **argv)
 	session_exe_directory(argv[0], exe_dir, sizeof(exe_dir));
 	machine_options_t mo = { opt.model, opt.rom, exe_dir, opt.map, opt.midi_rate,
 	                         { 0 },
-	                         opt.tail, opt.keep_settings, opt.no_cache, opt.no_audio,
+	                         opt.tail, opt.keep_settings, opt.no_cache, opt.no_audio, opt.boot_animation,
 	                         app.audio_choice >= 0 ? app.devices[app.audio_choice].index : -1,
 	                         (unsigned)block_sizes[app.block_choice],
 	                         (unsigned)output_rates[app.rate_choice] };

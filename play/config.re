@@ -43,7 +43,8 @@ static const int rate_numbers[] = { 0, 31250, 38400, -1 };
 static const int audio_rate_numbers[] = { 0, 32000, 44100, 48000, -1 };
 static const char *const computer_words[] = { "midi", "pc1", "pc2", "mac", "usb", NULL };
 
-static const char group_machine[] = "the machine: which module, where its ROMs are, and what it remembers";
+static const char group_machine[] = "the machine: which module, where its ROMs are, what it remembers"
+                                   " and whether it boots in its own time";
 static const char group_window[] = "the window: 4 the small panel, 8 twice as large, and what the"
                                   " pointer's buttons do";
 static const char group_computer[] = "the rear COMPUTER switch of each system: midi, pc1, pc2, mac (usb on the SC-8850)";
@@ -59,6 +60,7 @@ static const config_key_t keys[] = {
 	{ "rom",              SLOT_TEXT, FIELD(rom),           0, 0,     NULL,           NULL,         group_machine },
 	{ "map",              SLOT_TEXT, FIELD(map),           0, 0,     map_words,      NULL,         group_machine },
 	{ "keep_settings",    SLOT_BOOL, FIELD(keep_settings), 0, 0,     NULL,           NULL,         group_machine },
+	{ "boot_animation",   SLOT_BOOL, FIELD(boot_animation), 0, 0,    NULL,           NULL,         group_machine },
 	{ "computer_sc55mk2", SLOT_TEXT, FIELD(computer[CONFIG_ROW_SC55MK2]), 0, 0, computer_words, NULL, group_computer },
 	{ "computer_sc88",    SLOT_TEXT, FIELD(computer[CONFIG_ROW_SC88]),    0, 0, computer_words, NULL, group_computer },
 	{ "computer_sc88vl",  SLOT_TEXT, FIELD(computer[CONFIG_ROW_SC88VL]),  0, 0, computer_words, NULL, group_computer },
@@ -99,6 +101,7 @@ void config_defaults(scgui_config_t *c)
 	c->midi_rate = 31250;
 	c->volume = 0.75f;
 	c->swap_buttons = false;
+	c->boot_animation = false;
 	c->tail = 4;
 }
 

@@ -28,7 +28,7 @@ struct unit
 	scemu_midi_out_fn midi_out;
 	void *midi_out_user;
 
-	bool power;
+	bool power, boot_live, booting;
 	bool held[SCEMU_BUTTON_COUNT];
 	struct { scemu_button_t b; bool down; uint64_t due; } timed[TIMED_KEYS];
 	int timed_count;
@@ -197,7 +197,33 @@ bool unit_boot(unit_t *u, bool use_cache, session_progress_fn progress, void *us
 {
 	u->power = true;
 	hold_keys(u);
+	if (u->boot_live)
+	{
+		session_boot_live(&u->session);
+		u->booting = true;
+		return true;
+	}
 	bool up = session_boot(&u->session, use_cache, progress, user);
+	apply_settings(u);
+	return up;
+}
+
+void unit_set_boot_live(unit_t *u, bool live)
+{
+	u->boot_live = live;
+}
+
+bool unit_booting(const unit_t *u)
+{
+	return u->booting;
+}
+
+bool unit_boot_finish(unit_t *u)
+{
+	if (!u->booting)
+		return true;
+	bool up = session_boot_finish(&u->session);
+	u->booting = false;
 	apply_settings(u);
 	return up;
 }
@@ -210,7 +236,10 @@ void unit_power(unit_t *u, bool on)
 		unit_boot(u, false, NULL, NULL);
 	}
 	else if (!on && u->power)
+	{
 		u->power = false;
+		u->booting = false;
+	}
 }
 
 bool unit_power_on(const unit_t *u) { return u->power; }
@@ -249,7 +278,14 @@ void unit_send(unit_t *u, const uint8_t *bytes, size_t count)
 void unit_render(unit_t *u, int32_t *const out[2], size_t frames)
 {
 	if (u->power)
+	{
 		scemu_render(u->m, out, frames);
+		if (u->booting && !session_booting(&u->session, frames))
+		{
+			u->booting = false;
+			apply_settings(u);
+		}
+	}
 	else
 		for (int pair = 0; pair < 2; pair++)
 			if (out[pair])
@@ -333,6 +369,7 @@ void unit_replace(unit_t *u, session_progress_fn progress, void *user)
 	if (was_on)
 		session_save_settings(&u->session);
 	u->power = false;
+	u->booting = false;
 	session_free(&u->session);
 	scemu_destroy(u->m);
 	if (!u->next.same_roms)
