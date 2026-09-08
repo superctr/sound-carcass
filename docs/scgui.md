@@ -83,6 +83,14 @@ not inherit the last one's settings; pausing or stopping sends all notes off and
 every part first, so nothing hangs.  The title bar of the main window shows the song's title (UTF-8
 or Shift-JIS, as in scplay).
 
+Files dragged onto the window from a file manager are added where they are dropped: on a row they go
+in above it, past the last row or anywhere else in the window they go on the end, and if the list was
+empty the first one starts playing.  A row dragged within the list moves to where it is dropped, so
+the order is the order of the rows; the song that is playing keeps playing, and its highlight follows
+it.  A row's tooltip is the file's whole path, and a right-click on it opens a menu with **Go to
+source directory**, which opens the host's file manager on the folder the file is in, and **Remove
+file from playlist**; removing the song that is playing stops it, the way the stop button does.
+
 ## MIDI ports
 
 The bottom of the playlist window ties the machine to the host's MIDI devices, through PortMidi.  On

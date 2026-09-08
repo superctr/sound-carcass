@@ -39,7 +39,8 @@ typedef struct app
 	GtkWidget *settings_window, *notebook, *audio_label, *audio_drop, *rate_drop, *block_drop;
 	GtkWidget *system_label, *model_check[MACHINE_SYSTEMS], *computer_check[COMPUTER_POSITIONS], *cache_label;
 	GtkWidget *size_drop, *swap_check;
-	GtkWidget *logo_popover, *system_popover;
+	GtkWidget *logo_popover, *system_popover, *list_popover;
+	int menu_index;            /* the song the right-click menu is on, or -1 */
 	GSimpleAction *system_model_action;   /* the system menu's radio state */
 	scgui_config_t cfg;
 	char config_file[1024];
@@ -264,6 +265,7 @@ static void play_index(app_t *app, int index);
 static void set_title(app_t *app);
 static gboolean macro_done(gpointer user);
 static void panel_rebuild(app_t *app, panel_model_t model, int size);
+static void menu_append(GMenu *menu, const char *label, const char *action, int parameter);
 
 static const char *song_label(const char *path, char *buf, size_t size)
 {
@@ -285,10 +287,95 @@ static void on_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer user)
 	play_index(app, gtk_list_box_row_get_index(row));
 }
 
-static void list_append(app_t *app, const char *path)
+/* the songs array holds the order the rows are in; both move together */
+static void songs_move(app_t *app, int from, int to)
 {
-	if (!app->list)
+	if (from == to || from < 0 || to < 0 || from >= (int)app->songs->len || to >= (int)app->songs->len)
 		return;
+	g_ptr_array_insert(app->songs, to, g_ptr_array_steal_index(app->songs, from));
+	if (app->current == from)
+		app->current = to;
+	else if (from < app->current && app->current <= to)
+		app->current--;
+	else if (to <= app->current && app->current < from)
+		app->current++;
+}
+
+static void songs_remove(app_t *app, int index)
+{
+	if (index < 0 || index >= (int)app->songs->len)
+		return;
+	if (app->list)
+	{
+		GtkListBoxRow *row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(app->list), index);
+		if (row)
+			gtk_list_box_remove(GTK_LIST_BOX(app->list), GTK_WIDGET(row));
+	}
+	g_ptr_array_remove_index(app->songs, index);
+	if (index == app->current)
+	{
+		machine_stop_song(app->mc);
+		app->current = -1;
+	}
+	else if (index < app->current)
+		app->current--;
+	list_select(app, app->current);
+}
+
+/* a row is dragged as itself: nothing leaves the process */
+static GdkContentProvider *on_row_drag_prepare(GtkDragSource *source, double x, double y, gpointer user)
+{
+	return gdk_content_provider_new_typed(GTK_TYPE_LIST_BOX_ROW, user);
+}
+
+static void on_row_drag_begin(GtkDragSource *source, GdkDrag *drag, gpointer user)
+{
+	GdkPaintable *icon = gtk_widget_paintable_new(GTK_WIDGET(user));
+	gtk_drag_source_set_icon(source, icon, 0, 0);
+	g_object_unref(icon);
+}
+
+static GtkListBoxRow *target_row(GtkDropTarget *target)
+{
+	return GTK_LIST_BOX_ROW(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target)));
+}
+
+static GdkDragAction on_row_drag_enter(GtkDropTarget *target, double x, double y, gpointer user)
+{
+	app_t *app = user;
+	gtk_list_box_drag_highlight_row(GTK_LIST_BOX(app->list), target_row(target));
+	return GDK_ACTION_MOVE;
+}
+
+static void on_row_drag_leave(GtkDropTarget *target, gpointer user)
+{
+	app_t *app = user;
+	gtk_list_box_drag_unhighlight_row(GTK_LIST_BOX(app->list));
+}
+
+static gboolean on_row_drop(GtkDropTarget *target, const GValue *value, double x, double y, gpointer user)
+{
+	app_t *app = user;
+	GtkWidget *row = GTK_WIDGET(target_row(target));
+	GtkWidget *dragged = g_value_get_object(value);
+	gtk_list_box_drag_unhighlight_row(GTK_LIST_BOX(app->list));
+	if (!dragged || dragged == row)
+		return FALSE;
+	int from = gtk_list_box_row_get_index(GTK_LIST_BOX_ROW(dragged));
+	int to = gtk_list_box_row_get_index(GTK_LIST_BOX_ROW(row));
+	g_object_ref(dragged);
+	gtk_list_box_remove(GTK_LIST_BOX(app->list), dragged);
+	gtk_list_box_insert(GTK_LIST_BOX(app->list), dragged, to);
+	g_object_unref(dragged);
+	songs_move(app, from, to);
+	list_select(app, app->current);
+	return TRUE;
+}
+
+static void on_list_pressed(GtkGestureClick *gesture, int presses, double x, double y, gpointer user);
+
+static GtkWidget *list_row(app_t *app, const char *path)
+{
 	char buf[300];
 	GtkWidget *label = gtk_label_new(song_label(path, buf, sizeof(buf)));
 	gtk_label_set_xalign(GTK_LABEL(label), 0);
@@ -297,13 +384,137 @@ static void list_append(app_t *app, const char *path)
 	gtk_widget_set_margin_end(label, 8);
 	gtk_widget_set_margin_top(label, 4);
 	gtk_widget_set_margin_bottom(label, 4);
-	gtk_list_box_append(GTK_LIST_BOX(app->list), label);
+	GtkWidget *row = gtk_list_box_row_new();
+	gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), label);
+	gtk_widget_set_tooltip_text(row, path);
+
+	GtkDragSource *source = gtk_drag_source_new();
+	gtk_drag_source_set_actions(source, GDK_ACTION_MOVE);
+	g_signal_connect(source, "prepare", G_CALLBACK(on_row_drag_prepare), row);
+	g_signal_connect(source, "drag-begin", G_CALLBACK(on_row_drag_begin), row);
+	gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(source));
+
+	GtkDropTarget *target = gtk_drop_target_new(GTK_TYPE_LIST_BOX_ROW, GDK_ACTION_MOVE);
+	g_signal_connect(target, "enter", G_CALLBACK(on_row_drag_enter), app);
+	g_signal_connect(target, "leave", G_CALLBACK(on_row_drag_leave), app);
+	g_signal_connect(target, "drop", G_CALLBACK(on_row_drop), app);
+	gtk_widget_add_controller(row, GTK_EVENT_CONTROLLER(target));
+	return row;
+}
+
+/* index < 0 appends */
+static void songs_insert(app_t *app, int index, const char *path)
+{
+	if (index < 0 || index > (int)app->songs->len)
+		index = (int)app->songs->len;
+	g_ptr_array_insert(app->songs, index, g_strdup(path));
+	if (app->list)
+		gtk_list_box_insert(GTK_LIST_BOX(app->list), list_row(app, path), index);
+	if (app->current >= index)
+		app->current++;
 }
 
 static void songs_add(app_t *app, const char *path)
 {
-	g_ptr_array_add(app->songs, g_strdup(path));
-	list_append(app, path);
+	songs_insert(app, -1, path);
+}
+
+/* files dropped on the window land where the pointer is, or at the end */
+static int drop_position(app_t *app, GtkWidget *from, double x, double y)
+{
+	graphene_point_t at;
+	if (!gtk_widget_compute_point(from, app->list, &GRAPHENE_POINT_INIT((float)x, (float)y), &at))
+		return -1;
+	GtkListBoxRow *row = at.y >= 0 ? gtk_list_box_get_row_at_y(GTK_LIST_BOX(app->list), (int)at.y) : NULL;
+	return row ? gtk_list_box_row_get_index(row) : -1;
+}
+
+static gboolean on_files_dropped(GtkDropTarget *target, const GValue *value, double x, double y, gpointer user)
+{
+	app_t *app = user;
+	if (!G_VALUE_HOLDS(value, GDK_TYPE_FILE_LIST))
+		return FALSE;
+	GSList *files = gdk_file_list_get_files(g_value_get_boxed(value));
+	bool was_empty = app->songs->len == 0;
+	int at = drop_position(app, gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target)), x, y);
+	for (GSList *l = files; l; l = l->next)
+	{
+		char *path = g_file_get_path(l->data);
+		if (path && !g_file_test(path, G_FILE_TEST_IS_DIR))
+		{
+			songs_insert(app, at, path);
+			if (at >= 0)
+				at++;
+		}
+		g_free(path);
+	}
+	g_slist_free(files);
+	if (was_empty && app->songs->len)
+		play_index(app, 0);
+	else
+		list_select(app, app->current);
+	return TRUE;
+}
+
+/* ---------------------------------------------------------------- the song menu */
+
+static void on_song_folder(GSimpleAction *a, GVariant *parameter, gpointer user)
+{
+	app_t *app = user;
+	if (app->menu_index < 0 || app->menu_index >= (int)app->songs->len)
+		return;
+	GFile *file = g_file_new_for_path(g_ptr_array_index(app->songs, app->menu_index));
+	GtkFileLauncher *launcher = gtk_file_launcher_new(file);
+	gtk_file_launcher_open_containing_folder(launcher, GTK_WINDOW(app->playlist_window), NULL, NULL, NULL);
+	g_object_unref(launcher);
+	g_object_unref(file);
+}
+
+static void on_song_remove(GSimpleAction *a, GVariant *parameter, gpointer user)
+{
+	app_t *app = user;
+	songs_remove(app, app->menu_index);
+	app->menu_index = -1;
+}
+
+static void song_menu(app_t *app)
+{
+	static const GActionEntry entries[] =
+	{
+		{ "folder", on_song_folder, NULL, NULL, NULL, { 0 } },
+		{ "remove", on_song_remove, NULL, NULL, NULL, { 0 } },
+	};
+	GSimpleActionGroup *group = g_simple_action_group_new();
+	g_action_map_add_action_entries(G_ACTION_MAP(group), entries, G_N_ELEMENTS(entries), app);
+	gtk_widget_insert_action_group(app->list, "song", G_ACTION_GROUP(group));
+	g_object_unref(group);
+
+	GMenu *menu = g_menu_new();
+	menu_append(menu, "Go to source directory", "song.folder", -1);
+	menu_append(menu, "Remove file from playlist", "song.remove", -1);
+	app->list_popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+	g_object_unref(menu);
+	gtk_widget_set_parent(app->list_popover, app->list);
+	gtk_popover_set_has_arrow(GTK_POPOVER(app->list_popover), FALSE);
+
+	GtkGesture *click = gtk_gesture_click_new();
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_SECONDARY);
+	g_signal_connect(click, "pressed", G_CALLBACK(on_list_pressed), app);
+	gtk_widget_add_controller(app->list, GTK_EVENT_CONTROLLER(click));
+}
+
+static void on_list_pressed(GtkGestureClick *gesture, int presses, double x, double y, gpointer user)
+{
+	app_t *app = user;
+	GtkListBoxRow *row = y >= 0 ? gtk_list_box_get_row_at_y(GTK_LIST_BOX(app->list), (int)y) : NULL;
+	if (!row)
+		return;
+	app->menu_index = gtk_list_box_row_get_index(row);
+	gtk_list_box_select_row(GTK_LIST_BOX(app->list), row);
+	GdkRectangle at = { (int)x, (int)y, 1, 1 };
+	gtk_popover_set_pointing_to(GTK_POPOVER(app->list_popover), &at);
+	gtk_popover_popup(GTK_POPOVER(app->list_popover));
+	gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 }
 
 static void on_files_chosen(GObject *source, GAsyncResult *result, gpointer user)
@@ -643,8 +854,9 @@ static void playlist_show(app_t *app)
 		gtk_list_box_set_selection_mode(GTK_LIST_BOX(app->list), GTK_SELECTION_SINGLE);
 		g_signal_connect(app->list, "row-activated", G_CALLBACK(on_row_activated), app);
 		for (guint n = 0; n < app->songs->len; n++)
-			list_append(app, g_ptr_array_index(app->songs, n));
+			gtk_list_box_append(GTK_LIST_BOX(app->list), list_row(app, g_ptr_array_index(app->songs, n)));
 		list_select(app, app->current);
+		song_menu(app);
 		GtkWidget *scroll = gtk_scrolled_window_new();
 		gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), app->list);
 		gtk_widget_set_vexpand(scroll, TRUE);
@@ -654,6 +866,9 @@ static void playlist_show(app_t *app)
 		gtk_box_append(GTK_BOX(box), more_section(app));
 		midi_fill(app);
 		midi_rows_show(app);
+		GtkDropTarget *drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST, GDK_ACTION_COPY);
+		g_signal_connect(drop, "drop", G_CALLBACK(on_files_dropped), app);
+		gtk_widget_add_controller(box, GTK_EVENT_CONTROLLER(drop));
 		gtk_window_set_child(GTK_WINDOW(w), box);
 		app->playlist_window = w;
 	}
@@ -1595,6 +1810,7 @@ int main(int argc, char **argv)
 	memset(&app, 0, sizeof(app));
 	app.songs = g_ptr_array_new_with_free_func(g_free);
 	app.current = -1;
+	app.menu_index = -1;
 	for (int n = 0; n < MIDI_SLOTS; n++)
 		app.midi_choice[n] = -1;
 	app.audio_choice = -1;
