@@ -350,6 +350,5 @@ void unit_replace(unit_t *u, session_progress_fn progress, void *user)
 
 float unit_output_trim(scemu_model_t model)
 {
-	(void)model;
-	return 2.0f;
+	return model == SCEMU_MODEL_SC8850 ? 2.5f : 2.0f;
 }
