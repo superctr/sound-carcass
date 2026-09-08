@@ -24,7 +24,8 @@ static void row_texts(const menu_t *m, int row, char *line1, size_t size1, char 
 	combo_text(c, line2, size2);
 }
 
-bool menu_open(menu_t *m, panel_element_t e, double x, double y, int panel_w, int panel_h, int scale)
+bool menu_open(menu_t *m, panel_model_t panel, panel_element_t e, double x, double y,
+               int panel_w, int panel_h, int scale)
 {
 	memset(m, 0, sizeof *m);
 	m->hover = -1;
@@ -32,7 +33,7 @@ bool menu_open(menu_t *m, panel_element_t e, double x, double y, int panel_w, in
 	if (button < 0)
 		return false;
 	int ids[MENU_ROWS];
-	int count = combos_for((scemu_button_t)button, ids, MENU_ROWS);
+	int count = combos_for(panel, (scemu_button_t)button, ids, MENU_ROWS);
 	/* holding one half and pressing the other is a pointer gesture here, not a menu entry */
 	for (int n = 0; n < count; n++)
 		if (strcmp(combos[ids[n]].name, "the value will change faster") != 0)

@@ -63,9 +63,11 @@ machine.  Files on the command line become the playlist and the first one plays.
   with its keys spelled out and the mode it applies in; the keys light up on the panel while the
   pointer is over an entry, and choosing one plays it for you on the machine's own clock: keys the
   manual says to press together go down in one scan, a held key is held for a moment before the next
-  goes down, and a power-on combination goes through a power cycle with its keys held.  The list is
-  `docs/panel/combinations.md` in the project.  The SC-88Pro's power-on combinations (test mode, the
-  version display) do not take effect in the emulator yet; see that file.
+  goes down, and a power-on combination goes through a power cycle with its keys held.  Each panel has
+  its own list -- the SC-88, SC-88VL, SC-55mkII and SC-8850 keep to what their own manual and service
+  notes describe -- and the whole of it is `docs/panel/combinations.md` in the project.  The SC-88Pro's
+  power-on combinations (test mode, the version display) do not take effect in the emulator yet; see
+  that file.
 
 Keys: `space` pause, `n` / `p` next and previous song, `l` the playlist, `q` quit.
 

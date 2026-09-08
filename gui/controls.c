@@ -43,6 +43,10 @@ void controls_set_knob_notches(controls_t *c, int notches) { c->knob_notches = n
 /* the other half of a ◀ ▶ pair, or -1 */
 static int opposite_button(int b)
 {
+	if (b == SCEMU_BUTTON_DEC)
+		return SCEMU_BUTTON_INC;
+	if (b == SCEMU_BUTTON_INC)
+		return SCEMU_BUTTON_DEC;
 	bool pair = (b >= SCEMU_BUTTON_PART_LEFT && b <= SCEMU_BUTTON_MIDI_CH_RIGHT)
 	            || (b >= SCEMU_BUTTON_EDIT1_LEFT && b <= SCEMU_BUTTON_EDIT3_RIGHT);
 	return pair ? SCEMU_BUTTON_PART_LEFT + ((b - SCEMU_BUTTON_PART_LEFT) ^ 1) : -1;
@@ -310,7 +314,8 @@ unsigned controls_play_combo(controls_t *c, const combo_t *combo)
 {
 	if (c->macro_pressed || c->release_after_boot)
 		return 0;
-	int first = combo->timing == COMBO_HOLD_THEN_PAIR && !combo->power_on ? 1 : combo->hold_count;
+	int first = combo->timing == COMBO_HOLD_THEN_PAIR && !combo->power_on ? combo->hold_count - 1
+	                                                                     : combo->hold_count;
 	for (int n = 0; n < first; n++)
 		macro_key(c, combo->hold[n], true, 0);
 	if (combo->power_on)

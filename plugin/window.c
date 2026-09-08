@@ -274,7 +274,7 @@ static void inner_combo_menu(void *user, panel_element_t e, double x, double y)
 {
 	window_t *w = user;
 	menu_dismiss(w);
-	if (menu_open(&w->menu, e, x, y, panel_width(w->panel), panel_height(w->panel), text_scale(w)))
+	if (menu_open(&w->menu, w->model, e, x, y, panel_width(w->panel), panel_height(w->panel), text_scale(w)))
 		w->redraw = true;
 }
 

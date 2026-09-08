@@ -32,9 +32,10 @@ typedef struct menu
 	int hover;                /* the row under the pointer, or -1 */
 } menu_t;
 
-/* Opens the menu for a key at a point on a panel of the given size; false,
- * and closed, when the key has no combinations to offer. */
-bool menu_open(menu_t *m, panel_element_t e, double x, double y, int panel_w, int panel_h, int scale);
+/* Opens the menu for a key of a model's panel at a point on a panel of the
+ * given size; false, and closed, when the key has no combinations to offer. */
+bool menu_open(menu_t *m, panel_model_t panel, panel_element_t e, double x, double y,
+               int panel_w, int panel_h, int scale);
 void menu_close(menu_t *m);
 bool menu_contains(const menu_t *m, double x, double y);
 /* the row at a point, or -1 */

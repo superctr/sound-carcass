@@ -1392,7 +1392,7 @@ static void on_combo_chosen(GtkButton *b, gpointer user)
 static void combo_menu(app_t *app, int element, double x, double y)
 {
 	int button = panel_element_button((panel_element_t)element);
-	int count = combos_for((scemu_button_t)button, app->combo_ids, 64);
+	int count = combos_for(panel_model(app->panel), (scemu_button_t)button, app->combo_ids, 64);
 	/* holding one half and pressing the other is a mouse gesture here, not a menu entry */
 	int kept = 0;
 	for (int n = 0; n < count; n++)
@@ -1427,7 +1427,7 @@ static void combo_menu(app_t *app, int element, double x, double y)
 		gtk_button_set_child(GTK_BUTTON(item), label);
 		gtk_button_set_has_frame(GTK_BUTTON(item), FALSE);
 		char tip[400];
-		snprintf(tip, sizeof(tip), "%s  (%s p.%d)", c->effect, c->power_on ? "service notes" : "manual", c->page);
+		snprintf(tip, sizeof(tip), "%s  (%s)", c->effect, c->page);
 		gtk_widget_set_tooltip_text(item, tip);
 		g_object_set_data(G_OBJECT(item), "combo", GINT_TO_POINTER(app->combo_ids[n]));
 		g_signal_connect(item, "clicked", G_CALLBACK(on_combo_chosen), app);
