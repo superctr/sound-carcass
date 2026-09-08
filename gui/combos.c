@@ -6,6 +6,11 @@
 #include <stdio.h>
 #include "combos.h"
 
+/* The service notes' Test Mode -- the chord that enters it and the menu of tests inside it.
+   Nothing here answers them yet, so a machine's menu would list a dozen rows that do nothing;
+   set this to 1 to have them back, or hang a setting on it when the tests run. */
+#define COMBOS_TEST_MODE 0
+
 #define B(x) SCEMU_BUTTON_##x
 #define NONE SCEMU_BUTTON_COUNT
 #define P(x) PANEL_MODEL_##x
@@ -266,6 +271,7 @@ const combo_t combos[] = {
 	 * (Roland SC-88Pro Service Notes, First Edition, Nov.1996, p.4 and p.8).  The rear Select
 	 * switch (MIDI / Mac / PC-1 / PC-2) that some of these depend on is not a panel button and
 	 * cannot be set from here. */
+#if COMBOS_TEST_MODE
 	{ "Normal Test Mode",
 	  "Rear Select SW on MIDI: held while switching on, then PREVIEW, enters the factory Test Mode at T-1.",
 	  "power-on", P(SC88PRO),
@@ -274,6 +280,7 @@ const combo_t combos[] = {
 	  "The same hold with the rear Select SW on Mac enters the Test Mode at the Serial Test instead.",
 	  "power-on", P(SC88PRO),
 	  { B(KEY_SHIFT_LEFT), B(KEY_SHIFT_RIGHT) }, 2, B(PREVIEW), true, "service notes p.4", COMBO_HOLD_THEN_PRESS },
+#endif
 	{ "THRU Check",
 	  "Rear Select SW on MIDI: held while switching on, puts the unit in the MIDI THRU check.",
 	  "power-on", P(SC88PRO),
@@ -282,6 +289,7 @@ const combo_t combos[] = {
 	  "Held while switching on, then PREVIEW, shows the ROM, sub-CPU, SCGS-core and parameter versions.",
 	  "power-on", P(SC88PRO),
 	  { B(MIDI_CH_LEFT), B(MIDI_CH_RIGHT) }, 2, B(PREVIEW), true, "service notes p.8", COMBO_HOLD_THEN_PRESS },
+#if COMBOS_TEST_MODE
 	{ "To move to the next test.",
 	  "In Test Mode, steps to the following test.",
 	  "Test Mode", P(SC88PRO),
@@ -318,6 +326,7 @@ const combo_t combos[] = {
 	  "In Test Mode, jumps to T-6, the LSP test; the notes give no procedure for it.",
 	  "Test Mode", P(SC88PRO),
 	  { B(KEY_SHIFT_LEFT) }, 1, B(LEVEL_RIGHT), false, "service notes p.4", COMBO_HOLD_THEN_PRESS },
+#endif
 
 	/* ================================================================ SC-88
 	 * Owner's manual "SC-88_e2"; its pages are numbered by chapter, and the "Parameter list and
@@ -503,6 +512,7 @@ const combo_t combos[] = {
 	 * (Roland SC-88 Service Notes, First Edition, Jun.1994, p.4 and p.9).  The direct-select
 	 * list is for Program ROM version 1.02 and later; entry and tests 1 and 3 are common to
 	 * version 1.01 as well.  The rear Select SW is not a panel button and cannot be set here. */
+#if COMBOS_TEST_MODE
 	{ "Normal Test Mode",
 	  "Rear Select SW on MIDI: held while switching on, enters the factory Test Mode.",
 	  "power-on", P(SC88),
@@ -511,6 +521,7 @@ const combo_t combos[] = {
 	  "The same hold with the rear Select SW on Mac enters the Test Mode at the Serial Test instead.",
 	  "power-on", P(SC88),
 	  { B(KEY_SHIFT_LEFT), B(KEY_SHIFT_RIGHT) }, 2, NONE, true, "service notes p.4", COMBO_TOGETHER },
+#endif
 	{ "THRU Check",
 	  "Rear Select SW on MIDI: held while switching on, puts the unit in the MIDI THRU check.",
 	  "power-on", P(SC88),
@@ -519,6 +530,7 @@ const combo_t combos[] = {
 	  "Held while switching on, shows the ROM, sub-CPU, XPGS-core and parameter versions.",
 	  "power-on", P(SC88),
 	  { B(MIDI_CH_LEFT), B(MIDI_CH_RIGHT) }, 2, NONE, true, "service notes p.9", COMBO_TOGETHER },
+#if COMBOS_TEST_MODE
 	{ "To move to the next test.",
 	  "In Test Mode, steps to the following test.",
 	  "Test Mode", P(SC88),
@@ -551,6 +563,7 @@ const combo_t combos[] = {
 	  "In Test Mode, jumps to the sound and effect test, which walks the two outputs.",
 	  "Test Mode", P(SC88),
 	  { B(KEY_SHIFT_LEFT) }, 1, B(LEVEL_LEFT), false, "service notes p.4", COMBO_HOLD_THEN_PRESS },
+#endif
 
 	/* ================================================================ SC-88VL
 	 * Owner's manual "SC-88VL_e2", pages numbered straight through; "Parameter list and
@@ -683,6 +696,7 @@ const combo_t combos[] = {
 	 * (Roland SC-88VL Service Notes, p.4 and p.8, with the errata sheets ER00197 and ER00198 of
 	 * 1997-01-08).  The VL is put in standby first and its POWER key must follow the chord
 	 * quickly; the host's power switch stands in for that here. */
+#if COMBOS_TEST_MODE
 	{ "Normal Test Mode",
 	  "From standby with the rear Select SW on MIDI, the four keys held as the power comes on enter the Test Mode.",
 	  "power-on", P(SC88VL),
@@ -698,6 +712,7 @@ const combo_t combos[] = {
 	  "Test Mode", P(SC88VL),
 	  { B(INSTRUMENT_LEFT), B(INSTRUMENT_RIGHT), B(KEY_SHIFT_LEFT) }, 3, B(KEY_SHIFT_RIGHT), false,
 	  "service notes p.4", COMBO_HOLD_THEN_PAIR },
+#endif
 	{ "THRU Check",
 	  "Rear Select SW on MIDI: held while switching on, puts the unit in the MIDI THRU check.",
 	  "power-on", P(SC88VL),
@@ -707,6 +722,7 @@ const combo_t combos[] = {
 	  "power-on", P(SC88VL),
 	  { B(INSTRUMENT_LEFT), B(INSTRUMENT_RIGHT), B(MIDI_CH_LEFT), B(MIDI_CH_RIGHT) }, 4, NONE, true,
 	  "service notes p.8 (errata ER00198)", COMBO_TOGETHER },
+#if COMBOS_TEST_MODE
 	{ "To move to the next test.",
 	  "In Test Mode, steps to the following test.",
 	  "Test Mode", P(SC88VL),
@@ -743,6 +759,7 @@ const combo_t combos[] = {
 	  "In Test Mode, loads the factory setup back into memory; the notes give no procedure for it.",
 	  "Test Mode", P(SC88VL),
 	  { B(KEY_SHIFT_LEFT) }, 1, B(LEVEL_RIGHT), false, "service notes p.4", COMBO_HOLD_THEN_PRESS },
+#endif
 
 	/* ================================================================ SC-55mkII
 	 * Owner's manual "SC-55mkII_e"; its "TABLE OF OPERATIONS" (p.108-109) and "OPERATION BLOCK
@@ -842,6 +859,7 @@ const combo_t combos[] = {
 	 * (Roland SC-55mkII Service Notes, p.4 and p.8).  Both are entered from standby: the
 	 * STANDBY key is a position in the machine's own matrix, so it keeps scanning the panel
 	 * with the unit apparently off. */
+#if COMBOS_TEST_MODE
 	{ "To enter the Test Mode",
 	  "From standby, enters the factory Test Mode at T-1.",
 	  "standby", P(SC55MK2),
@@ -852,11 +870,13 @@ const combo_t combos[] = {
 	  "Test Mode", P(SC55MK2),
 	  { B(INSTRUMENT_LEFT), B(INSTRUMENT_RIGHT), B(KEY_SHIFT_LEFT) }, 3, B(KEY_SHIFT_RIGHT), false,
 	  "service notes p.4", COMBO_HOLD_THEN_PAIR },
+#endif
 	{ "Identifying version number",
 	  "From standby, shows the version numbers of the CPU, the sub CPU and the 4M ROM, and the version date.",
 	  "standby", P(SC55MK2),
 	  { B(INSTRUMENT_LEFT), B(INSTRUMENT_RIGHT), B(MIDI_CH_LEFT) }, 3, B(MIDI_CH_RIGHT), false,
 	  "service notes p.8", COMBO_HOLD_THEN_PAIR },
+#if COMBOS_TEST_MODE
 	{ "To move to the next test.",
 	  "In Test Mode, steps to the following test.",
 	  "Test Mode", P(SC55MK2),
@@ -897,6 +917,7 @@ const combo_t combos[] = {
 	  "In Test Mode, loads the factory setup back into memory.",
 	  "Test Mode", P(SC55MK2),
 	  { B(KEY_SHIFT_LEFT) }, 1, B(PAN_LEFT), false, "service notes p.4", COMBO_HOLD_THEN_PRESS },
+#endif
 
 	/* ================================================================ SC-8850
 	 * Owner's manual "SC-8850_e3"; "Operating Procedure List" (p.158-166) is the spine, and
@@ -955,14 +976,17 @@ const combo_t combos[] = {
 	/* Service notes -- "TEST MODE" and "UPGRADING PROCEDURE" (Roland SC-8850 Service Notes,
 	 * Jun.1999, p.6-10).  The rear selector must be at MIDI for the test mode, and the two
 	 * upgrade chords erase a flash memory that then has to be reloaded from SMF. */
+#if COMBOS_TEST_MODE
 	{ "Entering the test mode",
 	  "Rear selector on MIDI: held while switching on, enters the factory Test Mode at its menu.",
 	  "power-on", P(SC8850),
 	  { B(F3), B(PART_LEFT), B(INC) }, 3, NONE, true, "service notes p.8", COMBO_TOGETHER },
+#endif
 	{ "Verifying version number",
 	  "The same hold shows the program version; [F2] then shows the CPU version and [F3] the tone parameters.",
 	  "power-on", P(SC8850),
 	  { B(F3), B(PART_LEFT), B(INC) }, 3, NONE, true, "service notes p.8", COMBO_TOGETHER },
+#if COMBOS_TEST_MODE
 	{ "Return back to the test mode menu screen",
 	  "In Test Mode, leaves the running test and returns to the menu.",
 	  "Test Mode", P(SC8850),
@@ -1003,6 +1027,7 @@ const combo_t combos[] = {
 	  "In Test Mode, loads the factory preset data back into memory.",
 	  "Test Mode", P(SC8850),
 	  { B(SHIFT) }, 1, B(ENTER), false, "service notes p.8", COMBO_HOLD_THEN_PRESS },
+#endif
 	{ "Updating the program",
 	  "Held while switching on, erases the 8M program flash and waits for the update SMFs.",
 	  "power-on", P(SC8850),
