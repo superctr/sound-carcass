@@ -48,7 +48,8 @@ typedef struct controls
 	bool soft_power;           /* the power key is a position in the machine's own matrix (the SC-55mkII) */
 	float knob;
 	int knob_notches;          /* wheel notches from silent to full */
-	bool swap_buttons;         /* the right button opens the combination menu, the middle one queues keys */
+	bool swap_buttons;         /* the right button opens the combination menu, the middle one queues keys;
+	                              the other half of a pair stays on the right button either way */
 	int pressed_element;       /* the element under the held left button, or -1 */
 	int opposite_element;      /* the other half of the pair, pressed with the right button meanwhile */
 	uint64_t queued;           /* elements queued with the right button: they go down with the next key */
@@ -69,7 +70,8 @@ void controls_set_soft_power(controls_t *c, bool soft);
 void controls_set_knob(controls_t *c, float turn);
 void controls_set_knob_notches(controls_t *c, int notches);
 /* the right button and the middle one change places, so the combination menu
- * is a right-click and the queue-and-hold gesture a middle-click */
+ * is a right-click and the queue-and-hold gesture a middle-click; pressing the
+ * other half of a pair is the right button either way */
 void controls_set_swap_buttons(controls_t *c, bool swap);
 
 /* Pointer events in panel pixels.  A scroll returns true when the panel took it. */

@@ -158,16 +158,17 @@ static void dial_turn(controls_t *c, double x, double y)
 
 void controls_press(controls_t *c, int button, unsigned mods, double x, double y)
 {
-	button = mapped_button(c, button);
+	const int gesture = mapped_button(c, button);
 	int e = panel_hit(c->panel, (int)x, (int)y);
 	if (e < 0)
 		return;
 	int b = panel_element_button((panel_element_t)e);
 	if (b >= 0)
 	{
+		/* the right button while a half of a pair is held: its other half, whether
+		 * or not the two buttons are swapped */
 		if (button == CONTROLS_BUTTON_RIGHT && c->pressed_element >= 0)
 		{
-			/* the right button while a half of a pair is held: its other half */
 			int held = panel_element_button((panel_element_t)c->pressed_element);
 			int other = opposite_button(held);
 			int oe = other >= 0 ? element_for_button((scemu_button_t)other) : -1;
@@ -178,9 +179,9 @@ void controls_press(controls_t *c, int button, unsigned mods, double x, double y
 				panel_set_pressed(c->panel, (panel_element_t)oe, true);
 			}
 		}
-		else if (button == CONTROLS_BUTTON_MIDDLE || (button == CONTROLS_BUTTON_RIGHT && (mods & CONTROLS_CONTROL)))
+		else if (gesture == CONTROLS_BUTTON_MIDDLE || (button == CONTROLS_BUTTON_RIGHT && (mods & CONTROLS_CONTROL)))
 			c->act->combo_menu(c->user, (panel_element_t)e, x, y);
-		else if (button == CONTROLS_BUTTON_RIGHT)
+		else if (gesture == CONTROLS_BUTTON_RIGHT)
 		{
 			/* the right button queues a key for the next one, or with Shift
 			 * holds it down from now; either again lets it go */
@@ -225,7 +226,6 @@ void controls_press(controls_t *c, int button, unsigned mods, double x, double y
 
 void controls_release(controls_t *c, int button)
 {
-	button = mapped_button(c, button);
 	if (button == CONTROLS_BUTTON_RIGHT)
 	{
 		int oe = c->opposite_element;

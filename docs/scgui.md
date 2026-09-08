@@ -34,8 +34,8 @@ machine.  Files on the command line become the playlist and the first one plays.
   where the firmware must see the hold before the second key.  Either kind comes up when the
   left-clicked key does, or with another right-click on it, and both are held through a power-on.
   While the left button holds one half of a ◀ ▶ pair, the right button presses the other half, which
-  is how the unit steps a value quickly.  The Interface tab swaps the right and the middle button for
-  a hand that would rather right-click the combination menu.
+  is how the unit steps a value quickly -- that one is the right button whether or not the Interface
+  tab has swapped the two.
 - **The volume knob** turns with the scroll wheel over it; it is the program's output gain, the
   machine itself has no volume control in software.  The knob's push switch (PREVIEW) is a button.
 - **The SC-8850's value dial** turns two ways: drag its outer ring with the left button and it follows
@@ -136,8 +136,9 @@ medium sinc.
 artwork's two bakes -- the small panel, or twice as large -- and changing it redraws the window at
 once, keys held and all; it is `--size 4|8` on the command line.  **Swapping the right and middle
 mouse buttons** puts the combination menu on a plain right-click and moves the queue-and-hold gesture
-(and the other half of a ◀ ▶ pair) to the middle button, for a mouse whose middle button is a wheel to
-press or none at all.  Ctrl and the right button open the menu either way round.
+to the middle button, for a mouse whose middle button is a wheel to press or none at all.  Pressing the
+other half of a ◀ ▶ pair stays on the right button, since it happens while the left button holds the
+first half and no menu is wanted there, and Ctrl with the right button opens the menu either way round.
 
 **System**: which machine this is -- SC-88, SC-88VL, SC-88Pro, SC-8850 or SC-55mkII.  A model whose
 ROM images were not found is greyed out.  Choosing another one switches at once: the song is

@@ -868,8 +868,9 @@ static GtkWidget *interface_page(app_t *app)
 	grid_row(grid, 0, "Panel size", app->size_drop);
 
 	GtkWidget *swap_label = gtk_label_new("Swap the right and middle mouse buttons: the combination menu"
-	                                      " opens on a right-click, and the right button's queue-and-hold"
-	                                      " gesture moves to the middle one");
+	                                      " opens on a right-click and the queue-and-hold gesture moves to"
+	                                      " the middle button.  The right button still presses the other"
+	                                      " half of a pair.");
 	gtk_label_set_xalign(GTK_LABEL(swap_label), 0);
 	gtk_label_set_wrap(GTK_LABEL(swap_label), TRUE);
 	gtk_label_set_max_width_chars(GTK_LABEL(swap_label), 52);
