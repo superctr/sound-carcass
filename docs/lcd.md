@@ -42,6 +42,13 @@ CGRAM patterns; column x of cell 20 + k is bar 5k + x (bars 0-15, so cell 23 use
 and pattern row y is segment y of the upper half (line 0) or 8 + y of the lower half (line 1), counted
 from the top.  The firmware fills the patterns so a bar's lit segments run from the bottom.
 
+## Characters
+
+Codes 0-7 are the CGRAM patterns; everything else is a character of the module's own generator, which
+is not a Hitachi one.  The firmwares write ASCII, and two codes beside it: `0x11` is `±`, the first
+character of the SC-88 family's KEY SHIFT field while the shift is zero, and `0x1a` is the `Ⅱ` the
+SC-55mkII writes in `SC-55 mkⅡ` all through its boot.
+
 ## Geometry
 
 Positions in the driver's 720 × 272 rendering of the glass, for a host that wants the same look:
