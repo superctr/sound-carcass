@@ -50,7 +50,8 @@ machine.  Files on the command line become the playlist and the first one plays.
   it sends that key: the firmware mutes the audio and switches the display's power off while the
   machine keeps running, and the STANDBY lamp is the machine's own.  A note sounding when it is
   pressed keeps sounding into a dead amplifier, and MIDI arriving in standby goes nowhere.
-- **The MIDI IN B jack** opens the playlist, **the PHONES jack** the Settings window.
+- **The MIDI IN B jack** opens the playlist (on the SC-8850 and the SC-8820, whose MIDI comes in over
+  USB, it is **the USB mark**), **the PHONES jack** the Settings window.
 - **The model name** beside the logotype opens a menu of the systems whose ROMs are there, to switch
   between them, and a Reset that power-cycles the machine.
 - **The logotype** at the bottom left opens a menu where the pointer is: the playlist, the Settings

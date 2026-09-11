@@ -284,7 +284,10 @@ static void draw_glass(panel_t *p, uint32_t *pixels, size_t stride)
 	const panel_glass_t *g = &p->size->glass;
 	uint8_t rows[8];
 	if (!p->lcd.display_on)
+	{
+		blit_sprite(p, pixels, stride, PANEL_SPRITE_LCD_GLASS_OFF);
 		return;
+	}
 	for (int line = 0; line < 2; line++)
 		for (int cell = 0; cell < (line ? 18 : 19); cell++)
 		{
@@ -321,7 +324,10 @@ static void draw_glcd(panel_t *p, uint32_t *pixels, size_t stride)
 {
 	const panel_glass_t *g = &p->size->glass;
 	if (!p->glcd.display_on)
+	{
+		blit_sprite(p, pixels, stride, PANEL_SPRITE_LCD_GLASS_OFF);
 		return;
+	}
 	for (int row = 0; row < g->dot_rows; row++)
 	{
 		const uint8_t *line = p->glcd.bitmap + (size_t)row * GLCD_STRIDE;
