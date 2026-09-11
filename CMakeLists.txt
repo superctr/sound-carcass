@@ -112,6 +112,9 @@ if(ZLIB_FOUND)
 	foreach(pitch 3 6)   # the SC-8850's glass is a 160 x 64 dot panel, so its own pitches
 		list(APPEND PANEL_ART panel_sc8850_base_p${pitch} panel_sc8850_atlas_p${pitch})
 	endforeach()
+	foreach(pitch 7 14)  # the SC-8820 has no glass; its pitch is pixels per millimetre
+		list(APPEND PANEL_ART panel_sc8820_base_p${pitch} panel_sc8820_atlas_p${pitch})
+	endforeach()
 	foreach(art ${PANEL_ART})
 		set(src ${CMAKE_CURRENT_SOURCE_DIR}/gui/${art}.png)
 		set(dst ${CMAKE_CURRENT_BINARY_DIR}/gui/${art}_png.c)

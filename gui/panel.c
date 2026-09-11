@@ -18,6 +18,7 @@
 #define ART_MODEL(m) ART_DECLARE(m, 4) ART_DECLARE(m, 8)
 ART_MODEL(sc88pro) ART_MODEL(sc88) ART_MODEL(sc88vl) ART_MODEL(sc55mk2)
 ART_DECLARE(sc8850, 3) ART_DECLARE(sc8850, 6)
+ART_DECLARE(sc8820, 7) ART_DECLARE(sc8820, 14)
 
 #define ART_ROW(m, p) { p, panel_##m##_base_p##p##_png, panel_##m##_atlas_p##p##_png, \
                         &panel_##m##_base_p##p##_png_size, &panel_##m##_atlas_p##p##_png_size }
@@ -32,6 +33,7 @@ static const struct
 	[PANEL_MODEL_SC88VL] = { ART_ROW(sc88vl, 4), ART_ROW(sc88vl, 8) },
 	[PANEL_MODEL_SC55MK2] = { ART_ROW(sc55mk2, 4), ART_ROW(sc55mk2, 8) },
 	[PANEL_MODEL_SC8850] = { ART_ROW(sc8850, 3), ART_ROW(sc8850, 6) },
+	[PANEL_MODEL_SC8820] = { ART_ROW(sc8820, 7), ART_ROW(sc8820, 14) },
 };
 
 #define SEG_COLOR 0xff201000u
@@ -70,6 +72,7 @@ panel_model_t panel_model_for(scemu_model_t model)
 	case SCEMU_MODEL_SC88: return PANEL_MODEL_SC88;
 	case SCEMU_MODEL_SC88VL: return PANEL_MODEL_SC88VL;
 	case SCEMU_MODEL_SC8850: return PANEL_MODEL_SC8850;
+	case SCEMU_MODEL_SC8820: return PANEL_MODEL_SC8820;
 	case SCEMU_MODEL_SC55MK2: return PANEL_MODEL_SC55MK2;
 	default: return PANEL_MODEL_SC88PRO;
 	}
@@ -335,6 +338,9 @@ static const panel_sprite_id_t led_sprite[SCEMU_LED_COUNT] = {
 	PANEL_SPRITE_LED_USER_INST, PANEL_SPRITE_LED_USER_INST_RED,
 	PANEL_SPRITE_LED_SOLO, PANEL_SPRITE_LED_EDIT, PANEL_SPRITE_LED_DRUM, PANEL_SPRITE_LED_EFFECTS,
 	PANEL_SPRITE_LED_STANDBY,
+	PANEL_SPRITE_LED_POWER, PANEL_SPRITE_LED_USB, PANEL_SPRITE_LED_MAP,
+	PANEL_SPRITE_LED_PART_A1, PANEL_SPRITE_LED_PART_A2, PANEL_SPRITE_LED_PART_A3, PANEL_SPRITE_LED_PART_A4,
+	PANEL_SPRITE_LED_PART_B1, PANEL_SPRITE_LED_PART_B2, PANEL_SPRITE_LED_PART_B3, PANEL_SPRITE_LED_PART_B4,
 };
 
 void panel_render(panel_t *p, uint32_t *pixels, size_t stride)
@@ -364,15 +370,19 @@ void panel_render(panel_t *p, uint32_t *pixels, size_t stride)
 
 /* ---------------------------------------------------------------- input */
 
+/* the smallest box under the point: a key wins over the face it sits on, the model name over the
+ * logo, and the SC-8820's power and USB marks over the window they are printed in */
 int panel_hit(const panel_t *p, int x, int y)
 {
+	int hit = -1;
 	for (int e = PANEL_ELEMENT_COUNT - 1; e >= 0; e--)
 	{
 		const panel_rect_t *r = &p->size->element[e];
-		if (x >= r->x && y >= r->y && x < r->x + r->w && y < r->y + r->h)
-			return e;
+		if (x >= r->x && y >= r->y && x < r->x + r->w && y < r->y + r->h
+		    && (hit < 0 || r->w * r->h < p->size->element[hit].w * p->size->element[hit].h))
+			hit = e;
 	}
-	return -1;
+	return hit;
 }
 
 int panel_element_button(panel_element_t e)

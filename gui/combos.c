@@ -1036,6 +1036,24 @@ const combo_t combos[] = {
 	  "Held while switching on, erases the 16M tone-parameter flash and waits for the update SMFs.",
 	  "power-on", P(SC8850),
 	  { B(MUTE), B(EXIT), B(EDIT), B(F3) }, 4, NONE, true, "service notes p.7", COMBO_TOGETHER },
+
+	/* ================================================================ SC-8820
+	 * Owner's manual "SC-8820_e": one key and the knob's push, and nothing held through the
+	 * switch.  Service notes -- "IDENTIFYING VERSION NUMBER" and "TEST MODE" (Roland SC-8820
+	 * Service Notes, Nov.1999, p.5-7): the knob held while switching on shows the CPU ROM's
+	 * version on the lamps, and is the way into the test mode. */
+	{ "Identifying version number",
+	  "The knob held while switching on: the POWER and USB lamps light, and PART A and PART B show the "
+	  "CPU ROM version's major and minor numbers in four bits each.",
+	  "power-on", P(SC8820),
+	  { B(PREVIEW) }, 1, NONE, true, "service notes p.5", COMBO_TOGETHER },
+#if COMBOS_TEST_MODE
+	{ "Entering the test mode",
+	  "Rear selector on Mac: the knob held while switching on, then, while the INST MAP lamp is lit, the "
+	  "knob pressed twice and INST MAP once.",
+	  "power-on", P(SC8820),
+	  { B(PREVIEW) }, 1, NONE, true, "service notes p.6", COMBO_TOGETHER },
+#endif
 };
 
 const int combo_count = (int)(sizeof combos / sizeof combos[0]);
@@ -1115,6 +1133,11 @@ static const char *const label_sc8850[SCEMU_BUTTON_COUNT] = {
 	[SCEMU_BUTTON_DEC] = "DEC", [SCEMU_BUTTON_INC] = "INC",
 };
 
+/* the SC-8820 has one key and the knob's push, and nothing in common with the others */
+static const char *const label_sc8820[SCEMU_BUTTON_COUNT] = {
+	[SCEMU_BUTTON_MAP] = "INST MAP", [SCEMU_BUTTON_PREVIEW] = "PREVIEW (push the knob)",
+};
+
 const char *combo_button_label(panel_model_t panel, scemu_button_t button)
 {
 	if (button < 0 || button >= SCEMU_BUTTON_COUNT)
@@ -1122,10 +1145,11 @@ const char *combo_button_label(panel_model_t panel, scemu_button_t button)
 	const char *const *own = panel == PANEL_MODEL_SC88 ? label_sc88
 	                       : panel == PANEL_MODEL_SC88VL ? label_sc88vl
 	                       : panel == PANEL_MODEL_SC55MK2 ? label_sc55mk2
-	                       : panel == PANEL_MODEL_SC8850 ? label_sc8850 : NULL;
+	                       : panel == PANEL_MODEL_SC8850 ? label_sc8850
+	                       : panel == PANEL_MODEL_SC8820 ? label_sc8820 : NULL;
 	if (own && own[button])
 		return own[button];
-	return panel == PANEL_MODEL_SC8850 ? NULL : label_common[button];
+	return panel == PANEL_MODEL_SC8850 || panel == PANEL_MODEL_SC8820 ? NULL : label_common[button];
 }
 
 /* a key of a row's own panel; the table is checked against the panels in tests/test_menu.cpp,

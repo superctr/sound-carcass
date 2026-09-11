@@ -21,8 +21,9 @@
 typedef struct panel panel_t;
 
 /* One panel per model and size; `pitch` is the glass's dot pitch in pixels,
- * one of the baked sizes (4, or 8 for twice the size).  NULL if there is no
- * such bake or the artwork does not decode. */
+ * one of the baked sizes (4, or 8 for twice the size; pixels per millimetre
+ * on the SC-8820, which has no glass).  NULL if there is no such bake or the
+ * artwork does not decode. */
 panel_t *panel_create(panel_model_t model, int pitch);
 void panel_destroy(panel_t *p);
 panel_model_t panel_model(const panel_t *p);
@@ -47,7 +48,7 @@ bool panel_dirty(const panel_t *p);
  * at least panel_width() x panel_height().  Clears the dirty flag. */
 void panel_render(panel_t *p, uint32_t *pixels, size_t stride);
 
-/* The element under a point, or -1.  Keys win over what they sit on. */
+/* The element under a point, or -1: the smallest box there, so keys win over what they sit on. */
 int panel_hit(const panel_t *p, int x, int y);
 
 /* The scemu button an element is, or -1 for the host-side ones. */
