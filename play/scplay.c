@@ -260,7 +260,7 @@ static void usage(FILE *fp)
 	fprintf(fp,
 	        "usage: scplay [options] song.mid\n"
 	        "\n"
-	        "  --model sc88|sc88pro|sc88vl|sc8850|sc8820|sc55mk2\n"
+	        "  --model sc88|sc88pro|sc88vl|sc8850|sc8820|sc55mk2|sc55\n"
 	        "                                machine to emulate (default sc88pro)\n"
 	        "  --rom PATH                    a zip or a directory holding the ROM images (any names)\n"
 	        "  --wav FILE                    also write what is played, 16-bit stereo at the\n"
@@ -507,7 +507,7 @@ int main(int argc, char **argv)
 	st.glcd = scemu_glcd(m);
 	st.has_efx_led = roms.model == SCEMU_MODEL_SC88PRO;
 	st.eq_label = roms.model != SCEMU_MODEL_SC88PRO;
-	st.standby_lamp = roms.model == SCEMU_MODEL_SC55MK2;
+	st.standby_lamp = scplay_model_standby_key(roms.model);
 	st.lamps_only = roms.model == SCEMU_MODEL_SC8820;
 
 	int32_t raw[BLOCK * 2];

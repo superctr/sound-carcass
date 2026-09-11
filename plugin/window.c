@@ -9,6 +9,7 @@
 #include <pugl/pugl.h>
 #include <pugl/gl.h>
 #include "window.h"
+#include "roms.h"
 #include "menu.h"
 #include "text.h"
 
@@ -417,7 +418,7 @@ window_t *window_create(scemu_model_t model, double scale, const window_actions_
 	                                 inner_combo_menu };
 	controls_init(&w->ctl, w->panel, &w->inner, w);
 	w->menu.hover = -1;
-	controls_set_soft_power(&w->ctl, model == SCEMU_MODEL_SC55MK2);
+	controls_set_soft_power(&w->ctl, scplay_model_standby_key(model));
 	w->ctl.power = false;
 	panel_set_standby(w->panel, true);
 

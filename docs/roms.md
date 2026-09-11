@@ -25,6 +25,22 @@ complete SC-88VL.
 
 Where several versions of a control ROM are there, the newest is taken.
 
+## SC-55
+
+Five images: the control program, the main CPU's own internal ROM and the three wave ROMs.  The control
+ROM and the CPU ROM belong together, a version of one needing the same version of the other.
+
+| image | size | CRC32 |
+|---|---|---|
+| control ROM 1.21, IC23 | 256 KiB | `2dc58549` |
+| CPU ROM, IC30 | 32 KiB | `4ed0d171` |
+| wave ROM GSS A, IC28 | 1 MiB | `1ac774d3` |
+| wave ROM GSS B, IC27 | 1 MiB | `8dcc592a` |
+| wave ROM GSS C, IC26 | 1 MiB | `e21ebc04` |
+
+These are MAME's `sc55` set.  A blank battery SRAM needs nothing: the firmware notices its signature is
+missing and writes the settings itself.
+
 ## SC-55mkII
 
 Four images: the control program, the main CPU's own internal ROM and the two wave ROMs.

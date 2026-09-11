@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include "scemu.h"
 
 typedef struct scplay_roms
@@ -33,5 +34,7 @@ unsigned scplay_roms_available(const char *rom_path, const char *exe_dir);
 
 const char *scplay_model_label(scemu_model_t model);
 const char *scplay_model_name(scemu_model_t model);
+/* the power key is a standby key in the machine's own matrix, with the STANDBY lamp beside it */
+bool scplay_model_standby_key(scemu_model_t model);
 
 #endif

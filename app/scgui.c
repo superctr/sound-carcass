@@ -111,7 +111,7 @@ static void usage(FILE *fp)
 	fprintf(fp,
 	        "usage: scgui [options] [file.mid ...]\n"
 	        "  --model NAME        sc88pro (default when its ROMs are found), sc88, sc88vl, sc8850,\n"
-	        "                      sc8820, sc55mk2\n"
+	        "                      sc8820, sc55mk2, sc55\n"
 	        "  --rom PATH          a zip or directory with the ROM images\n"
 	        "  --map sc55|sc88|sc88pro|sc8850\n"
 	        "                      play every part from that instrument map\n"
@@ -218,6 +218,12 @@ static scemu_computer_switch_t computer_position(const char *word)
 static const char *computer_word(scemu_model_t model, scemu_computer_switch_t sw)
 {
 	return sw == SCEMU_COMPUTER_MAC && usb_is_fourth(model) ? "usb" : computer_words[sw];
+}
+
+/* the SC-55 has no COMPUTER switch */
+static bool has_computer_switch(scemu_model_t model)
+{
+	return model != SCEMU_MODEL_SC55;
 }
 
 static const char *computer_label(scemu_model_t model, scemu_computer_switch_t sw)
@@ -1146,6 +1152,7 @@ static void system_readout(app_t *app)
 	{
 		gtk_check_button_set_label(GTK_CHECK_BUTTON(app->computer_check[n]),
 		                           computer_label(info.model, (scemu_computer_switch_t)n));
+		gtk_widget_set_sensitive(app->computer_check[n], has_computer_switch(info.model));
 		if (n == (int)sw)
 			gtk_check_button_set_active(GTK_CHECK_BUTTON(app->computer_check[n]), TRUE);
 	}
@@ -1239,6 +1246,7 @@ static GtkWidget *system_page(app_t *app)
 	{
 		GtkWidget *b = gtk_check_button_new_with_label(computer_label(model, (scemu_computer_switch_t)n));
 		app->computer_check[n] = b;
+		gtk_widget_set_sensitive(b, has_computer_switch(model));
 		if (n)
 			gtk_check_button_set_group(GTK_CHECK_BUTTON(b), GTK_CHECK_BUTTON(app->computer_check[0]));
 		g_object_set_data(G_OBJECT(b), "position", GINT_TO_POINTER(n));
@@ -1602,7 +1610,7 @@ static gboolean on_tick(gpointer user)
 		set_title(app);
 		system_readout(app);
 		panel_switch(app, panel_model_for(model));
-		controls_set_soft_power(&app->ctl, model == SCEMU_MODEL_SC55MK2);
+		controls_set_soft_power(&app->ctl, scplay_model_standby_key(model));
 	}
 	panel_set_standby(app->panel, !app->ctl.power);
 	if (panel_dirty(app->panel))
@@ -1976,7 +1984,7 @@ int main(int argc, char **argv)
 	controls_init(&app.ctl, app.panel, &actions, &app);
 	controls_set_swap_buttons(&app.ctl, app.cfg.swap_buttons);
 	controls_set_knob(&app.ctl, app.cfg.volume);
-	controls_set_soft_power(&app.ctl, app.shown_model == SCEMU_MODEL_SC55MK2);
+	controls_set_soft_power(&app.ctl, scplay_model_standby_key(app.shown_model));
 	machine_set_gain(app.mc, app.ctl.knob * app.ctl.knob);
 	gtk_window_present(GTK_WINDOW(app.window));
 	if (app.songs->len)

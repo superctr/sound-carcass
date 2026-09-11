@@ -1,8 +1,8 @@
 # scemu aka SoundCarcass
 
-An emulator of the Roland Sound Canvas SC-55mkII, SC-88, SC-88VL, SC-88Pro, SC-8850 and SC-8820 as a C library,
+An emulator of the Roland Sound Canvas SC-55, SC-55mkII, SC-88, SC-88VL, SC-88Pro, SC-8850 and SC-8820 as a C library,
 with a terminal player and a headless renderer.  It runs the machine's own firmware on an emulated
-board; the H8/510 main CPU (the H8/532 on the SC-55mkII, the SH-2 on the SC-8850), the XP tone
+board; the H8/510 main CPU (the H8/532 on the SC-55 and the SC-55mkII, the SH-2 on the SC-8850), the XP tone
 generator's DSP program and the LSP effect processor's program are all compiled to native code with
 [sljit](https://github.com/zherczeg/sljit).  It comes as a library, two players and a CLAP plugin.
 
@@ -22,8 +22,8 @@ executable memory to the integrator (see `scemu_config` in `lib/scemu.h`).
 ## Using the library
 
 `lib/scemu.h` is the whole interface.  Create an instance from the ROM images, boot it, feed it MIDI bytes
-and render frames at the machine's own rate — 32 kHz, and the SC-55mkII's own 66206 Hz, which
-`scemu_sample_rate` reports:
+and render frames at the machine's own rate — 32 kHz, the SC-55mkII's own 66206 Hz and the SC-55's
+64000 Hz, which `scemu_sample_rate` reports:
 
 ```c
 scemu_t *m = scemu_create(SCEMU_MODEL_SC88PRO, &roms, NULL);
@@ -38,7 +38,7 @@ battery-backed settings memory, can be saved and restored.
 
 ## Tools
 
-`scemu-cli <sc88|sc88vl|sc88pro|sc8850|sc8820|sc55mk2> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--state boot.state] [--computer midi|pc1|pc2|usb]
+`scemu-cli <sc88|sc88vl|sc88pro|sc8850|sc8820|sc55mk2|sc55> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--state boot.state] [--computer midi|pc1|pc2|usb]
 ...` boots the machine (or loads a saved state, saving one after the boot when the file is not there) and
 renders a song to a WAV file.
 

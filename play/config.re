@@ -35,7 +35,7 @@ typedef struct key
 	const char *group;
 } config_key_t;
 
-static const char *const model_words[] = { "", "sc88pro", "sc88", "sc88vl", "sc8850", "sc8820", "sc55mk2", NULL };
+static const char *const model_words[] = { "", "sc88pro", "sc88", "sc88vl", "sc8850", "sc8820", "sc55mk2", "sc55", NULL };
 static const char *const reset_words[] = { "none", "gm", "gs", "gm2", "sc88-single", "sc88-double", NULL };
 static const char *const map_words[] = { "native", "sc55", "sc88", "sc88pro", "sc8850", NULL };
 static const int size_numbers[] = { 4, 8, -1 };

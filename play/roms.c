@@ -26,9 +26,9 @@
 
 enum
 {
-	SET_SC88_CTL, SET_SC88VL_CTL, SET_PRO_CTL, SET_8850_CTL, SET_MK2_CTL, SET_8820_CTL,
-	SET_SC88_WAVE, SET_PRO_WAVE, SET_8850_WAVE, SET_MK2_WAVE, SET_8820_WAVE,
-	SET_8850_BOOT, SET_8850_TONE, SET_MK2_BOOT, SET_MK2_SUB, SET_8820_BOOT,
+	SET_SC88_CTL, SET_SC88VL_CTL, SET_PRO_CTL, SET_8850_CTL, SET_MK2_CTL, SET_8820_CTL, SET_55_CTL,
+	SET_SC88_WAVE, SET_PRO_WAVE, SET_8850_WAVE, SET_MK2_WAVE, SET_8820_WAVE, SET_55_WAVE,
+	SET_8850_BOOT, SET_8850_TONE, SET_MK2_BOOT, SET_MK2_SUB, SET_8820_BOOT, SET_55_BOOT,
 	SET_NONE = -1
 };
 
@@ -85,6 +85,12 @@ static const rom_image_t IMAGES[] =
 	{ 0x702c0a82, 0x001000, SET_MK2_SUB,    0, 0, NULL, 0, "sub-CPU ROM" },
 	{ 0x1519d3b3, 0x200000, SET_MK2_WAVE,   0, 0, NULL, 0, "wave ROM ic15" },
 	{ 0x0f826c7f, 0x100000, SET_MK2_WAVE,   1, 0, NULL, 0, "wave ROM ic16" },
+
+	{ 0x2dc58549, 0x040000, SET_55_CTL,     0, 121, "1.21", 0, "control ROM ic23" },
+	{ 0x4ed0d171, 0x008000, SET_55_BOOT,    0, 0, NULL, 0, "CPU ROM ic30" },
+	{ 0x1ac774d3, 0x100000, SET_55_WAVE,    0, 0, NULL, 0, "wave ROM GSS A ic28" },
+	{ 0x8dcc592a, 0x100000, SET_55_WAVE,    1, 0, NULL, 0, "wave ROM GSS B ic27" },
+	{ 0xe21ebc04, 0x100000, SET_55_WAVE,    2, 0, NULL, 0, "wave ROM GSS C ic26" },
 };
 
 #define IMAGE_COUNT ((int)(sizeof(IMAGES) / sizeof(IMAGES[0])))
@@ -109,6 +115,7 @@ static const model_def_t MODELS[] =
 	{ "sc8850",  "SC-8850",   SCEMU_MODEL_SC8850,  SET_8850_CTL,   SET_8850_WAVE, 2, SET_8850_BOOT, SET_8850_TONE },
 	{ "sc8820",  "SC-8820",   SCEMU_MODEL_SC8820,  SET_8820_CTL,   SET_8820_WAVE, 2, SET_8820_BOOT, SET_NONE },
 	{ "sc55mk2", "SC-55mkII", SCEMU_MODEL_SC55MK2, SET_MK2_CTL,    SET_MK2_WAVE,  2, SET_MK2_BOOT,  SET_NONE },
+	{ "sc55",    "SC-55",     SCEMU_MODEL_SC55,    SET_55_CTL,     SET_55_WAVE,   3, SET_55_BOOT,   SET_NONE },
 };
 
 #define MODEL_COUNT ((int)(sizeof(MODELS) / sizeof(MODELS[0])))
@@ -819,4 +826,9 @@ const char *scplay_model_name(scemu_model_t model)
 		if (MODELS[n].model == model)
 			return MODELS[n].name;
 	return "?";
+}
+
+bool scplay_model_standby_key(scemu_model_t model)
+{
+	return model == SCEMU_MODEL_SC55MK2 || model == SCEMU_MODEL_SC55;
 }

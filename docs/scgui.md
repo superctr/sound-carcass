@@ -1,7 +1,7 @@
 # scgui
 
 The Sound Canvas on the desktop: the machine's front panel in a window (the SC-88's, the SC-88VL's, the
-SC-88Pro's, the SC-8850's or the SC-55mkII's, following the System choice; the VE-GS Pro, which has no
+SC-88Pro's, the SC-8850's, the SC-55mkII's or the SC-55's, following the System choice; the VE-GS Pro, which has no
 panel, wears the Pro's), playing Standard MIDI Files from a playlist, with the panel's buttons under
 the mouse.
 
@@ -13,9 +13,9 @@ machine.  Files on the command line become the playlist and the first one plays.
 
 | option | |
 |---|---|
-| `--model sc88pro \| sc88 \| sc88vl \| sc8850 \| sc8820 \| sc55mk2` | which machine; the default is the SC-88Pro when its ROMs are found |
+| `--model sc88pro \| sc88 \| sc88vl \| sc8850 \| sc8820 \| sc55mk2 \| sc55` | which machine; the default is the SC-88Pro when its ROMs are found |
 | `--rom PATH` | a zip or a directory holding the ROM images, whatever they are named |
-| `--size 4 \| 8` | the window size: 4 is the small panel (1399 × 440 for the SC-88 and the SC-88Pro, 1399 × 282 for the shallower SC-88VL and SC-55mkII, 1696 × 692 for the SC-8850, 1421 × 242 for the SC-8820), 8 twice that.  The bake is named by the glass's dot pitch, which is 4 and 8 on the 88 family and the SC-55mkII and 3 and 6 on the SC-8850, whose display has more and smaller dots; the SC-8820 has no glass and its bake is 7 and 14 pixels a millimetre.  On a HiDPI screen the large bake is used for the small size automatically |
+| `--size 4 \| 8` | the window size: 4 is the small panel (1399 × 440 for the SC-88 and the SC-88Pro, 1399 × 282 for the shallower SC-88VL, SC-55mkII and SC-55, 1696 × 692 for the SC-8850, 1421 × 242 for the SC-8820), 8 twice that.  The bake is named by the glass's dot pitch, which is 4 and 8 on the 88 family and the two SC-55s and 3 and 6 on the SC-8850, whose display has more and smaller dots; the SC-8820 has no glass and its bake is 7 and 14 pixels a millimetre.  On a HiDPI screen the large bake is used for the small size automatically |
 | `--map sc55 \| sc88 \| sc88pro \| sc8850` | play every part from that instrument map, as in scplay |
 | `--midi-rate BAUD` | the speed of the MIDI input, as in scplay |
 | `--rate native \| 32000 \| 44100 \| 48000` | the rate to ask the output device for, as in scplay; `native`, the default, is the machine's own |
@@ -46,14 +46,15 @@ machine.  Files on the command line become the playlist and the first one plays.
 - **The power switch** switches the emulated unit off and on; on the SC-88VL the STANDBY lamp beside
   it is lit while the unit is off.  Switching on boots the firmware for
   real (not from the cache), with any queued keys held, so the power-on combinations work.  The
-  SC-55mkII's POWER is not a mains switch but a position in the panel's own switch matrix, so clicking
-  it sends that key: the firmware mutes the audio and switches the display's power off while the
-  machine keeps running, and the STANDBY lamp is the machine's own.  A note sounding when it is
+  SC-55mkII's and the SC-55's POWER is not a mains switch but a position in the panel's own switch
+  matrix, so clicking it sends that key: the firmware mutes the audio and switches the display's power
+  off while the machine keeps running, and the STANDBY lamp is the machine's own.  A note sounding when it is
   pressed keeps sounding into a dead amplifier, and MIDI arriving in standby goes nowhere.
 - **The MIDI IN B jack** opens the playlist (on the SC-8850 and the SC-8820, whose MIDI comes in over
   USB, it is **the USB mark**), **the PHONES jack** the Settings window.
 - **The model name** beside the logotype opens a menu of the systems whose ROMs are there, to switch
-  between them, and a Reset that power-cycles the machine.
+  between them, and a Reset that power-cycles the machine.  The SC-55 carries no name there, only the
+  logotype, and the bare panel where the SC-55mkII has its name opens the same menu.
 - **The logotype** at the bottom left opens a menu where the pointer is: the playlist, the Settings
   window on its Audio or its System tab, a **Send** submenu, and About.  Send puts a message on both of
   the machine's inputs at once (and on the song outputs, for a unit playing along): GM System On, GS
@@ -69,7 +70,8 @@ machine.  Files on the command line become the playlist and the first one plays.
   manual says to press together go down in one scan, a held key is held for a moment before the next
   goes down, and a power-on combination goes through a power cycle with its keys held.  Each panel has
   its own list -- the SC-88, SC-88VL, SC-55mkII and SC-8850 keep to what their own manual and service
-  notes describe -- and the whole of it is `docs/panel/combinations.md` in the project.  The factory Test
+  notes describe, and the SC-55 takes the SC-55mkII's manual's list, marked as such, until its own
+  manual is in -- and the whole of it is `docs/panel/combinations.md` in the project.  The factory Test
   Mode is left out of the menus, since nothing here answers it yet; the power-on combinations that are
   offered (the version display, the MIDI THRU check) do not take effect either, and that file says so.
 
@@ -137,7 +139,7 @@ of the device -- two of the buffer chosen, or of the period the host actually ta
 larger, as under JACK, where the server sets it; a smaller buffer means less delay from a key to the
 sound and more chance of a dropout on a busy host.
 
-The rate is the machine's own, 32 kHz and the SC-55mkII's 66206 Hz, or 32000, 44100 or 48000; a
+The rate is the machine's own, 32 kHz, the SC-55mkII's 66206 Hz and the SC-55's 64000 Hz, or 32000, 44100 or 48000; a
 device that will not open at the one asked for runs at one of its own.  The machine always renders at
 its own rate, and whatever the device opens at, the output is converted to it with libsamplerate's
 medium sinc.
@@ -150,7 +152,7 @@ to the middle button, for a mouse whose middle button is a wheel to press or non
 other half of a ◀ ▶ pair stays on the right button, since it happens while the left button holds the
 first half and no menu is wanted there, and Ctrl with the right button opens the menu either way round.
 
-**System**: which machine this is -- SC-88, SC-88VL, SC-88Pro, SC-8820, SC-8850 or SC-55mkII.  A model whose
+**System**: which machine this is -- SC-55, SC-55mkII, SC-88, SC-88VL, SC-88Pro, SC-8820 or SC-8850.  A model whose
 ROM images were not found is greyed out.  Choosing another one switches at once: the song is
 unloaded, the machine is replaced and the new one comes up from its own boot cache, so it is instant
 from the second time on; the sound card and the MIDI ties stay as they are.  Below the choice is what
@@ -158,7 +160,8 @@ is running: the model, its control ROM version, and the file its images came fro
 
 The **computer switch** is the row under the systems: the switch on the back of the unit, in the
 positions that system has -- MIDI, PC-1, PC-2 and Mac on the 88 family and the SC-55mkII, MIDI, PC-1,
-PC-2 and USB on the SC-8850.  It belongs to the system, not to the program, so each one keeps its own;
+PC-2 and USB on the SC-8850; the SC-55 has none, and the row is greyed out.  It belongs to the system,
+not to the program, so each one keeps its own;
 the row always shows the running one.  The firmware reads the ladder once when it comes up, so
 changing it replaces the machine and boots it again, the way changing the model does (from that
 position's own boot cache).

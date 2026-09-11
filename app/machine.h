@@ -17,11 +17,11 @@
 
 typedef struct machine machine_t;
 
-/* The systems the players keep a rear COMPUTER switch for, oldest first, which
- * is also the order they are listed in.  It is the order of machine_options_t's
- * computer[] and of the settings file's rows (play/config.h's CONFIG_ROW_*), and
- * the three have to agree. */
-#define MACHINE_SYSTEMS 6
+/* The systems the players list, oldest first, each with a row for its rear
+ * COMPUTER switch (the SC-55, which has none, stays at MIDI).  It is the order
+ * of machine_options_t's computer[] and of the settings file's rows
+ * (play/config.h's CONFIG_ROW_*), and the three have to agree. */
+#define MACHINE_SYSTEMS 7
 extern const scemu_model_t machine_systems[MACHINE_SYSTEMS];
 /* the row a model's switch lives in, or -1 for a model without one */
 int machine_system_index(scemu_model_t model);

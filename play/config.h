@@ -52,19 +52,20 @@
 extern "C" {
 #endif
 
-/* The systems whose rear COMPUTER switch the file remembers, one row each,
- * oldest machine first -- the keys are computer_sc55mk2, computer_sc88,
- * computer_sc88vl, computer_sc88pro, computer_sc8820 and computer_sc8850, and
- * app/machine.h's machine_systems[] is the same order. */
+/* The systems, one row each for the rear COMPUTER switch, oldest machine
+ * first -- the keys are computer_sc55mk2, computer_sc88, computer_sc88vl,
+ * computer_sc88pro, computer_sc8820 and computer_sc8850, and app/machine.h's
+ * machine_systems[] is the same order.  The SC-55 has no such switch: its
+ * row stays at midi and the file keeps no key for it. */
 enum
 {
-	CONFIG_ROW_SC55MK2, CONFIG_ROW_SC88, CONFIG_ROW_SC88VL, CONFIG_ROW_SC88PRO,
+	CONFIG_ROW_SC55, CONFIG_ROW_SC55MK2, CONFIG_ROW_SC88, CONFIG_ROW_SC88VL, CONFIG_ROW_SC88PRO,
 	CONFIG_ROW_SC8820, CONFIG_ROW_SC8850, CONFIG_SYSTEMS
 };
 
 typedef struct scgui_config
 {
-	char model[16];          /* "sc88pro", "sc88", "sc88vl", "sc8850", "sc8820", "sc55mk2"; "" = the best set found */
+	char model[16];          /* "sc88pro", "sc88", "sc88vl", "sc8850", "sc8820", "sc55mk2", "sc55"; "" = the best set found */
 	char rom[1024];          /* --rom: a zip or directory; "" = search the usual places */
 	int size;                /* the window size: 4 the small panel, 8 twice as large */
 	char audio_device[128];  /* PortAudio device name; "" = the default */

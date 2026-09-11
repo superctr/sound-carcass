@@ -59,6 +59,7 @@ static const model_info_t model_infos[] = {
 	{ SCEMU_MODEL_SC8850, "sc8850", ID_PREFIX "sc8850", "SC-8850", "Roland SC-8850" },
 	{ SCEMU_MODEL_SC8820, "sc8820", ID_PREFIX "sc8820", "SC-8820", "Roland SC-8820" },
 	{ SCEMU_MODEL_SC55MK2, "sc55mk2", ID_PREFIX "sc55mk2", "SC-55mkII", "Roland SC-55mkII" },
+	{ SCEMU_MODEL_SC55, "sc55", ID_PREFIX "sc55", "SC-55", "Roland SC-55" },
 };
 #define MODEL_COUNT ((int)(sizeof model_infos / sizeof model_infos[0]))
 

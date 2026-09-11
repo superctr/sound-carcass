@@ -43,6 +43,10 @@ static const rom_set_t ROM_SETS[] =
 	{ "sc55mk2", SCEMU_MODEL_SC55MK2, { "r00233567_control.bin", 0x80000 },
 	  { { "r15209359_pcm_1.bin", 0x200000 }, { "r15279813_pcm_2.bin", 0x100000 } }, 2,
 	  { "r15199858_main_mcu.bin", 0x8000 }, { NULL, 0 } },
+	{ "sc55", SCEMU_MODEL_SC55, { "roland_r15209363.ic23", 0x40000 },
+	  { { "roland-gss.a_r15209276.ic28", 0x100000 }, { "roland-gss.b_r15209277.ic27", 0x100000 },
+	    { "roland-gss.c_r15209281.ic26", 0x100000 } }, 3,
+	  { "roland_r15199778_6435328a97f.ic30", 0x8000 }, { NULL, 0 } },
 };
 
 /* ---------------------------------------------------------------- files */
@@ -301,7 +305,7 @@ static int smf_load(smf_t *s, const uint8_t *data, size_t size, uint32_t rate)
 
 static void usage(const char *argv0)
 {
-	fprintf(stderr, "usage: %s <sc88|sc88vl|sc88pro|sc8850|sc8820|sc55mk2> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--tail N] [--state boot.state] [--map sc55|sc88|sc88pro|sc8850] [--midi-rate BAUD] [--computer midi|pc1|pc2|usb] [--raw words.bin] [--no-jit]\n", argv0);
+	fprintf(stderr, "usage: %s <sc88|sc88vl|sc88pro|sc8850|sc8820|sc55mk2|sc55> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--tail N] [--state boot.state] [--map sc55|sc88|sc88pro|sc8850] [--midi-rate BAUD] [--computer midi|pc1|pc2|usb] [--raw words.bin] [--no-jit]\n", argv0);
 }
 
 int main(int argc, char **argv)
