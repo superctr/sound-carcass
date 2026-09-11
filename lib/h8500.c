@@ -1082,6 +1082,7 @@ void h8500_io_write(h8500_t *cpu, uint16_t address, uint8_t data)
 		case S_SSR:
 		{
 			int base = v->sci_reg[unit];
+			int vec = v->sci_vector[unit];
 			uint8_t old = cpu->io[o];
 			uint8_t seen = cpu->sci[unit].ssr_read;
 			uint8_t nv = old;
@@ -1095,6 +1096,14 @@ void h8500_io_write(h8500_t *cpu, uint16_t address, uint8_t data)
 			nv = (uint8_t)((nv & 0xfe) | (data & 1));
 			cpu->io[o] = nv;
 			cpu->sci[unit].ssr_read &= nv;
+			if (!(nv & (SSR_ORER | SSR_FER | SSR_PER)))
+				irq_clear(cpu, vec);
+			if (!(nv & SSR_RDRF))
+				irq_clear(cpu, vec + 1);
+			if (!(nv & SSR_TDRE))
+				irq_clear(cpu, vec + 2);
+			if (!(nv & SSR_TEND))
+				irq_clear(cpu, vec + 3);
 			if (!(nv & SSR_TDRE))
 				sci_tx_start(cpu, unit);
 			return;
@@ -1118,6 +1127,15 @@ void h8500_io_write(h8500_t *cpu, uint16_t address, uint8_t data)
 				if (ssr & (SSR_ORER | SSR_FER | SSR_PER))
 					irq_raise(cpu, vec);
 			}
+			if (!(data & 0x40))
+			{
+				irq_clear(cpu, vec);
+				irq_clear(cpu, vec + 1);
+			}
+			if (!(data & 0x80))
+				irq_clear(cpu, vec + 2);
+			if (!(data & 0x04))
+				irq_clear(cpu, vec + 3);
 			return;
 		}
 		case S_RDR:
