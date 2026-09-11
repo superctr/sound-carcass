@@ -1971,7 +1971,6 @@ int main(int argc, char **argv)
 	gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(app.area), draw, &app, NULL);
 	gtk_window_set_child(GTK_WINDOW(app.window), app.area);
 	gtk_window_set_resizable(GTK_WINDOW(app.window), FALSE);
-	set_title(&app);
 
 	GtkEventController *buttons = gtk_event_controller_legacy_new();
 	g_signal_connect(buttons, "event", G_CALLBACK(on_button_event), &app);
@@ -1993,6 +1992,7 @@ int main(int argc, char **argv)
 	controls_set_knob(&app.ctl, app.cfg.volume);
 	controls_set_soft_power(&app.ctl, scplay_model_standby_key(app.shown_model));
 	machine_set_gain(app.mc, app.ctl.knob * app.ctl.knob);
+	set_title(&app);   /* the title carries the power, which controls_init has only just set */
 	gtk_window_present(GTK_WINDOW(app.window));
 	if (app.songs->len)
 		play_index(&app, 0);
