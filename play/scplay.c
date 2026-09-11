@@ -508,6 +508,7 @@ int main(int argc, char **argv)
 	st.has_efx_led = roms.model == SCEMU_MODEL_SC88PRO;
 	st.eq_label = roms.model != SCEMU_MODEL_SC88PRO;
 	st.standby_lamp = scplay_model_standby_key(roms.model);
+	st.map_lamps = roms.model == SCEMU_MODEL_SC88VL;
 	st.lamps_only = roms.model == SCEMU_MODEL_SC8820;
 
 	int32_t raw[BLOCK * 2];

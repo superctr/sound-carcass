@@ -830,5 +830,5 @@ const char *scplay_model_name(scemu_model_t model)
 
 bool scplay_model_standby_key(scemu_model_t model)
 {
-	return model == SCEMU_MODEL_SC55MK2 || model == SCEMU_MODEL_SC55;
+	return model == SCEMU_MODEL_SC55MK2 || model == SCEMU_MODEL_SC55 || model == SCEMU_MODEL_SC88VL;
 }

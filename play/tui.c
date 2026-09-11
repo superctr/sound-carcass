@@ -312,6 +312,11 @@ static const uint8_t LED_ROW_SC55MK2[] =
 	SCEMU_LED_ALL, SCEMU_LED_MUTE, SCEMU_LED_STANDBY
 };
 
+static const uint8_t LED_ROW_SC88VL[] =
+{
+	SCEMU_LED_ALL, SCEMU_LED_MUTE, SCEMU_LED_SC55_MAP, SCEMU_LED_SC88_MAP, SCEMU_LED_STANDBY
+};
+
 static const uint8_t LED_ROW_GLCD[] =
 {
 	SCEMU_LED_MUTE, SCEMU_LED_SOLO, SCEMU_LED_EDIT, SCEMU_LED_DRUM, SCEMU_LED_EFFECTS
@@ -455,9 +460,9 @@ static void build_frame(tui_t *t, const tui_state_t *st)
 	put(&b, "\n");
 	put(&b, " ");
 	const uint8_t *row = st->lamps_only ? LED_ROW_SC8820 : st->glcd ? LED_ROW_GLCD
-			: st->standby_lamp ? LED_ROW_SC55MK2 : LED_ROW_LCD;
+			: !st->standby_lamp ? LED_ROW_LCD : st->map_lamps ? LED_ROW_SC88VL : LED_ROW_SC55MK2;
 	int row_count = (int)(st->lamps_only ? sizeof(LED_ROW_SC8820) : st->glcd ? sizeof(LED_ROW_GLCD)
-			: st->standby_lamp ? sizeof(LED_ROW_SC55MK2) : sizeof(LED_ROW_LCD));
+			: !st->standby_lamp ? sizeof(LED_ROW_LCD) : st->map_lamps ? sizeof(LED_ROW_SC88VL) : sizeof(LED_ROW_SC55MK2));
 	for (int k = 0; k < row_count; k++)
 	{
 		int n = row[k];
