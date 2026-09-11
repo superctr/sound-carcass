@@ -364,7 +364,15 @@ void sh2_take_interrupt(sh2_t *cpu, int vector, int level)
 	if (vector == VEC_NMI)
 		cpu->nmi_pending = false;
 	else
+	{
 		intc_clear(cpu, vector);
+		if (vector >= 64 && vector < 72)
+		{
+			const int line = vector - 64;
+			if ((cpu->icr >> (7 - line)) & 1)
+				cpu->isr &= (uint16_t)~(1u << (7 - line));
+		}
+	}
 	sh2_exception(cpu, vector, cpu->pc, level);
 }
 
