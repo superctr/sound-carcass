@@ -17,6 +17,8 @@ size_t wave_rom_size(scemu_model_t model)
 		return 0x1800000;
 	case SCEMU_MODEL_SC55MK2:
 		return 0x400000;
+	case SCEMU_MODEL_SC55:
+		return 0x600000;
 	default:
 		return 0;
 	}
@@ -32,6 +34,7 @@ uint32_t wave_rom_chip_size(scemu_model_t model)
 
 static const uint8_t ADDRESS_LINES_SC88[18] = { 0, 4, 2, 3, 1, 13, 7, 12, 5, 10, 16, 9, 6, 8, 14, 17, 11, 15 };
 static const uint8_t ADDRESS_LINES_SC8850[18] = { 0, 4, 2, 3, 1, 8, 12, 6, 13, 11, 9, 16, 7, 5, 14, 17, 10, 15 };
+/* the SC-55 carries the same permutation */
 static const uint8_t ADDRESS_LINES_SC55MK2[20] = { 2, 0, 3, 4, 1, 9, 13, 10, 18, 17, 6, 15, 11, 16, 8, 5, 12, 7, 14, 19 };
 
 #define UNSCRAMBLE_MAX_GROUPS 4
@@ -82,6 +85,22 @@ static bool build_sc55mk2(const scemu_roms_t *roms, uint8_t *out, size_t out_siz
 	return true;
 }
 
+/* each of the three 1 MB parts has a 2 MB chip select of its own and no A20 */
+static bool build_sc55(const scemu_roms_t *roms, uint8_t *out, size_t out_size)
+{
+	if (out_size < 0x600000 || roms->wave_rom_count != 3)
+		return false;
+	for (int n = 0; n < 3; n++)
+	{
+		if (roms->wave_rom_size[n] != 0x100000)
+			return false;
+		uint8_t *chip = out + (size_t)n * 0x200000;
+		unscramble(chip, roms->wave_rom[n], 0x100000, ADDRESS_LINES_SC55MK2, 20);
+		memcpy(chip + 0x100000, chip, 0x100000);
+	}
+	return true;
+}
+
 bool wave_rom_build(scemu_model_t model, const scemu_roms_t *roms, uint8_t *out, size_t out_size)
 {
 	size_t offset = 0;
@@ -90,6 +109,8 @@ bool wave_rom_build(scemu_model_t model, const scemu_roms_t *roms, uint8_t *out,
 		return false;
 	if (model == SCEMU_MODEL_SC55MK2)
 		return build_sc55mk2(roms, out, out_size);
+	if (model == SCEMU_MODEL_SC55)
+		return build_sc55(roms, out, out_size);
 	for (int n = 0; n < roms->wave_rom_count; n++)
 	{
 		if (offset + roms->wave_rom_size[n] > out_size)

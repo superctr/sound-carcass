@@ -29,6 +29,7 @@ typedef enum scemu_model
 	SCEMU_MODEL_SC8850,
 	SCEMU_MODEL_SC55MK2,
 	SCEMU_MODEL_SC8820,
+	SCEMU_MODEL_SC55,
 	SCEMU_MODEL_COUNT
 } scemu_model_t;
 
@@ -48,7 +49,9 @@ typedef struct scemu_roms
 	 * flash; program_rom is its 1 MB program flash, and the wave ROMs are
 	 * IC53, IC54.  The SC-8820 takes the 64 KB CPU ROM too, its 2 MB flash
 	 * (program and tone parameters in one) as program_rom, no tone_rom, and
-	 * its wave ROMs IC7 (16 MB) and IC8 (8 MB) */
+	 * its wave ROMs IC7 (16 MB) and IC8 (8 MB).  The SC-55mkII and the SC-55
+	 * take their H8/532's 32 KB internal ROM as boot_rom; the SC-55's wave
+	 * ROMs are GSS A, B and C (IC28, IC27, IC26) */
 	const void *boot_rom;
 	size_t boot_rom_size;
 	const void *tone_rom;
@@ -121,7 +124,7 @@ typedef enum scemu_button
 	SCEMU_BUTTON_SOLO,
 	SCEMU_BUTTON_DEC,
 	SCEMU_BUTTON_INC,
-	SCEMU_BUTTON_POWER,           /* SC-55mkII: the standby key, a position in the matrix */
+	SCEMU_BUTTON_POWER,           /* SC-55 and SC-55mkII: the standby key, a position in the matrix */
 	SCEMU_BUTTON_COUNT
 } scemu_button_t;
 
@@ -162,7 +165,7 @@ typedef enum scemu_led
 	SCEMU_LED_EDIT,
 	SCEMU_LED_DRUM,
 	SCEMU_LED_EFFECTS,
-	SCEMU_LED_STANDBY,            /* SC-55mkII: lit while the machine is in standby */
+	SCEMU_LED_STANDBY,            /* SC-55 and SC-55mkII: lit while the machine is in standby */
 	SCEMU_LED_POWER,              /* the SC-8820 from here: the POWER lamp, lit by the firmware */
 	SCEMU_LED_USB,                /* a host is on the USB */
 	SCEMU_LED_MAP,                /* the red lamp inside the INST MAP key */
@@ -223,7 +226,7 @@ scemu_model_t scemu_model(const scemu_t *m);
 
 /* The machine's own sample rate in Hz: 32000 on the SC-88 family and the
  * SC-8850 (24.576 MHz / 768), 66206 on the SC-55mkII (24 MHz / 725, two DAC
- * words a chip frame).  One frame is one sample of it everywhere, so a
+ * words a chip frame), 64000 on the SC-55 (20 MHz / 625, the same).  One frame is one sample of it everywhere, so a
  * render's frame count, a MIDI offset and a state's frame stamp all mean the
  * same thing on every model.  The host resamples. */
 uint32_t scemu_sample_rate(const scemu_t *m);

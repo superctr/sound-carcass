@@ -19,6 +19,8 @@ static const board_ops_t *board_ops_for(scemu_model_t model)
 		return &sc8820_board_ops;
 	case SCEMU_MODEL_SC55MK2:
 		return &sc55mk2_board_ops;
+	case SCEMU_MODEL_SC55:
+		return &sc55_board_ops;
 	default:
 		return NULL;
 	}

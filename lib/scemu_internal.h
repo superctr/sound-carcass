@@ -8,6 +8,7 @@
 #include "sc8850.h"
 #include "sc8820.h"
 #include "sc55mk2.h"
+#include "sc55.h"
 
 /* What a board owes the API.  A board is one machine family's glue: its CPU, its memory map, its
  * gate array and display, wired to the chips; the API dispatches to whichever the model names. */
@@ -50,6 +51,7 @@ extern const board_ops_t sc88_board_ops;
 extern const board_ops_t sc8850_board_ops;
 extern const board_ops_t sc8820_board_ops;
 extern const board_ops_t sc55mk2_board_ops;
+extern const board_ops_t sc55_board_ops;
 
 struct scemu
 {
@@ -63,6 +65,7 @@ struct scemu
 		sc8850_t sc8850;
 		sc8820_t sc8820;
 		sc55mk2_t sc55mk2;
+		sc55_t sc55;
 	} board;
 	midi_map_t map;
 };
