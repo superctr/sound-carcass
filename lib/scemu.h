@@ -124,7 +124,7 @@ typedef enum scemu_button
 	SCEMU_BUTTON_SOLO,
 	SCEMU_BUTTON_DEC,
 	SCEMU_BUTTON_INC,
-	SCEMU_BUTTON_POWER,           /* SC-55 and SC-55mkII: the standby key, a position in the matrix */
+	SCEMU_BUTTON_POWER,           /* SC-55, SC-55mkII and SC-88VL: the standby key, a position in the matrix */
 	SCEMU_BUTTON_COUNT
 } scemu_button_t;
 
@@ -165,7 +165,7 @@ typedef enum scemu_led
 	SCEMU_LED_EDIT,
 	SCEMU_LED_DRUM,
 	SCEMU_LED_EFFECTS,
-	SCEMU_LED_STANDBY,            /* SC-55 and SC-55mkII: lit while the machine is in standby */
+	SCEMU_LED_STANDBY,            /* SC-55, SC-55mkII and SC-88VL: lit while the machine is in standby */
 	SCEMU_LED_POWER,              /* the SC-8820 from here: the POWER lamp, lit by the firmware */
 	SCEMU_LED_USB,                /* a host is on the USB */
 	SCEMU_LED_MAP,                /* the red lamp inside the INST MAP key */

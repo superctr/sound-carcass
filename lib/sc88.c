@@ -551,6 +551,12 @@ static const uint8_t BUTTON_BIT[SCEMU_BUTTON_F1] =
 
 void sc88_button(sc88_t *b, scemu_button_t button, bool down)
 {
+	/* the SC-88VL's POWER/STANDBY key is SW401, the position its siblings leave free */
+	if (button == SCEMU_BUTTON_POWER && b->model == SCEMU_MODEL_SC88VL)
+	{
+		sub_hle_set_key(&b->sub, 0, 0, down);
+		return;
+	}
 	if (button < 0 || button >= SCEMU_BUTTON_F1 || !b->has_panel)
 		return;
 	sub_hle_set_key(&b->sub, BUTTON_ROW[button], BUTTON_BIT[button], down);
@@ -587,7 +593,18 @@ static void ops_set_midi_out(void *board, scemu_midi_out_fn fn, void *user)
 }
 static void ops_button(void *b, scemu_button_t button, bool down) { sc88_button(b, button, down); }
 static void ops_set_computer_switch(void *b, scemu_computer_switch_t sw) { ((sc88_t *)b)->computer_switch = sw; }
-static uint32_t ops_leds(const void *b) { return ((const sc88_t *)b)->ga.leds; }
+/* The eight data lines are the same lamps on all three, and the second common is not:
+   the SC-88Pro's drives its lens's red die, the SC-88VL's its STANDBY lamp, and the
+   SC-88 leaves it parked. */
+static uint32_t ops_leds(const void *board)
+{
+	const sc88_t *b = board;
+	const uint32_t leds = b->ga.leds;
+	if (b->model == SCEMU_MODEL_SC88PRO)
+		return leds;
+	const uint32_t standby = (b->model == SCEMU_MODEL_SC88VL && (leds & 0x100)) ? 1u << SCEMU_LED_STANDBY : 0;
+	return (leds & 0xff) | standby;
+}
 static scemu_lcd_t *ops_lcd(void *b) { return &((sc88_t *)b)->lcd.out; }
 
 static size_t ops_nvram_size(const void *b) { (void)b; return SC88_SRAM_SIZE; }
