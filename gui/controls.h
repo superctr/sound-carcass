@@ -47,6 +47,7 @@ typedef struct controls
 	void *user;
 	bool power;
 	bool soft_power;           /* the power key is a position in the machine's own matrix (the SC-55mkII) */
+	bool standby;              /* such a machine's own standby lamp, as the host last saw it */
 	float knob;
 	bool swap_buttons;         /* the right button opens the combination menu, the middle one queues keys;
 	                              the other half of a pair stays on the right button either way */
@@ -67,6 +68,10 @@ void controls_init(controls_t *c, panel_t *panel, const controls_actions_t *act,
 /* another model's panel, the knob carried over */
 void controls_set_panel(controls_t *c, panel_t *panel);
 void controls_set_soft_power(controls_t *c, bool soft);
+/* The machine's standby lamp.  A soft-power unit reads the keys held through its
+ * own standby key and never sees the host's power switch, so the combinations the
+ * manuals hold through the power-on are played there instead. */
+void controls_set_standby(controls_t *c, bool standby);
 void controls_set_knob(controls_t *c, float turn);
 /* the right button and the middle one change places, so the combination menu
  * is a right-click and the queue-and-hold gesture a middle-click; pressing the

@@ -11,6 +11,8 @@
 #define DIAL_DEGREES (360.0 / PANEL_DIAL_FRAMES)   /* what the hand turns for one detent */
 #define MACRO_HOLD_MS 300    /* a held key is seen held before the next goes down */
 #define MACRO_PRESS_MS 150
+#define MACRO_STANDBY_MS 400   /* the machine has settled into standby */
+#define MACRO_WAKE_MS 1500     /* the keys stay down while it comes up and reads them */
 #define KNOB_NOTCHES 20    /* wheel notches from silent to full */
 
 void controls_init(controls_t *c, panel_t *panel, const controls_actions_t *act, void *user)
@@ -46,6 +48,8 @@ void controls_set_panel(controls_t *c, panel_t *panel)
 }
 
 void controls_set_soft_power(controls_t *c, bool soft) { c->soft_power = soft; }
+
+void controls_set_standby(controls_t *c, bool standby) { c->standby = standby; }
 
 void controls_set_knob(controls_t *c, float turn)
 {
@@ -343,6 +347,31 @@ static void macro_release(controls_t *c, const combo_t *combo, unsigned t)
 		macro_key(c, combo->hold[n], false, t);
 }
 
+/* A machine whose power key is one of its own reads the keys the manual holds
+ * "while switching on" as it comes out of standby, so the combination puts it in
+ * standby first if it is running, holds the keys there, and presses the key. */
+static unsigned play_through_standby(controls_t *c, const combo_t *combo)
+{
+	unsigned t = 0;
+	if (!c->standby)
+	{
+		macro_key(c, SCEMU_BUTTON_POWER, true, t);
+		macro_key(c, SCEMU_BUTTON_POWER, false, t + MACRO_PRESS_MS);
+		t = MACRO_STANDBY_MS;
+	}
+	for (int n = 0; n < combo->hold_count; n++)
+		macro_key(c, combo->hold[n], true, t);
+	if (combo->press != SCEMU_BUTTON_COUNT)
+		macro_key(c, combo->press, true, t);
+	t += MACRO_HOLD_MS;
+	macro_key(c, SCEMU_BUTTON_POWER, true, t);
+	macro_key(c, SCEMU_BUTTON_POWER, false, t + MACRO_PRESS_MS);
+	t += MACRO_WAKE_MS;
+	macro_release(c, combo, t);
+	c->macro_ms = t + 50;
+	return c->macro_ms;
+}
+
 /* the held keys go down in order, the pressed one follows (at once when the
  * manual says "simultaneously", after a moment when it says "while
  * holding"), and everything comes up in reverse; a pair pressed twice goes
@@ -351,6 +380,8 @@ unsigned controls_play_combo(controls_t *c, const combo_t *combo)
 {
 	if (c->macro_pressed || c->release_after_boot)
 		return 0;
+	if (combo->power_on && c->soft_power)
+		return play_through_standby(c, combo);
 	int first = combo->timing == COMBO_HOLD_THEN_PAIR && !combo->power_on ? combo->hold_count - 1
 	                                                                     : combo->hold_count;
 	bool together = combo->timing == COMBO_TOGETHER || combo->timing == COMBO_TOGETHER_TWICE;
