@@ -9,6 +9,8 @@
 #include "sh2.h"
 #include "flash.h"
 #include "uipc.h"
+#include "gp.h"
+#include "lcd.h"
 
 /* The chunks the boards share: a chip's state as a byte stream, the ERAMs apart. */
 
@@ -26,5 +28,9 @@ void state_put_flash(state_writer_t *w, const flash_t *f);
 void state_get_flash(state_reader_t *r, flash_t *f);
 void state_put_uipc(state_writer_t *w, const uipc_t *u);
 void state_get_uipc(state_reader_t *r, uipc_t *u);
+void state_put_gp(state_writer_t *w, const gp_t *g);
+void state_get_gp(state_reader_t *r, gp_t *g);
+void state_put_lcd(state_writer_t *w, const lcd_t *l);
+void state_get_lcd(state_reader_t *r, lcd_t *l);
 
 #endif

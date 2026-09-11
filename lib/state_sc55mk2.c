@@ -51,99 +51,6 @@ static void get_board(state_reader_t *r, sc55mk2_t *b)
 	b->midi.drops = get32(r);
 }
 
-static void put_gp(state_writer_t *w, const gp_t *g)
-{
-	for (int n = 0; n < GP_SLOTS; n++)
-	{
-		const gp_slot_t *s = &g->slots[n];
-		put_u32s(w, s->wide, 6);
-		put_u16s(w, s->narrow, 12);
-		put_i32(w, s->filter_low);
-		put_i32(w, s->filter_band);
-		put8(w, s->prefetch);
-		put_bool(w, s->crossed);
-	}
-	put32(w, g->key_mask);
-	put32(w, g->key_mask_pending);
-	put_bool(w, g->key_mask_dirty);
-	put32(w, g->write_latch);
-	put32(w, g->read_latch);
-	put32(w, g->rom_address);
-	put8(w, g->rom_byte);
-	put8(w, g->output_config);
-	put8(w, g->slot_config);
-	put8(w, g->selected_slot);
-	put8(w, g->irq_slot);
-	put_bool(w, g->irq_pending);
-	put16(w, g->frame_counter);
-	put_bool(w, g->first_frame);
-	put_i32s(w, g->mix, 2);
-	put_i32s(w, g->send, 2);
-	put_i32s(w, g->returns, 6);
-	for (int n = 0; n < 2; n++)
-		put_i32s(w, g->sample[n], 2);
-}
-
-static void get_gp(state_reader_t *r, gp_t *g)
-{
-	for (int n = 0; n < GP_SLOTS; n++)
-	{
-		gp_slot_t *s = &g->slots[n];
-		get_u32s(r, s->wide, 6);
-		get_u16s(r, s->narrow, 12);
-		s->filter_low = get_i32(r);
-		s->filter_band = get_i32(r);
-		s->prefetch = get8(r);
-		s->crossed = get_bool(r);
-	}
-	g->key_mask = get32(r);
-	g->key_mask_pending = get32(r);
-	g->key_mask_dirty = get_bool(r);
-	g->write_latch = get32(r);
-	g->read_latch = get32(r);
-	g->rom_address = get32(r);
-	g->rom_byte = get8(r);
-	g->output_config = get8(r);
-	g->slot_config = get8(r);
-	g->selected_slot = get8(r);
-	g->irq_slot = get8(r);
-	g->irq_pending = get_bool(r);
-	g->frame_counter = get16(r);
-	g->first_frame = get_bool(r);
-	get_i32s(r, g->mix, 2);
-	get_i32s(r, g->send, 2);
-	get_i32s(r, g->returns, 6);
-	for (int n = 0; n < 2; n++)
-		get_i32s(r, g->sample[n], 2);
-}
-
-static void put_lcd(state_writer_t *w, const lcd_t *l)
-{
-	put_bytes(w, l->out.ddram, 80);
-	put_bytes(w, l->out.cgram, 64);
-	put_bool(w, l->out.display_on);
-	put8(w, l->address);
-	put_bool(w, l->cgram_mode);
-	put_bool(w, l->increment);
-	put_bool(w, l->shift);
-	put_bool(w, l->two_line);
-	put8(w, l->display_shift);
-}
-
-static void get_lcd(state_reader_t *r, lcd_t *l)
-{
-	get_bytes(r, l->out.ddram, 80);
-	get_bytes(r, l->out.cgram, 64);
-	l->out.display_on = get_bool(r);
-	l->out.changed = true;
-	l->address = get8(r);
-	l->cgram_mode = get_bool(r);
-	l->increment = get_bool(r);
-	l->shift = get_bool(r);
-	l->two_line = get_bool(r);
-	l->display_shift = get8(r);
-}
-
 static void put_sub(state_writer_t *w, const sub55_hle_t *s)
 {
 	put_bytes(w, s->dpram, SUB55_DPRAM_SIZE);
@@ -246,9 +153,9 @@ static size_t write_state(const sc55mk2_t *b, uint8_t *out)
 		case CHUNK_BOARD:   put_board(&w, b); break;
 		case CHUNK_SRAM:    put_bytes(&w, b->sram, SC55MK2_SRAM_SIZE); break;
 		case CHUNK_CPU:     state_put_h8500(&w, &b->cpu); break;
-		case CHUNK_GP:      put_gp(&w, &b->gp); break;
+		case CHUNK_GP:      state_put_gp(&w, &b->gp); break;
 		case CHUNK_GP_ERAM: put_u16s(&w, b->gp.eram, GP_ERAM_SIZE); break;
-		case CHUNK_LCD:     put_lcd(&w, &b->lcd); break;
+		case CHUNK_LCD:     state_put_lcd(&w, &b->lcd); break;
 		case CHUNK_SUB:     put_sub(&w, &b->sub); break;
 		case CHUNK_MIDI:    state_put_midi(&w, &b->midi); break;
 		default: break;
@@ -285,9 +192,9 @@ static bool read_chunk(int which, state_reader_t *r, sc55mk2_t *b)
 	case CHUNK_BOARD:   get_board(r, b); break;
 	case CHUNK_SRAM:    get_bytes(r, b->sram, SC55MK2_SRAM_SIZE); break;
 	case CHUNK_CPU:     state_get_h8500(r, &b->cpu); break;
-	case CHUNK_GP:      get_gp(r, &b->gp); break;
+	case CHUNK_GP:      state_get_gp(r, &b->gp); break;
 	case CHUNK_GP_ERAM: get_u16s(r, b->gp.eram, GP_ERAM_SIZE); break;
-	case CHUNK_LCD:     get_lcd(r, &b->lcd); break;
+	case CHUNK_LCD:     state_get_lcd(r, &b->lcd); break;
 	case CHUNK_SUB:     get_sub(r, &b->sub); break;
 	case CHUNK_MIDI:    state_get_midi(r, &b->midi); break;
 	default: return false;
