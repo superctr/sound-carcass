@@ -45,6 +45,7 @@ add_library(scemu STATIC
 	lib/sc8820.c
 	lib/uipc.c
 	lib/sc55mk2.c
+	lib/i8251.c
 	lib/state.c
 	lib/state_sc8850.c
 	lib/state_sc8820.c
