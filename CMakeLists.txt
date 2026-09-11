@@ -42,9 +42,13 @@ add_library(scemu STATIC
 	lib/lsp.c
 	lib/sc88.c
 	lib/sc8850.c
+	lib/sc8820.c
+	lib/uipc.c
 	lib/sc55mk2.c
 	lib/state.c
 	lib/state_sc8850.c
+	lib/state_sc8820.c
+	lib/state_sh2.c
 	lib/state_sc55mk2.c
 	lib/midi_queue.c
 	lib/sub_hle.c

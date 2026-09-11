@@ -9,7 +9,6 @@ enum
 {
 	CHUNK_BOARD, CHUNK_CPU, CHUNK_DRAM, CHUNK_XP1, CHUNK_XP1_ERAM, CHUNK_XP2, CHUNK_XP2_ERAM,
 	CHUNK_LSP, CHUNK_LSP_ERAM, CHUNK_GATE_ARRAY, CHUNK_GLCD, CHUNK_MIDI, CHUNK_FLASH, CHUNK_UIPC,
-	CHUNK_PANEL,
 	CHUNK_COUNT
 };
 
@@ -18,19 +17,8 @@ static const uint32_t CHUNK_TAG[CHUNK_COUNT] =
 	TAG('B', 'R', 'D', '2'), TAG('S', 'H', '2', ' '), TAG('D', 'R', 'A', 'M'),
 	TAG('X', 'P', '1', ' '), TAG('X', 'E', 'R', '1'), TAG('X', 'P', '2', ' '), TAG('X', 'E', 'R', '2'),
 	TAG('L', 'S', 'P', ' '), TAG('L', 'E', 'R', 'M'), TAG('G', 'A', '2', ' '), TAG('G', 'L', 'C', 'D'),
-	TAG('M', 'I', 'D', 'I'), TAG('F', 'L', 'S', 'H'), TAG('U', 'I', 'P', 'C'),
-	TAG('P', 'N', 'L', '2')
+	TAG('M', 'I', 'D', 'I'), TAG('F', 'L', 'S', 'H'), TAG('U', 'I', 'P', 'C')
 };
-
-/* the chunks a board has: the SC-8820 has one chip, no gate array and no graphic display, and a panel
- * on the CPU's ports instead */
-static uint32_t chunk_set(const sc8850_t *b)
-{
-	uint32_t all = (1u << CHUNK_COUNT) - 1;
-	if (b->one_chip)
-		return all & ~((1u << CHUNK_XP2) | (1u << CHUNK_XP2_ERAM) | (1u << CHUNK_GATE_ARRAY) | (1u << CHUNK_GLCD));
-	return all & ~(1u << CHUNK_PANEL);
-}
 
 /* ---------------------------------------------------------------- the chunks */
 
@@ -44,53 +32,7 @@ static void put_board(state_writer_t *w, const sc8850_t *b)
 	put32(w, b->midi.drops);
 }
 
-static void put_uipc(state_writer_t *w, const sc8850_uipc_t *u)
-{
-	put16(w, u->rx_head);
-	put16(w, u->rx_count);
-	for (uint16_t n = 0; n < u->rx_count; n++)
-		put16(w, u->rx[(u->rx_head + n) % SC8850_UIPC_RX]);
-	put_bytes(w, u->tx, sizeof(u->tx));
-	put8(w, u->tx_count);
-	put8(w, u->boot);
-	put_bool(w, u->running);
-	put_bool(w, u->host);
-	put_bool(w, u->online);
-	for (int n = 0; n < SC8850_MIDI_PORTS; n++)
-	{
-		const sc8850_usb_in_t *in = &u->in[n];
-		put_bytes(w, in->msg, sizeof(in->msg));
-		put8(w, in->count);
-		put8(w, in->need);
-		put8(w, in->cin);
-		put8(w, in->status);
-		put_bool(w, in->sysex);
-	}
-	put32(w, u->announce);
-	put32(w, u->poll);
-}
 
-static void put_panel(state_writer_t *w, const sc8820_panel_t *p)
-{
-	put16(w, p->pe);
-	put16(w, p->pa);
-	put_bool(w, p->written);
-	put_bytes(w, p->column, SC8820_PANEL_ROWS);
-	put_bool(w, p->map_key);
-	put_bool(w, p->preview_key);
-	put32(w, p->leds);
-}
-
-static void get_panel(state_reader_t *r, sc8820_panel_t *p)
-{
-	p->pe = get16(r);
-	p->pa = get16(r);
-	p->written = get_bool(r);
-	get_bytes(r, p->column, SC8820_PANEL_ROWS);
-	p->map_key = get_bool(r);
-	p->preview_key = get_bool(r);
-	p->leds = get32(r);
-}
 
 static void get_board(state_reader_t *r, sc8850_t *b)
 {
@@ -102,280 +44,8 @@ static void get_board(state_reader_t *r, sc8850_t *b)
 	b->midi.drops = get32(r);
 }
 
-static void get_uipc(state_reader_t *r, sc8850_uipc_t *u)
-{
-	memset(u, 0, sizeof(*u));
-	u->rx_head = get16(r);
-	u->rx_count = get16(r);
-	if (u->rx_count > SC8850_UIPC_RX || u->rx_head >= SC8850_UIPC_RX)
-	{
-		r->ok = false;
-		return;
-	}
-	for (uint16_t n = 0; n < u->rx_count; n++)
-		u->rx[(u->rx_head + n) % SC8850_UIPC_RX] = get16(r);
-	get_bytes(r, u->tx, sizeof(u->tx));
-	u->tx_count = get8(r);
-	u->boot = get8(r);
-	u->running = get_bool(r);
-	u->host = get_bool(r);
-	u->online = get_bool(r);
-	for (int n = 0; n < SC8850_MIDI_PORTS; n++)
-	{
-		sc8850_usb_in_t *in = &u->in[n];
-		get_bytes(r, in->msg, sizeof(in->msg));
-		in->count = get8(r);
-		in->need = get8(r);
-		in->cin = get8(r);
-		in->status = get8(r);
-		in->sysex = get_bool(r);
-	}
-	u->announce = get32(r);
-	u->poll = get32(r);
-}
 
-static void put_cpu(state_writer_t *w, const sh2_t *c)
-{
-	put_u32s(w, c->r, 16);
-	put32(w, c->sr);
-	put32(w, c->gbr);
-	put32(w, c->vbr);
-	put32(w, c->mach);
-	put32(w, c->macl);
-	put32(w, c->pr);
-	put32(w, c->pc);
-	put32(w, c->delay_target);
-	put_bool(w, c->delay);
-	put_bool(w, c->sleeping);
 
-	put_u16s(w, c->ipr, 8);
-	put16(w, c->icr);
-	put16(w, c->isr);
-	put_u32s(w, c->pending, 8);
-	put8(w, c->irq_line);
-	put_bool(w, c->nmi_line);
-	put_bool(w, c->nmi_pending);
-
-	for (int n = 0; n < 2; n++)
-	{
-		const sh2_sci_t *s = &c->sci[n];
-		put8(w, s->smr);
-		put8(w, s->brr);
-		put8(w, s->scr);
-		put8(w, s->tdr);
-		put8(w, s->ssr);
-		put8(w, s->rdr);
-		put8(w, s->tx_shift);
-		put32(w, s->tx_timer);
-		put_bool(w, s->tx_busy);
-		put8(w, s->rx_byte);
-		put_bool(w, s->rx_pending);
-		put_bool(w, s->int_rxi);
-		put_bool(w, s->int_txi);
-		put_bool(w, s->int_tei);
-		put_bool(w, s->int_eri);
-	}
-
-	for (int n = 0; n < 3; n++)
-	{
-		const sh2_mtu_channel_t *m = &c->mtu[n];
-		put8(w, m->tcr);
-		put8(w, m->tmdr);
-		put8(w, m->tiorh);
-		put8(w, m->tiorl);
-		put8(w, m->tier);
-		put8(w, m->tsr);
-		put16(w, m->tcnt);
-		put_u16s(w, m->tgr, 4);
-		put32(w, m->prescale);
-		put_bool(w, m->active);
-	}
-	put8(w, c->tsyr);
-
-	put8(w, c->wtcsr);
-	put8(w, c->wtcnt);
-	put8(w, c->rstcsr);
-	put32(w, c->wdt_prescale);
-	put_bool(w, c->wdt_int);
-
-	put_u16s(w, c->addr_, 4);
-	put8(w, c->adcsr);
-	put8(w, c->adcr);
-	put32(w, c->adc_timer);
-	put_bool(w, c->adc_int);
-
-	for (int n = 0; n < 2; n++)
-	{
-		const sh2_dma_channel_t *d = &c->dma[n];
-		put32(w, d->sar);
-		put32(w, d->dar);
-		put32(w, d->chcr);
-		put32(w, d->dmatcr);
-		put32(w, d->count);
-		put32(w, d->timer);
-		put_bool(w, d->active);
-		put_bool(w, d->int_te);
-	}
-	put16(w, c->dmaor);
-
-	put16(w, c->padr);
-	put16(w, c->paior);
-	put16(w, c->pacr1);
-	put16(w, c->pacr2);
-	put16(w, c->pbdr);
-	put16(w, c->pbior);
-	put16(w, c->pbcr1);
-	put16(w, c->pbcr2);
-	put16(w, c->pedr);
-	put16(w, c->peior);
-	put16(w, c->pecr1);
-	put16(w, c->pecr2);
-	put_u16s(w, c->port_out, 3);
-
-	put16(w, c->bcr1);
-	put16(w, c->bcr2);
-	put16(w, c->wcr1);
-	put16(w, c->wcr2);
-	put16(w, c->dcr);
-	put16(w, c->rtcsr);
-	put16(w, c->rtcnt);
-	put16(w, c->rtcor);
-	put16(w, c->ccr);
-
-	put_bytes(w, c->ram, SH2_RAM_SIZE);
-	put64(w, c->cycles);
-}
-
-static void get_cpu(state_reader_t *r, sh2_t *c)
-{
-	get_u32s(r, c->r, 16);
-	c->sr = get32(r);
-	c->gbr = get32(r);
-	c->vbr = get32(r);
-	c->mach = get32(r);
-	c->macl = get32(r);
-	c->pr = get32(r);
-	c->pc = get32(r);
-	c->delay_target = get32(r);
-	c->delay = get_bool(r);
-	c->sleeping = get_bool(r);
-
-	get_u16s(r, c->ipr, 8);
-	c->icr = get16(r);
-	c->isr = get16(r);
-	get_u32s(r, c->pending, 8);
-	c->irq_line = get8(r);
-	c->nmi_line = get_bool(r);
-	c->nmi_pending = get_bool(r);
-
-	for (int n = 0; n < 2; n++)
-	{
-		sh2_sci_t *s = &c->sci[n];
-		s->smr = get8(r);
-		s->brr = get8(r);
-		s->scr = get8(r);
-		s->tdr = get8(r);
-		s->ssr = get8(r);
-		s->rdr = get8(r);
-		s->tx_shift = get8(r);
-		s->tx_timer = get32(r);
-		s->tx_busy = get_bool(r);
-		s->rx_byte = get8(r);
-		s->rx_pending = get_bool(r);
-		s->int_rxi = get_bool(r);
-		s->int_txi = get_bool(r);
-		s->int_tei = get_bool(r);
-		s->int_eri = get_bool(r);
-	}
-
-	for (int n = 0; n < 3; n++)
-	{
-		sh2_mtu_channel_t *m = &c->mtu[n];
-		m->tcr = get8(r);
-		m->tmdr = get8(r);
-		m->tiorh = get8(r);
-		m->tiorl = get8(r);
-		m->tier = get8(r);
-		m->tsr = get8(r);
-		m->tcnt = get16(r);
-		get_u16s(r, m->tgr, 4);
-		m->prescale = get32(r);
-		m->active = get_bool(r);
-	}
-	c->tsyr = get8(r);
-
-	c->wtcsr = get8(r);
-	c->wtcnt = get8(r);
-	c->rstcsr = get8(r);
-	c->wdt_prescale = get32(r);
-	c->wdt_int = get_bool(r);
-
-	get_u16s(r, c->addr_, 4);
-	c->adcsr = get8(r);
-	c->adcr = get8(r);
-	c->adc_timer = get32(r);
-	c->adc_int = get_bool(r);
-
-	for (int n = 0; n < 2; n++)
-	{
-		sh2_dma_channel_t *d = &c->dma[n];
-		d->sar = get32(r);
-		d->dar = get32(r);
-		d->chcr = get32(r);
-		d->dmatcr = get32(r);
-		d->count = get32(r);
-		d->timer = get32(r);
-		d->active = get_bool(r);
-		d->int_te = get_bool(r);
-	}
-	c->dmaor = get16(r);
-
-	c->padr = get16(r);
-	c->paior = get16(r);
-	c->pacr1 = get16(r);
-	c->pacr2 = get16(r);
-	c->pbdr = get16(r);
-	c->pbior = get16(r);
-	c->pbcr1 = get16(r);
-	c->pbcr2 = get16(r);
-	c->pedr = get16(r);
-	c->peior = get16(r);
-	c->pecr1 = get16(r);
-	c->pecr2 = get16(r);
-	get_u16s(r, c->port_out, 3);
-
-	c->bcr1 = get16(r);
-	c->bcr2 = get16(r);
-	c->wcr1 = get16(r);
-	c->wcr2 = get16(r);
-	c->dcr = get16(r);
-	c->rtcsr = get16(r);
-	c->rtcnt = get16(r);
-	c->rtcor = get16(r);
-	c->ccr = get16(r);
-
-	get_bytes(r, c->ram, SH2_RAM_SIZE);
-	c->cycles = get64(r);
-	c->irq_ready = false;
-	c->jit_pending = 0;
-	c->jit_limit = 0;
-	c->jit_deadline = 0;
-}
-
-static void put_flash(state_writer_t *w, const flash_t *f)
-{
-	put8(w, f->mode);
-	put8(w, f->pending);
-	put8(w, f->status);
-}
-
-static void get_flash(state_reader_t *r, flash_t *f)
-{
-	f->mode = get8(r);
-	f->pending = get8(r);
-	f->status = get8(r);
-	f->erased = false;
-}
 
 static void put_gate_array(state_writer_t *w, const sc8850_ga_t *g)
 {
@@ -509,20 +179,14 @@ static size_t write_state(const sc8850_t *b, uint8_t *out)
 {
 	state_writer_t w = { out, 0 };
 	put_bytes(&w, STATE_MAGIC, 8);
-	const uint32_t chunks = chunk_set(b);
-	uint32_t count = 0;
-	for (int which = 0; which < CHUNK_COUNT; which++)
-		count += (chunks >> which) & 1;
-	put32(&w, (uint32_t)b->model);
+	put32(&w, (uint32_t)SCEMU_MODEL_SC8850);
 	put32(&w, 0);
 	put64(&w, b->rom_id);
 	put64(&w, b->frame);
-	put32(&w, count);
+	put32(&w, CHUNK_COUNT);
 
 	for (int which = 0; which < CHUNK_COUNT; which++)
 	{
-		if (!((chunks >> which) & 1))
-			continue;
 		put32(&w, CHUNK_TAG[which]);
 		const size_t size_at = w.size;
 		put32(&w, 0);
@@ -530,7 +194,7 @@ static size_t write_state(const sc8850_t *b, uint8_t *out)
 		switch (which)
 		{
 		case CHUNK_BOARD:      put_board(&w, b); break;
-		case CHUNK_CPU:        put_cpu(&w, &b->cpu); break;
+		case CHUNK_CPU:        state_put_sh2(&w, &b->cpu); break;
 		case CHUNK_DRAM:       put_bytes(&w, b->dram, SC8850_DRAM_SIZE); break;
 		case CHUNK_XP1:        state_put_xp(&w, &b->master); break;
 		case CHUNK_XP1_ERAM:   put_i32s(&w, b->master.eram, XP_ERAM_SIZE); break;
@@ -541,15 +205,11 @@ static size_t write_state(const sc8850_t *b, uint8_t *out)
 		case CHUNK_GATE_ARRAY: put_gate_array(&w, &b->ga); break;
 		case CHUNK_GLCD:       put_glcd(&w, &b->glcd); break;
 		case CHUNK_MIDI:       state_put_midi(&w, &b->midi); break;
-		case CHUNK_UIPC:       put_uipc(&w, &b->uipc); break;
-		case CHUNK_PANEL:      put_panel(&w, &b->panel); break;
+		case CHUNK_UIPC:       state_put_uipc(&w, &b->uipc); break;
 		case CHUNK_FLASH:
-			put_flash(&w, &b->program_flash);
-			if (!b->one_chip)
-			{
-				put_flash(&w, &b->tone_flash);
-				put_bytes(&w, b->program_rom + SC8850_NVRAM_BASE, SC8850_NVRAM_SIZE);
-			}
+			state_put_flash(&w, &b->program_flash);
+			state_put_flash(&w, &b->tone_flash);
+			put_bytes(&w, b->program_rom + SC8850_NVRAM_BASE, SC8850_NVRAM_SIZE);
 			break;
 		default: break;
 		}
@@ -583,7 +243,7 @@ static bool read_chunk(int which, state_reader_t *r, sc8850_t *b, uint8_t *flash
 	switch (which)
 	{
 	case CHUNK_BOARD:      get_board(r, b); break;
-	case CHUNK_CPU:        get_cpu(r, &b->cpu); break;
+	case CHUNK_CPU:        state_get_sh2(r, &b->cpu); break;
 	case CHUNK_DRAM:       get_bytes(r, b->dram, SC8850_DRAM_SIZE); break;
 	case CHUNK_XP1:        state_get_xp(r, &b->master); break;
 	case CHUNK_XP1_ERAM:   get_i32s(r, b->master.eram, XP_ERAM_SIZE); break;
@@ -594,15 +254,11 @@ static bool read_chunk(int which, state_reader_t *r, sc8850_t *b, uint8_t *flash
 	case CHUNK_GATE_ARRAY: get_gate_array(r, &b->ga); break;
 	case CHUNK_GLCD:       get_glcd(r, &b->glcd); break;
 	case CHUNK_MIDI:       state_get_midi(r, &b->midi); break;
-	case CHUNK_UIPC:       get_uipc(r, &b->uipc); break;
-	case CHUNK_PANEL:      get_panel(r, &b->panel); break;
+	case CHUNK_UIPC:       state_get_uipc(r, &b->uipc); break;
 	case CHUNK_FLASH:
-		get_flash(r, &b->program_flash);
-		if (!b->one_chip)
-		{
-			get_flash(r, &b->tone_flash);
-			get_bytes(r, flash_blocks, SC8850_NVRAM_SIZE);
-		}
+		state_get_flash(r, &b->program_flash);
+		state_get_flash(r, &b->tone_flash);
+		get_bytes(r, flash_blocks, SC8850_NVRAM_SIZE);
 		break;
 	default: return false;
 	}
@@ -613,7 +269,7 @@ bool sc8850_state_load(sc8850_t *b, const void *buffer, size_t size)
 {
 	state_reader_t r = { buffer, size, 0, true };
 	state_header_t h;
-	if (!get_header(&r, &h) || h.model != (uint32_t)b->model || h.rom_id != b->rom_id)
+	if (!get_header(&r, &h) || h.model != (uint32_t)SCEMU_MODEL_SC8850 || h.rom_id != b->rom_id)
 		return false;
 
 	sc8850_t *t = malloc(sizeof(*t));
@@ -651,7 +307,7 @@ bool sc8850_state_load(sc8850_t *b, const void *buffer, size_t size)
 		}
 		r.at += len;
 	}
-	ok = ok && seen == chunk_set(b);
+	ok = ok && seen == (1u << CHUNK_COUNT) - 1;
 
 	if (ok)
 	{
@@ -660,20 +316,17 @@ bool sc8850_state_load(sc8850_t *b, const void *buffer, size_t size)
 		t->lsp.eram = b->lsp.eram;
 		memcpy(b, t, sizeof(*b));
 		memcpy(b->master.eram, master_eram, XP_ERAM_SIZE * sizeof(int32_t));
+		memcpy(b->slave.eram, slave_eram, XP_ERAM_SIZE * sizeof(int32_t));
 		memcpy(b->lsp.eram, lsp_eram, LSP_ERAM_SIZE * sizeof(int32_t));
 		b->master.jit = &b->jit;
+		b->slave.jit = &b->jit;
 		b->lsp.jit = &b->jit;
-		if (!b->one_chip)
-		{
-			memcpy(b->slave.eram, slave_eram, XP_ERAM_SIZE * sizeof(int32_t));
-			b->slave.jit = &b->jit;
-			memcpy(b->program_rom + SC8850_NVRAM_BASE, flash_blocks, SC8850_NVRAM_SIZE);
-		}
+		memcpy(b->program_rom + SC8850_NVRAM_BASE, flash_blocks, SC8850_NVRAM_SIZE);
 		for (int n = 0; n < b->cpu.region_count; n++)
 		{
 			if (b->cpu.regions[n].data == b->program_flash.data)
 				b->cpu.regions[n].bypass = !flash_in_array(&b->program_flash);
-			if (!b->one_chip && b->cpu.regions[n].data == b->tone_flash.data)
+			if (b->cpu.regions[n].data == b->tone_flash.data)
 				b->cpu.regions[n].bypass = !flash_in_array(&b->tone_flash);
 		}
 		sh2_jit_flush(&b->cpu);

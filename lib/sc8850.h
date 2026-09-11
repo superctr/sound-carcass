@@ -10,16 +10,13 @@
 #include "lsp.h"
 #include "glcd.h"
 #include "flash.h"
+#include "uipc.h"
 #include "midi_queue.h"
 #include "jit.h"
 
-/* The SC-8850 board, and the SC-8820 as a variant of it.  One frame of the
- * XPs' sample clock is the unit of time: the SH-2 runs its 882 cycles, the
- * gate array ticks, the master XP produces its sample and then the slave,
- * which clocks the LSP once on its port C.  The SC-8820 has one XP, which
- * clocks the LSP on its port B, no gate array and no graphic display; its
- * panel hangs off the SH-2's own port pins and its USB controller's mailboxes
- * raise IRQ1 and IRQ2. */
+/* The SC-8850 board.  One frame of the XPs' sample clock is the unit of time:
+ * the SH-2 runs its 882 cycles, the gate array ticks, the master XP produces
+ * its sample and then the slave, which clocks the LSP once on its port C. */
 
 #define SC8850_SAMPLE_RATE 32000u
 #define SC8850_SH2_CLOCK 28224000u
@@ -28,7 +25,6 @@
 #define SC8850_BOOT_ROM_SIZE 0x10000
 #define SC8850_PROGRAM_ROM_SIZE 0x100000
 #define SC8850_TONE_ROM_SIZE 0x200000
-#define SC8820_PROGRAM_ROM_SIZE 0x200000
 #define SC8850_DRAM_SIZE 0x80000
 #define SC8850_MIDI_PORTS 4
 #define SC8850_NVRAM_BASE 0xe0000u
@@ -36,8 +32,6 @@
 #define SC8850_PROGRAM_FLASH_DEVICE 0x0050
 #define SC8850_TONE_FLASH_DEVICE 0x00d0
 #define SC8850_IDLE_FRAMES 6400u
-#define SC8850_UIPC_RX 1024
-#define SC8820_PANEL_ROWS 3
 
 /* TC160G22AF gate array: sixteen interrupt sources on IRQ2 and PA8, the switch matrix,
  * the value encoder, the LED drives. */
@@ -59,59 +53,10 @@ typedef struct sc8850_ga
 	uint32_t leds;
 } sc8850_ga_t;
 
-/* One port group's wire bytes on their way into four byte packets. */
-typedef struct sc8850_usb_in
-{
-	uint8_t msg[3];
-	uint8_t count;
-	uint8_t need;
-	uint8_t cin;
-	uint8_t status;
-	bool sysex;
-} sc8850_usb_in_t;
-
-/* The M37640 USB controller as the two mailboxes present it: the power-on
- * handshake, the tagged byte stream in and the four byte packets out. */
-typedef struct sc8850_uipc
-{
-	sc8850_usb_in_t in[SC8850_MIDI_PORTS];
-	uint16_t rx[SC8850_UIPC_RX];
-	uint16_t rx_head;
-	uint16_t rx_count;
-	uint8_t tx[4];
-	uint8_t tx_count;
-	uint8_t boot;
-	bool running;
-	bool host;
-	bool online;
-	uint32_t announce;
-	uint32_t poll;
-} sc8850_uipc_t;
-
-/* The SC-8820's panel: an LED matrix of three rows on PE15, PE14 and PA15
- * (a row is on while its pin is low) by four columns on PE1, PE0, PE3, PE2,
- * the POWER lamp on PE4 (lit while low), the INST MAP key on PE6 and the
- * volume knob's push on PE7 (low while pressed).  A row's columns are
- * sampled at the end of a frame in which the ports were not written, so the
- * picture is what the eye sees of the scan and not the moment between two
- * rows. */
-typedef struct sc8820_panel
-{
-	uint16_t pe;
-	uint16_t pa;
-	bool written;
-	uint8_t column[SC8820_PANEL_ROWS];
-	bool map_key;
-	bool preview_key;
-	uint32_t leds;
-} sc8820_panel_t;
-
 typedef struct sc8850
 {
 	jit_alloc_t jit;
 	uint64_t rom_id;
-	scemu_model_t model;
-	bool one_chip;
 
 	uint8_t *boot_rom;
 	uint8_t *program_rom;
@@ -129,8 +74,7 @@ typedef struct sc8850
 	flash_t program_flash;
 	flash_t tone_flash;
 	sc8850_ga_t ga;
-	sc8850_uipc_t uipc;
-	sc8820_panel_t panel;
+	uipc_t uipc;
 
 	bool mute;
 	scemu_computer_switch_t computer_switch;
