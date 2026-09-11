@@ -35,7 +35,7 @@ typedef struct app
 	panel_t *panel;
 	int size, scale;           /* the window size setting (4 or 8) and the screen's scale factor */
 	uint32_t *frame;
-	GtkWidget *window, *area, *playlist_window, *list;
+	GtkWidget *window, *area, *playlist_window, *list, *list_scroll;
 	GtkWidget *settings_window, *notebook, *audio_label, *audio_drop, *rate_drop, *block_drop, *volume_scale;
 	GtkWidget *system_label, *model_check[MACHINE_SYSTEMS], *computer_check[COMPUTER_POSITIONS], *cache_label;
 	GtkWidget *size_drop, *swap_check, *skip_boot_check;
@@ -510,7 +510,9 @@ static void song_menu(app_t *app)
 	menu_append(menu, "Remove file from playlist", "song.remove", -1);
 	app->list_popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
 	g_object_unref(menu);
-	gtk_widget_set_parent(app->list_popover, app->list);
+	/* on the scroll, not on the list: a popover among the rows is a child the
+	   list box's own row walks trip over, gtk_list_box_remove_all() forever */
+	gtk_widget_set_parent(app->list_popover, app->list_scroll);
 	gtk_popover_set_has_arrow(GTK_POPOVER(app->list_popover), FALSE);
 
 	GtkGesture *click = gtk_gesture_click_new();
@@ -527,7 +529,10 @@ static void on_list_pressed(GtkGestureClick *gesture, int presses, double x, dou
 		return;
 	app->menu_index = gtk_list_box_row_get_index(row);
 	gtk_list_box_select_row(GTK_LIST_BOX(app->list), row);
-	GdkRectangle at = { (int)x, (int)y, 1, 1 };
+	graphene_point_t point;
+	if (!gtk_widget_compute_point(app->list, app->list_scroll, &GRAPHENE_POINT_INIT((float)x, (float)y), &point))
+		return;
+	GdkRectangle at = { (int)point.x, (int)point.y, 1, 1 };
 	gtk_popover_set_pointing_to(GTK_POPOVER(app->list_popover), &at);
 	gtk_popover_popup(GTK_POPOVER(app->list_popover));
 	gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
@@ -872,10 +877,11 @@ static void playlist_show(app_t *app)
 		for (guint n = 0; n < app->songs->len; n++)
 			gtk_list_box_append(GTK_LIST_BOX(app->list), list_row(app, g_ptr_array_index(app->songs, n)));
 		list_select(app, app->current);
-		song_menu(app);
 		GtkWidget *scroll = gtk_scrolled_window_new();
 		gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), app->list);
 		gtk_widget_set_vexpand(scroll, TRUE);
+		app->list_scroll = scroll;
+		song_menu(app);
 		gtk_box_append(GTK_BOX(box), scroll);
 		gtk_box_append(GTK_BOX(box), gtk_separator_new(GTK_ORIENTATION_HORIZONTAL));
 		gtk_box_append(GTK_BOX(box), midi_section(app));
