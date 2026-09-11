@@ -335,29 +335,46 @@ void controls_macro_done(controls_t *c)
 	c->macro_pressed = 0;
 }
 
+static void macro_release(controls_t *c, const combo_t *combo, unsigned t)
+{
+	if (combo->press != SCEMU_BUTTON_COUNT)
+		macro_key(c, combo->press, false, t);
+	for (int n = combo->hold_count - 1; n >= 0; n--)
+		macro_key(c, combo->hold[n], false, t);
+}
+
 /* the held keys go down in order, the pressed one follows (at once when the
  * manual says "simultaneously", after a moment when it says "while
- * holding"), and everything comes up in reverse */
+ * holding"), and everything comes up in reverse; a pair pressed twice goes
+ * down again as soon as it has come up */
 unsigned controls_play_combo(controls_t *c, const combo_t *combo)
 {
 	if (c->macro_pressed || c->release_after_boot)
 		return 0;
 	int first = combo->timing == COMBO_HOLD_THEN_PAIR && !combo->power_on ? combo->hold_count - 1
 	                                                                     : combo->hold_count;
+	bool together = combo->timing == COMBO_TOGETHER || combo->timing == COMBO_TOGETHER_TWICE;
 	for (int n = 0; n < first; n++)
 		macro_key(c, combo->hold[n], true, 0);
 	if (combo->power_on)
 		controls_power_cycle(c);   /* the held keys go through a power cycle; the rest follows the boot */
-	unsigned t = combo->timing != COMBO_TOGETHER || combo->power_on ? MACRO_HOLD_MS : 0;
+	unsigned t = !together || combo->power_on ? MACRO_HOLD_MS : 0;
 	for (int n = first; n < combo->hold_count; n++)
 		macro_key(c, combo->hold[n], true, t);
 	if (combo->press != SCEMU_BUTTON_COUNT)
 		macro_key(c, combo->press, true, t);
 	t += MACRO_PRESS_MS;
-	if (combo->press != SCEMU_BUTTON_COUNT)
-		macro_key(c, combo->press, false, t);
-	for (int n = combo->hold_count - 1; n >= 0; n--)
-		macro_key(c, combo->hold[n], false, t);
+	macro_release(c, combo, t);
+	if (combo->timing == COMBO_TOGETHER_TWICE && !combo->power_on)
+	{
+		t += MACRO_PRESS_MS;
+		for (int n = 0; n < combo->hold_count; n++)
+			macro_key(c, combo->hold[n], true, t);
+		if (combo->press != SCEMU_BUTTON_COUNT)
+			macro_key(c, combo->press, true, t);
+		t += MACRO_PRESS_MS;
+		macro_release(c, combo, t);
+	}
 	c->macro_ms = t + 50;
 	if (combo->power_on)
 	{

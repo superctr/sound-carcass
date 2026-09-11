@@ -20,12 +20,15 @@
 /* How the firmware wants the keys: the manuals' [A]*[B] means both keys are
  * pressed at once and must reach it in one scan, their [A]+[B] means [A] is
  * held, and seen held, before [B] goes down; [A]+[B]*[C] holds [A] first and
- * then presses the other two at once. */
+ * then presses the other two at once; the SC-55's and the SC-55mkII's "press
+ * [A] and [B] simultaneously two times quickly" is [A]*[B] twice, the second
+ * press within about 0.4 s of the first. */
 typedef enum combo_timing
 {
 	COMBO_TOGETHER,
 	COMBO_HOLD_THEN_PRESS,
-	COMBO_HOLD_THEN_PAIR
+	COMBO_HOLD_THEN_PAIR,
+	COMBO_TOGETHER_TWICE
 } combo_timing_t;
 
 typedef struct combo

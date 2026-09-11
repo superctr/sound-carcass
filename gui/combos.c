@@ -15,98 +15,6 @@
 #define NONE SCEMU_BUTTON_COUNT
 #define P(x) PANEL_MODEL_##x
 
-/* The SC-55mkII's owner's manual rows, once for each panel that takes them: the SC-55mkII's own,
-   and the SC-55's until its own manual is in (TODO: replace the SC-55's with its own manual's rows). */
-#define SC55MK2_MANUAL(panel, manual) \
-	{ "Part Monitor", \
-	  "Listens to the selected Part alone.", \
-	  "Part display", panel, \
-	  { B(ALL) }, 1, B(MUTE), false, manual "32", COMBO_TOGETHER }, \
-	{ "Settings for each part", \
-	  "Opens and closes the per-Part parameter menu, from Part Mode to Portamento Time; [ALL] and [MUTE] step through it.", \
-	  "Part display (ALL dark)", panel, \
-	  { B(PART_LEFT) }, 1, B(PART_RIGHT), false, manual "51", COMBO_TOGETHER }, \
-	{ "Settings for all parts", \
-	  "Opens and closes the all-Parts menu, from Master Tune to Use Universal Realtime Ex.", \
-	  "All display (ALL lit)", panel, \
-	  { B(PART_LEFT) }, 1, B(PART_RIGHT), false, manual "33", COMBO_TOGETHER }, \
-	{ "Indicator on / Indicator off", \
-	  "Inside the menu, switches between the all-Parts parameters and the selected Part's.", \
-	  "parameter menu", panel, \
-	  { B(ALL) }, 1, B(PART_LEFT), false, manual "111", COMBO_TOGETHER }, \
-	{ "Selection of Variation", \
-	  "Enters and leaves Variation select, where the Instrument buttons pick the Variation.", \
-	  "Part display", panel, \
-	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, manual "45", COMBO_TOGETHER }, \
-	{ "USER ON, USER OFF", \
-	  "Turns the User settings on and off; with them off the unit plays the preset sounds.", \
-	  NULL, panel, \
-	  { B(LEVEL_RIGHT) }, 1, B(REVERB_RIGHT), false, manual "28", COMBO_TOGETHER }, \
-	{ "Clear the setting", \
-	  "Asks to clear the User settings; [ALL] executes and [MUTE] cancels.", \
-	  NULL, panel, \
-	  { B(PAN_LEFT) }, 1, B(CHORUS_LEFT), false, manual "29", COMBO_TOGETHER }, \
-	{ "Minus-one Play", \
-	  "Mutes the Part on the selected MIDI channel so it can be played live.", \
-	  "Part display", panel, \
-	  { B(LEVEL_LEFT) }, 1, B(REVERB_LEFT), false, manual "34", COMBO_TOGETHER }, \
-	{ "Changing the Patch name", \
-	  "Enters and leaves Patch-name editing: Part moves the cursor, Instrument picks the character.", \
-	  "All display (ALL lit)", panel, \
-	  { B(PAN_RIGHT) }, 1, B(CHORUS_RIGHT), false, manual "40", COMBO_TOGETHER }, \
-	{ "Store", \
-	  "Asks to store the whole state of the unit into the User area; [ALL] executes.", \
-	  "All display (ALL lit)", panel, \
-	  { B(PART_LEFT) }, 1, B(INSTRUMENT_LEFT), false, manual "41", COMBO_TOGETHER }, \
-	{ "Call", \
-	  "Asks to load the stored state back out of the User area; [ALL] executes.", \
-	  "All display (ALL lit)", panel, \
-	  { B(PART_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, manual "41", COMBO_TOGETHER }, \
-	{ "GS Setup Send", \
-	  "Transmits the basic settings of every Part as GS exclusive data; [ALL] executes.", \
-	  "All display (ALL lit)", panel, \
-	  { B(PART_RIGHT) }, 1, B(INSTRUMENT_LEFT), false, manual "59", COMBO_TOGETHER }, \
-	{ "GM Setup Send", \
-	  "Transmits the basic settings of every Part as GM messages; [ALL] executes.", \
-	  "All display (ALL lit)", panel, \
-	  { B(KEY_SHIFT_RIGHT) }, 1, B(MIDI_CH_LEFT), false, manual "59", COMBO_TOGETHER }, \
-	{ "DUMP All", \
-	  "Asks to transmit every setting of the unit as System Exclusive data; [ALL] executes.", \
-	  "All display (ALL lit)", panel, \
-	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, manual "60", COMBO_TOGETHER }, \
-	{ "DUMP ALL+", \
-	  "Inside the all-Parts menu, asks to transmit every setting and the Parts not muted.", \
-	  "all-Parts parameter menu", panel, \
-	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, manual "61", COMBO_TOGETHER }, \
-	{ "DUMP PART", \
-	  "Inside the Part menu, asks to transmit the settings of the selected Part.", \
-	  "Part parameter menu", panel, \
-	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, manual "62", COMBO_TOGETHER }, \
-	{ "Set to ROM play status", \
-	  "Held while switching on, puts the unit in ROM play: Part selects the song, [ALL] starts it and [MUTE] stops it.", \
-	  "power-on", panel, \
-	  { B(PART_LEFT), B(PART_RIGHT) }, 2, NONE, true, manual "17", COMBO_TOGETHER }, \
-	{ "Cancel ROM play status", \
-	  "Leaves ROM play and returns to the Part display.", \
-	  "ROM play", panel, \
-	  { B(PART_LEFT) }, 1, B(PART_RIGHT), false, manual "17", COMBO_TOGETHER }, \
-	{ "Sound arrangement of MT-32", \
-	  "Held while switching on, asks to set the unit up to play MT-32 song data; [ALL] executes.", \
-	  "power-on", panel, \
-	  { B(INSTRUMENT_LEFT) }, 1, NONE, true, manual "38", COMBO_TOGETHER }, \
-	{ "Initialization for GM system", \
-	  "Held while switching on, asks to set the unit to the basic GM state; [ALL] executes.", \
-	  "power-on", panel, \
-	  { B(PART_LEFT) }, 1, NONE, true, manual "36", COMBO_TOGETHER }, \
-	{ "Initialization for GS format", \
-	  "Held while switching on, asks to set the unit to the basic GS state; [ALL] executes.", \
-	  "power-on", panel, \
-	  { B(INSTRUMENT_RIGHT) }, 1, NONE, true, manual "36", COMBO_TOGETHER }, \
-	{ "Returning to factory presets", \
-	  "Held while switching on, asks \"Init All, Sure?\" to restore every setting; [ALL] executes.", \
-	  "power-on", panel, \
-	  { B(INSTRUMENT_LEFT), B(INSTRUMENT_RIGHT) }, 2, NONE, true, manual "37", COMBO_TOGETHER },
-
 const combo_t combos[] = {
 	/* ================================================================ SC-88Pro */
 	/* Chapter 1 -- Try out the unit */
@@ -857,8 +765,136 @@ const combo_t combos[] = {
 	 * Owner's manual "SC-55mkII_e"; its "TABLE OF OPERATIONS" (p.108-109) and "OPERATION BLOCK
 	 * DIAGRAM" (p.110-111) are the spine, and page numbers below are the body pages they point
 	 * at.  The panel has neither map keys nor a lower face, so what the SC-88 does with
-	 * [SELECT] this machine does with a key held through the power-on. */
-	SC55MK2_MANUAL(P(SC55MK2), "manual p.")
+	 * [SELECT] this machine does with a key held through the power-on.  The bar displays, All
+	 * Monitor and Micro Edit are in the body and the appendix only, not in the table. */
+	{ "the current setting will be shown on the Bar display",
+	  "Draws each Part's Level as a bar, or the ALL Level across the bars with ALL lit; the same press returns.",
+	  "Part or All display", P(SC55MK2),
+	  { B(LEVEL_LEFT) }, 1, B(LEVEL_RIGHT), false, "manual p.19", COMBO_TOGETHER },
+	{ "the current setting will be shown on the Bar display",
+	  "Draws each Part's Pan, or the ALL Pan across the bars with ALL lit; the same press returns.",
+	  "Part or All display", P(SC55MK2),
+	  { B(PAN_LEFT) }, 1, B(PAN_RIGHT), false, "manual p.19", COMBO_TOGETHER },
+	{ "the current setting will be shown on the Bar display",
+	  "Draws each Part's Reverb level, or the ALL Reverb level across the bars with ALL lit; the same press returns.",
+	  "Part or All display", P(SC55MK2),
+	  { B(REVERB_LEFT) }, 1, B(REVERB_RIGHT), false, "manual p.20", COMBO_TOGETHER },
+	{ "the current setting will be shown on the Bar display",
+	  "Draws each Part's Chorus level, or the ALL Chorus level across the bars with ALL lit; the same press returns.",
+	  "Part or All display", P(SC55MK2),
+	  { B(CHORUS_LEFT) }, 1, B(CHORUS_RIGHT), false, "manual p.20", COMBO_TOGETHER },
+	{ "the current setting will be shown on the Bar display",
+	  "Draws each Part's Key Shift, or the ALL Key Shift across the bars with ALL lit; the same press returns.",
+	  "Part or All display", P(SC55MK2),
+	  { B(KEY_SHIFT_LEFT) }, 1, B(KEY_SHIFT_RIGHT), false, "manual p.21", COMBO_TOGETHER },
+	{ "the MIDI reception channel setting of each part will be shown on the Bar Display",
+	  "Draws each Part's MIDI reception channel, or the Device ID with ALL lit; the same press returns.",
+	  "Part or All display", P(SC55MK2),
+	  { B(MIDI_CH_LEFT) }, 1, B(MIDI_CH_RIGHT), false, "manual p.63", COMBO_TOGETHER },
+	{ "Part Monitor",
+	  "Listens to the selected Part alone.",
+	  "Part display", P(SC55MK2),
+	  { B(ALL) }, 1, B(MUTE), false, "manual p.32", COMBO_TOGETHER },
+	{ "All Monitor",
+	  "Listens to every Part, those muted by Part Mute too; the MUTE indicator blinks until the same press.",
+	  "All display (ALL lit)", P(SC55MK2),
+	  { B(ALL) }, 1, B(MUTE), false, "manual p.32", COMBO_TOGETHER },
+	{ "Settings for each part",
+	  "Opens and closes the per-Part parameter menu, from Part Mode to Portamento Time; [ALL] and [MUTE] step through it.",
+	  "Part display (ALL dark)", P(SC55MK2),
+	  { B(PART_LEFT) }, 1, B(PART_RIGHT), false, "manual p.51", COMBO_TOGETHER },
+	{ "Settings for all parts",
+	  "Opens and closes the all-Parts menu, from Master Tune to Use Universal Realtime Ex.",
+	  "All display (ALL lit)", P(SC55MK2),
+	  { B(PART_LEFT) }, 1, B(PART_RIGHT), false, "manual p.33", COMBO_TOGETHER },
+	{ "Indicator on / Indicator off",
+	  "Inside the menu, switches between the all-Parts parameters and the selected Part's.",
+	  "parameter menu", P(SC55MK2),
+	  { B(ALL) }, 1, B(PART_LEFT), false, "manual p.111", COMBO_TOGETHER },
+	{ "Selection of Variation",
+	  "Enters and leaves Variation select, where the Instrument buttons pick the Variation.",
+	  "Part display", P(SC55MK2),
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, "manual p.45", COMBO_TOGETHER },
+	{ "USER ON, USER OFF",
+	  "Turns the User settings on and off; with them off the unit plays the preset sounds.",
+	  NULL, P(SC55MK2),
+	  { B(LEVEL_RIGHT) }, 1, B(REVERB_RIGHT), false, "manual p.28", COMBO_TOGETHER },
+	{ "Clear the setting",
+	  "Asks to clear the User settings; [ALL] executes and [MUTE] cancels.",
+	  NULL, P(SC55MK2),
+	  { B(PAN_LEFT) }, 1, B(CHORUS_LEFT), false, "manual p.29", COMBO_TOGETHER },
+	{ "Minus-one Play",
+	  "Mutes the Part on the selected MIDI channel so it can be played live.",
+	  "Part display", P(SC55MK2),
+	  { B(LEVEL_LEFT) }, 1, B(REVERB_LEFT), false, "manual p.34", COMBO_TOGETHER },
+	{ "Changing the Patch name",
+	  "Enters and leaves Patch-name editing: Part moves the cursor, Instrument picks the character.",
+	  "All display (ALL lit)", P(SC55MK2),
+	  { B(PAN_RIGHT) }, 1, B(CHORUS_RIGHT), false, "manual p.40", COMBO_TOGETHER },
+	{ "Store",
+	  "Asks to store the whole state of the unit into the User area; [ALL] executes.",
+	  "All display (ALL lit)", P(SC55MK2),
+	  { B(PART_LEFT) }, 1, B(INSTRUMENT_LEFT), false, "manual p.41", COMBO_TOGETHER },
+	{ "Call",
+	  "Asks to load the stored state back out of the User area; [ALL] executes.",
+	  "All display (ALL lit)", P(SC55MK2),
+	  { B(PART_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, "manual p.41", COMBO_TOGETHER },
+	{ "GS Setup Send",
+	  "Transmits the basic settings of every Part as GS exclusive data; [ALL] executes.",
+	  "All display (ALL lit)", P(SC55MK2),
+	  { B(PART_RIGHT) }, 1, B(INSTRUMENT_LEFT), false, "manual p.59", COMBO_TOGETHER },
+	{ "GM Setup Send",
+	  "Transmits the basic settings of every Part as GM messages; [ALL] executes.",
+	  "All display (ALL lit)", P(SC55MK2),
+	  { B(KEY_SHIFT_RIGHT) }, 1, B(MIDI_CH_LEFT), false, "manual p.59", COMBO_TOGETHER },
+	{ "DUMP All",
+	  "Asks to transmit every setting of the unit as System Exclusive data; [ALL] executes.",
+	  "All display (ALL lit)", P(SC55MK2),
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, "manual p.60", COMBO_TOGETHER },
+	{ "DUMP ALL+",
+	  "Inside the all-Parts menu, asks to transmit every setting and the Parts not muted.",
+	  "all-Parts parameter menu", P(SC55MK2),
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, "manual p.61", COMBO_TOGETHER },
+	{ "DUMP PART",
+	  "Inside the Part menu, asks to transmit the settings of the selected Part.",
+	  "Part parameter menu", P(SC55MK2),
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, "manual p.62", COMBO_TOGETHER },
+	{ "Micro Edit",
+	  "Inside a menu, shows the parameter as its exclusive address and hex value; [ALL] and [MUTE] step the address.",
+	  "parameter menu", P(SC55MK2),
+	  { B(ALL) }, 1, B(MUTE), false, "manual p.102", COMBO_TOGETHER_TWICE },
+	{ "transmit the displayed parameter values from MIDI OUT",
+	  "Sends the address and value on the display as a Data Set exclusive message.",
+	  "Micro Edit", P(SC55MK2),
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, "manual p.102", COMBO_TOGETHER },
+	{ "Micro Edit",
+	  "Leaves Micro Edit for the parameter menu, which the PART pair then closes.",
+	  "Micro Edit", P(SC55MK2),
+	  { B(ALL) }, 1, B(MUTE), false, "manual p.102", COMBO_TOGETHER },
+	{ "Set to ROM play status",
+	  "Held while switching on, puts the unit in ROM play: Part selects the song, [ALL] starts it and [MUTE] stops it.",
+	  "power-on", P(SC55MK2),
+	  { B(PART_LEFT), B(PART_RIGHT) }, 2, NONE, true, "manual p.16", COMBO_TOGETHER },
+	{ "Cancel ROM play status",
+	  "Leaves ROM play and returns to the Part display.",
+	  "ROM play", P(SC55MK2),
+	  { B(PART_LEFT) }, 1, B(PART_RIGHT), false, "manual p.16", COMBO_TOGETHER },
+	{ "Sound arrangement of MT-32",
+	  "Held while switching on, asks to set the unit up to play MT-32 song data; [ALL] executes.",
+	  "power-on", P(SC55MK2),
+	  { B(INSTRUMENT_LEFT) }, 1, NONE, true, "manual p.38", COMBO_TOGETHER },
+	{ "Initialization for GM system",
+	  "Held while switching on, asks \"Init GM, Sure?\" to set the unit to the basic GM state; [ALL] executes.",
+	  "power-on", P(SC55MK2),
+	  { B(PART_RIGHT) }, 1, NONE, true, "manual p.36", COMBO_TOGETHER },
+	{ "Initialization for GS format",
+	  "Held while switching on, asks to set the unit to the basic GS state; [ALL] executes.",
+	  "power-on", P(SC55MK2),
+	  { B(INSTRUMENT_RIGHT) }, 1, NONE, true, "manual p.36", COMBO_TOGETHER },
+	{ "Returning to factory presets",
+	  "Held while switching on, asks \"Init All, Sure?\" to restore every setting; [ALL] executes.",
+	  "power-on", P(SC55MK2),
+	  { B(INSTRUMENT_LEFT), B(INSTRUMENT_RIGHT) }, 2, NONE, true, "manual p.37", COMBO_TOGETHER },
 
 	/* Service notes -- "TEST MODE / Switch operations" and "IDENTIFYING VERSION NUMBER"
 	 * (Roland SC-55mkII Service Notes, p.4 and p.8).  Both are entered from standby: the
@@ -925,12 +961,102 @@ const combo_t combos[] = {
 #endif
 
 	/* ================================================================ SC-55
-	 * Until its own owner's manual is in, the SC-55 takes the SC-55mkII's owner's-manual rows,
-	 * cited as such: the matrix is the SC-55mkII's, key for key, and the firmware its ancestor.
-	 * Its service notes (Roland SC-55 Service Notes, Apr. 1991) add "TEST MODE / Switch
-	 * operations" (p.4) and "IDENTIFYING VERSION NUMBER" (p.8); their "FACTORY SETUP" and
-	 * "BULK DUMPING" are two of the mkII manual's rows, key for key. */
-	SC55MK2_MANUAL(P(SC55), "SC-55mkII manual p.")
+	 * Owner's manual (1991, MIDI implementation version 1.00), pages numbered straight through;
+	 * its "TABLE OF OPERATIONS" (p.63-65) is the spine.  The panel is the SC-55mkII's key for
+	 * key, but the manual has no User settings, no Setup Send and no GM initialization, its
+	 * all-Parts menu carries the System functions, and ROM play asks "Init GS, Sure?" first. */
+	{ "Set to ROM play status",
+	  "Held while switching on, asks \"Init GS, Sure?\"; [ALL] then enters ROM play, where Part selects the song, [ALL] starts it and [MUTE] stops it.",
+	  "power-on", P(SC55),
+	  { B(PART_LEFT), B(PART_RIGHT) }, 2, NONE, true, "manual p.13", COMBO_TOGETHER },
+	{ "Cancel ROM play status",
+	  "Leaves ROM play and returns to the Part display.",
+	  "ROM play", P(SC55),
+	  { B(PART_LEFT) }, 1, B(PART_RIGHT), false, "manual p.65", COMBO_TOGETHER },
+	{ "the current setting will be shown on the Bar display",
+	  "Draws each Part's Level as a bar, or the ALL Level across the bars with ALL lit; the same press returns.",
+	  "Part or All display", P(SC55),
+	  { B(LEVEL_LEFT) }, 1, B(LEVEL_RIGHT), false, "manual p.15", COMBO_TOGETHER },
+	{ "the current setting will be shown on the Bar display",
+	  "Draws each Part's Pan, or the ALL Pan across the bars with ALL lit; the same press returns.",
+	  "Part or All display", P(SC55),
+	  { B(PAN_LEFT) }, 1, B(PAN_RIGHT), false, "manual p.15", COMBO_TOGETHER },
+	{ "the current setting will be shown on the Bar display",
+	  "Draws each Part's Reverb level, or the ALL Reverb level across the bars with ALL lit; the same press returns.",
+	  "Part or All display", P(SC55),
+	  { B(REVERB_LEFT) }, 1, B(REVERB_RIGHT), false, "manual p.16", COMBO_TOGETHER },
+	{ "the current setting will be shown on the Bar display",
+	  "Draws each Part's Chorus level, or the ALL Chorus level across the bars with ALL lit; the same press returns.",
+	  "Part or All display", P(SC55),
+	  { B(CHORUS_LEFT) }, 1, B(CHORUS_RIGHT), false, "manual p.16", COMBO_TOGETHER },
+	{ "the current setting will be shown on the Bar display",
+	  "Draws each Part's Key Shift, or the ALL Key Shift across the bars with ALL lit; the same press returns.",
+	  "Part or All display", P(SC55),
+	  { B(KEY_SHIFT_LEFT) }, 1, B(KEY_SHIFT_RIGHT), false, "manual p.17", COMBO_TOGETHER },
+	{ "the MIDI receive channel setting of each part will be shown on the Bar Display",
+	  "Draws each Part's MIDI receive channel, or the Device ID with ALL lit; the same press returns.",
+	  "Part or All display", P(SC55),
+	  { B(MIDI_CH_LEFT) }, 1, B(MIDI_CH_RIGHT), false, "manual p.35", COMBO_TOGETHER },
+	{ "Part Monitor",
+	  "Listens to the selected Part alone; the MUTE indicator blinks until the same press.",
+	  "Part display", P(SC55),
+	  { B(ALL) }, 1, B(MUTE), false, "manual p.26", COMBO_TOGETHER },
+	{ "All Monitor",
+	  "Listens to every Part, those muted by Part Mute too; the MUTE indicator blinks until the same press.",
+	  "All display (ALL lit)", P(SC55),
+	  { B(ALL) }, 1, B(MUTE), false, "manual p.26", COMBO_TOGETHER },
+	{ "All parts and System function settings",
+	  "Opens and closes the all-Parts menu, from Master Tune to Rx Remote; [ALL] and [MUTE] step through it.",
+	  "All display (ALL lit)", P(SC55),
+	  { B(PART_LEFT) }, 1, B(PART_RIGHT), false, "manual p.27", COMBO_TOGETHER },
+	{ "Settings for each part",
+	  "Opens and closes the per-Part parameter menu, from Part Mode to Release Time; [ALL] and [MUTE] step through it.",
+	  "Part display (ALL dark)", P(SC55),
+	  { B(PART_LEFT) }, 1, B(PART_RIGHT), false, "manual p.39", COMBO_TOGETHER },
+	{ "Sound arrangement of MT-32",
+	  "Held while switching on, asks \"Init MT-32, Sure?\" to set the unit up to play MT-32 song data; [ALL] executes.",
+	  "power-on", P(SC55),
+	  { B(INSTRUMENT_LEFT) }, 1, NONE, true, "manual p.32", COMBO_TOGETHER },
+	{ "Making the basic GS Standard format",
+	  "Held while switching on, asks \"Init GS, Sure?\" to set the unit to the basic GS state; [ALL] executes.",
+	  "power-on", P(SC55),
+	  { B(INSTRUMENT_RIGHT) }, 1, NONE, true, "manual p.33", COMBO_TOGETHER },
+	{ "Returning to factory preset",
+	  "Held while switching on, asks \"Init All, Sure?\" to restore every setting; [ALL] executes.",
+	  "power-on", P(SC55),
+	  { B(INSTRUMENT_LEFT), B(INSTRUMENT_RIGHT) }, 2, NONE, true, "manual p.34", COMBO_TOGETHER },
+	{ "Selection of variation",
+	  "Enters and leaves Variation select, where the Instrument buttons pick the Variation.",
+	  "Part display", P(SC55),
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, "manual p.44", COMBO_TOGETHER },
+	{ "How to transmit (All Sound Canvas settings)",
+	  "Asks \"Dump All, Sure?\" to transmit every setting of the unit as System Exclusive data; [ALL] executes.",
+	  "All display (ALL lit)", P(SC55),
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, "manual p.50", COMBO_TOGETHER },
+	{ "How to transmit (all parts and specified parts)",
+	  "Inside the all-Parts menu, asks \"Dump ALL+, Sure?\" to transmit every setting and the Parts not muted.",
+	  "all-Parts parameter menu", P(SC55),
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, "manual p.51", COMBO_TOGETHER },
+	{ "How to transmit (the settings of a specific part)",
+	  "Inside the Part menu, asks \"Dump PART, Sure?\" to transmit the settings of the selected Part.",
+	  "Part parameter menu", P(SC55),
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, "manual p.52", COMBO_TOGETHER },
+	{ "Micro Edit",
+	  "Inside a menu, shows the parameter as its exclusive address and hex value; [ALL] and [MUTE] step the address.",
+	  "parameter menu", P(SC55),
+	  { B(ALL) }, 1, B(MUTE), false, "manual p.83", COMBO_TOGETHER_TWICE },
+	{ "transmit the displayed parameter values from MIDI OUT",
+	  "Sends the address and value on the display as a Data Set exclusive message.",
+	  "Micro Edit", P(SC55),
+	  { B(INSTRUMENT_LEFT) }, 1, B(INSTRUMENT_RIGHT), false, "manual p.83", COMBO_TOGETHER },
+	{ "Micro Edit",
+	  "Leaves Micro Edit for the parameter menu, which the PART pair then closes.",
+	  "Micro Edit", P(SC55),
+	  { B(ALL) }, 1, B(MUTE), false, "manual p.83", COMBO_TOGETHER },
+
+	/* Service notes -- "TEST MODE / Switch operations" and "IDENTIFYING VERSION NUMBER"
+	 * (Roland SC-55 Service Notes, Apr. 1991, p.4 and p.8), from standby as on the SC-55mkII;
+	 * their "FACTORY SETUP" and "BULK DUMPING" are the manual's own rows, key for key. */
 	{ "Identifying version number",
 	  "From standby, shows the version numbers of the CPU and the program ROM, and the version date.",
 	  "standby", P(SC55),
@@ -1232,7 +1358,7 @@ static const char *key_name(const combo_t *c, scemu_button_t b)
 
 void combo_text(const combo_t *c, char *out, size_t size)
 {
-	bool together = c->timing == COMBO_TOGETHER && !c->power_on;
+	bool together = (c->timing == COMBO_TOGETHER || c->timing == COMBO_TOGETHER_TWICE) && !c->power_on;
 	int first = c->timing == COMBO_HOLD_THEN_PAIR && !c->power_on ? c->hold_count - 1 : c->hold_count;
 	size_t n = (size_t)snprintf(out, size, together ? "press " : "hold ");
 	for (int k = 0; k < first && n < size; k++)
@@ -1248,5 +1374,7 @@ void combo_text(const combo_t *c, char *out, size_t size)
 	if (n < size)
 		n += (size_t)snprintf(out + n, size - n, "%s%s", together ? " + " : "", key_name(c, c->press));
 	if ((together || first < c->hold_count) && n < size)
-		snprintf(out + n, size - n, " together");
+		n += (size_t)snprintf(out + n, size - n, " together");
+	if (together && c->timing == COMBO_TOGETHER_TWICE && n < size)
+		snprintf(out + n, size - n, ", twice");
 }
