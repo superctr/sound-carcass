@@ -1613,6 +1613,7 @@ static gboolean on_tick(gpointer user)
 		controls_set_soft_power(&app->ctl, scplay_model_standby_key(model));
 	}
 	panel_set_standby(app->panel, !app->ctl.power);
+	controls_set_standby(&app->ctl, (st.leds >> SCEMU_LED_STANDBY) & 1);
 	if (panel_dirty(app->panel))
 		gtk_widget_queue_draw(app->area);
 	return G_SOURCE_CONTINUE;

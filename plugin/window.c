@@ -552,6 +552,7 @@ void window_set_panel(window_t *w, const unit_panel_t *state)
 	panel_set_leds(w->panel, state->leds);
 	w->ctl.power = state->power;
 	panel_set_standby(w->panel, !state->power);
+	controls_set_standby(&w->ctl, (state->leds >> SCEMU_LED_STANDBY) & 1);
 }
 
 void window_set_knob(window_t *w, float turn)
