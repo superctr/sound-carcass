@@ -62,6 +62,7 @@ typedef struct app
 	int block_choice;
 	bool system_updating;          /* the radio group is being set from the machine */
 	scemu_model_t shown_model;
+	bool shown_standby;        /* the standby the title carries */
 	GtkWidget *midi_drop[MIDI_SLOTS], *midi_label[MIDI_SLOTS];
 	int midi_choice[MIDI_SLOTS];   /* index into ports, or -1 */
 	GtkWidget *combo_popover;
@@ -1572,11 +1573,13 @@ static void panel_switch(app_t *app, panel_model_t model)
 static void set_title(app_t *app)
 {
 	char title[512];
+	/* a machine whose power key is its own is never off, it stands by */
+	const char *power = !app->ctl.power ? " (off)" : app->ctl.standby ? " (standby)" : "";
 	if (app->state.song[0])
 		snprintf(title, sizeof(title), "%s%s%s — %s", app->state.title[0] ? app->state.title : app->state.song,
-		         app->paused ? " (paused)" : "", app->ctl.power ? "" : " (off)", machine_model_label(app->mc));
+		         app->paused ? " (paused)" : "", power, machine_model_label(app->mc));
 	else
-		snprintf(title, sizeof(title), "%s%s", machine_model_label(app->mc), app->ctl.power ? "" : " (off)");
+		snprintf(title, sizeof(title), "%s%s", machine_model_label(app->mc), power);
 	gtk_window_set_title(GTK_WINDOW(app->window), title);
 }
 
@@ -1619,7 +1622,13 @@ static gboolean on_tick(gpointer user)
 		controls_set_soft_power(&app->ctl, scplay_model_standby_key(model));
 	}
 	panel_set_standby(app->panel, !app->ctl.power);
-	controls_set_standby(&app->ctl, (st.leds >> SCEMU_LED_STANDBY) & 1);
+	const bool standby = ((st.leds >> SCEMU_LED_STANDBY) & 1) != 0;
+	controls_set_standby(&app->ctl, standby);
+	if (standby != app->shown_standby)
+	{
+		app->shown_standby = standby;
+		set_title(app);
+	}
 	if (panel_dirty(app->panel))
 		gtk_widget_queue_draw(app->area);
 	return G_SOURCE_CONTINUE;
