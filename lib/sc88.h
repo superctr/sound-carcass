@@ -84,6 +84,8 @@ typedef struct sc88
 
 	bool xp_int;
 	bool mute;
+	bool lcd_lit;          /* the SC-88VL's LCDBL line, its P6-0; the glass is dark without it */
+	bool lcd_powered;      /* the controller's own display-on bit, before that line */
 	bool lsp_mute;
 	scemu_computer_switch_t computer_switch;
 
@@ -109,5 +111,6 @@ size_t sc88_state_save(const sc88_t *b, void *buffer, size_t size);
 bool sc88_state_load(sc88_t *b, const void *buffer, size_t size);
 bool sc88_state_info(const void *buffer, size_t size, scemu_model_t *model, uint64_t *rom_id, uint64_t *frame);
 void sc88_button(sc88_t *b, scemu_button_t button, bool down);
+void sc88_display_restored(sc88_t *b);
 
 #endif

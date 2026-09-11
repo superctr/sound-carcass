@@ -679,6 +679,7 @@ bool sc88_state_load(sc88_t *b, const void *buffer, size_t size)
 		b->lsp.jit = &b->jit;
 		b->ga.user = b;
 		b->sub.user = b;
+		sc88_display_restored(b);
 		h8500_set_irq(&b->cpu, H8500_IRQ1, b->xp_int);
 	}
 	free(lsp_eram);

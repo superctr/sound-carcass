@@ -150,6 +150,26 @@ void sc88_ga_frame(sc88_ga_t *ga)
 	}
 }
 
+/* The SC-88VL lights its glass from P6-0 (LCDBL), and drops it for as long as it is in
+   standby; the SC-88 and the SC-88Pro do not drive the line at all. */
+static void sc88_update_display(sc88_t *b)
+{
+	const bool on = b->lcd_powered && b->lcd_lit;
+	if (b->lcd.out.display_on != on)
+	{
+		b->lcd.out.display_on = on;
+		b->lcd.out.changed = true;
+	}
+}
+
+/* A state carries the glass as it was lit, and the CPU's own port latch carries the line,
+   so the pair behind it comes back from those two. */
+void sc88_display_restored(sc88_t *b)
+{
+	b->lcd_lit = b->model != SCEMU_MODEL_SC88VL || (b->cpu.port_out[H8500_PORT6] & 1) != 0;
+	b->lcd_powered = b->lcd.out.display_on || !b->lcd_lit;
+}
+
 /* ---------------------------------------------------------------- wiring */
 
 static void ga_irq(void *user, bool state)
@@ -289,7 +309,17 @@ static void bus_write8(void *user, uint32_t address, uint8_t data)
 	case DEV_SRAM: b->sram[offset] = data; break;
 	case DEV_XP:   xp_write(&b->xp, offset >> 1, (uint16_t)(data * 0x101), (address & 1) ? 0x00ff : 0xff00); break;
 	case DEV_SUB:  sub_hle_write(&b->sub, offset, data); break;
-	case DEV_GA:   sc88_ga_write(&b->ga, offset, data); break;
+	case DEV_GA:
+		if (offset == 0x1e)
+		{
+			b->lcd.out.display_on = b->lcd_powered;   /* the controller's own bit takes the commands */
+			sc88_ga_write(&b->ga, offset, data);
+			b->lcd_powered = b->lcd.out.display_on;
+			sc88_update_display(b);
+			break;
+		}
+		sc88_ga_write(&b->ga, offset, data);
+		break;
 	case DEV_LSP:  lsp_host_write(&b->lsp, offset, data); break;
 	default: break;
 	}
@@ -333,6 +363,13 @@ static void bus_write_port(void *user, int port, uint8_t data, uint8_t ddr)
 	case H8500_PORT3:
 		if (ddr & 0x80)
 			b->lsp_mute = !(data & 0x80);
+		break;
+	case H8500_PORT6:
+		if ((ddr & 0x01) && b->model == SCEMU_MODEL_SC88VL)
+		{
+			b->lcd_lit = (data & 0x01) != 0;
+			sc88_update_display(b);
+		}
 		break;
 	case H8500_PORT4:
 		if (ddr & 0x04)
@@ -470,6 +507,8 @@ void sc88_reset(sc88_t *b)
 	b->xp_int = false;
 	b->mute = true;
 	b->lsp_mute = true;
+	b->lcd_lit = true;
+	b->lcd_powered = false;
 	b->frame = 0;
 	midi_queue_reset(&b->midi);
 	xp_reset(&b->xp);
