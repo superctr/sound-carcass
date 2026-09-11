@@ -16,7 +16,7 @@
 	extern const unsigned char panel_##m##_atlas_p##p##_png[]; \
 	extern const size_t panel_##m##_atlas_p##p##_png_size;
 #define ART_MODEL(m) ART_DECLARE(m, 4) ART_DECLARE(m, 8)
-ART_MODEL(sc88pro) ART_MODEL(sc88) ART_MODEL(sc88vl) ART_MODEL(sc55mk2)
+ART_MODEL(sc88pro) ART_MODEL(sc88) ART_MODEL(sc88vl) ART_MODEL(sc55mk2) ART_MODEL(sc55)
 ART_DECLARE(sc8850, 3) ART_DECLARE(sc8850, 6)
 ART_DECLARE(sc8820, 7) ART_DECLARE(sc8820, 14)
 
@@ -34,6 +34,7 @@ static const struct
 	[PANEL_MODEL_SC55MK2] = { ART_ROW(sc55mk2, 4), ART_ROW(sc55mk2, 8) },
 	[PANEL_MODEL_SC8850] = { ART_ROW(sc8850, 3), ART_ROW(sc8850, 6) },
 	[PANEL_MODEL_SC8820] = { ART_ROW(sc8820, 7), ART_ROW(sc8820, 14) },
+	[PANEL_MODEL_SC55] = { ART_ROW(sc55, 4), ART_ROW(sc55, 8) },
 };
 
 #define SEG_COLOR 0xff201000u
@@ -74,6 +75,7 @@ panel_model_t panel_model_for(scemu_model_t model)
 	case SCEMU_MODEL_SC8850: return PANEL_MODEL_SC8850;
 	case SCEMU_MODEL_SC8820: return PANEL_MODEL_SC8820;
 	case SCEMU_MODEL_SC55MK2: return PANEL_MODEL_SC55MK2;
+	case SCEMU_MODEL_SC55: return PANEL_MODEL_SC55;
 	default: return PANEL_MODEL_SC88PRO;
 	}
 }
