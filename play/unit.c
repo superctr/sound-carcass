@@ -306,14 +306,14 @@ bool unit_panel(unit_t *u, unit_panel_t *out)
 	unit_panel_t s;
 	memset(&s, 0, sizeof(s));
 	bool glass_changed = false;
+	const scemu_glcd_t *glcd = scemu_glcd(u->m);
+	s.has_glcd = glcd != NULL;   /* off as much as on: the dark glass is still the bitmap one */
 	if (u->power)
 	{
 		const scemu_lcd_t *lcd = scemu_lcd(u->m);
-		const scemu_glcd_t *glcd = scemu_glcd(u->m);
 		if (lcd)
 			s.lcd = *lcd;
-		s.has_glcd = glcd != NULL;
-		if (glcd && (glcd->changed || !u->last.has_glcd))
+		if (glcd && (glcd->changed || !u->last.power))
 		{
 			s.glcd = *glcd;
 			s.glcd.changed = false;
