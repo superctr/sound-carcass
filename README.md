@@ -38,10 +38,9 @@ battery-backed settings memory, can be saved and restored.
 
 ## Tools
 
-`scemu-cli <sc88|sc88vl|sc88pro|sc8850|sc8820|sc55mk2> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--state boot.state] [--computer midi|pc1|pc2|usb] [--rail BITS]
+`scemu-cli <sc88|sc88vl|sc88pro|sc8850|sc8820|sc55mk2> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--state boot.state] [--computer midi|pc1|pc2|usb]
 ...` boots the machine (or loads a saved state, saving one after the boot when the file is not there) and
-renders a song to a WAV file; `--rail 29` widens the DSP's output rail for the busy songs that clip on the
-unit's 24 bits.
+renders a song to a WAV file.
 
 `scplay song.mid` plays a Standard MIDI File to the speakers with the front panel drawn in the terminal:
 the LCD's text fields, the sixteen level bars animating from the CGRAM patterns the firmware writes, the
@@ -71,36 +70,14 @@ two stereo ports, its MIDI INs and OUT as note ports, the volume, the map, the M
 headroom as parameters, the whole machine as the state, and the front panel as its window.  It needs
 OpenGL and, on Linux, X11.  See [docs/plugin.md](docs/plugin.md).
 
-## Status
+## Credits
 
-Playable.  The SC-88 and the SC-88Pro boot their real firmware through the display sequence, the
-front panel and its LEDs work, MIDI files render and play on both, and the SC-88VL boots and plays
-with the SC-88's wave ROMs.  The SC-8850 boots its own firmware on the SH-2, draws its graphic
-display, answers its panel and its value dial and plays, and with its rear COMPUTER switch on USB it
-takes all four MIDI port groups A-D — 64 parts — and sends its MIDI out back on the port it came from.
-The SC-55mkII boots its own firmware through the 4.75 s display animation — twice from a blank settings
-memory, which is what the machine needs to come up in tune — takes both MIDI INs, drives
-its MIDI OUT, answers its panel and its POWER key — a position in the panel matrix, so the machine
-mutes itself and goes on running — and renders at its own 66206 Hz.  What is emulated:
+Created by superctr 2026.
 
-| part | how | checked against |
-|---|---|---|
-| H8/510 main CPU (H8/532 on the SC-55mkII), its timers, serial ports and A/D | interpreter, and a dynamic translator for the firmware | MAME*'s core, instruction by instruction; the translator against the interpreter in lockstep |
-| XP tone generator (voices, ramps, filters, host interface) and its DSP program (reverb, chorus, delay, EQ) | voice engine in C; the DSP program compiled per frame, recompiled when the firmware patches a coefficient | MAME's device, every register every frame |
-| LSP insertion-effect processor (SC-88Pro) | the 384-word program compiled per sample, coefficient patches without recompiling | MAME's device on 171 firmware programs, and an SC-8850 |
-| GP tone generator (SC-55mkII): its 28 voices and the reverb and chorus in the same chip | C | MAME's device, a recorded firmware session replayed into both: every register read, every interrupt edge and every output sample |
-| gate array (interrupts, LEDs, LCD interface), LCD controller | C | firmware behaviour |
-| sub-CPU (MIDI in, panel matrix, MIDI out) | high-level emulation, without its ROM | firmware behaviour |
-| SC-8850 USB controller (the four port groups, the boot's box) | high-level emulation of its mailbox protocol; its ROM is not dumped | firmware behaviour |
-| SC-8820 | the SC-8850's board with one chip, no gate array and no display; its panel on the CPU's own pins, its USB controller's two port groups over the same mailbox protocol | its CPU ROM is not dumped: it runs on `sc8820rom`'s reconstruction of it, which is the SC-8850's ROM carried over and is not a dump |
-| wave ROMs | unscrambled on load | descrambled chips |
+Thanks to:
 
-`*`: MAME refers to a branch containing a previous version of the XP/LSP emulator created by this author.
+- [giulioz](https://theusualsuspects.io/) for reverse engineering the XP and LSP chips.
+- [nukeykt](https://github.com/nukeykt/) for reverse engineering the GP (SC-55 sound chip)
+- [kode54](https://github.com/TabulaSonora) for reverse engineering Sound Canvas VA and its synth engine which was used as a reference for the initial XP implementation.
 
-Speed: a 32 kHz frame costs about 2.3 µs when playing on this machine's x86-64 (the tone generator
-now dominates), so a render runs around 12× real time and playback takes a few percent of a core.
-Only 64-bit hosts compile the programs for now.
-
-Not done: the plugin's VST3 form; a save-state format that survives versions (the current one is a snapshot
-for the boot cache); 32-bit hosts; the rest of the SC-55 family; and the sound has been compared to
-MAME's renders and to hardware measurements, not yet to a real SC-88Pro side by side.
+AI disclosure: Claude Opus 5, Claude Fable 5 and 5.1 were used in this project.
