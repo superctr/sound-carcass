@@ -297,7 +297,8 @@ static void time_text(char *out, size_t size, double seconds)
 static const char *LED_NAME[SCEMU_LED_COUNT] =
 {
 	"ALL", "MUTE", "SC-55", "SC-88", "E1", "E2", "E3", "INST", "EFX",
-	"SOLO", "EDIT", "DRUM", "EFFECTS", "STANDBY"
+	"SOLO", "EDIT", "DRUM", "EFFECTS", "STANDBY",
+	"POWER", "USB", "INST MAP", "", "", "", "PART A", "", "", "", "PART B"
 };
 
 static const uint8_t LED_ROW_LCD[] =
@@ -314,6 +315,14 @@ static const uint8_t LED_ROW_SC55MK2[] =
 static const uint8_t LED_ROW_GLCD[] =
 {
 	SCEMU_LED_MUTE, SCEMU_LED_SOLO, SCEMU_LED_EDIT, SCEMU_LED_DRUM, SCEMU_LED_EFFECTS
+};
+
+/* the SC-8820's: the two level strips read left to right, the lamp with a name closing each */
+static const uint8_t LED_ROW_SC8820[] =
+{
+	SCEMU_LED_POWER, SCEMU_LED_USB, SCEMU_LED_MAP,
+	SCEMU_LED_PART_A1, SCEMU_LED_PART_A2, SCEMU_LED_PART_A3, SCEMU_LED_PART_A4,
+	SCEMU_LED_PART_B1, SCEMU_LED_PART_B2, SCEMU_LED_PART_B3, SCEMU_LED_PART_B4
 };
 
 /* the panel of the models whose glass is character cells */
@@ -445,8 +454,9 @@ static void build_frame(tui_t *t, const tui_state_t *st)
 
 	put(&b, "\n");
 	put(&b, " ");
-	const uint8_t *row = st->glcd ? LED_ROW_GLCD : st->standby_lamp ? LED_ROW_SC55MK2 : LED_ROW_LCD;
-	int row_count = (int)(st->glcd ? sizeof(LED_ROW_GLCD)
+	const uint8_t *row = st->lamps_only ? LED_ROW_SC8820 : st->glcd ? LED_ROW_GLCD
+			: st->standby_lamp ? LED_ROW_SC55MK2 : LED_ROW_LCD;
+	int row_count = (int)(st->lamps_only ? sizeof(LED_ROW_SC8820) : st->glcd ? sizeof(LED_ROW_GLCD)
 			: st->standby_lamp ? sizeof(LED_ROW_SC55MK2) : sizeof(LED_ROW_LCD));
 	for (int k = 0; k < row_count; k++)
 	{
@@ -457,7 +467,10 @@ static void build_frame(tui_t *t, const tui_state_t *st)
 		if (n == SCEMU_LED_USER_INST_RED && !st->has_efx_led)
 			continue;
 		bool on = (st->leds >> n) & 1;
-		put(&b, "%s%s %s%s ", on ? LIT : DIM, on ? "●" : "○", name, OFF);
+		if (name[0])
+			put(&b, "%s%s %s%s ", on ? LIT : DIM, on ? "●" : "○", name, OFF);
+		else
+			put(&b, "%s%s%s", on ? LIT : DIM, on ? "●" : "○", OFF);
 	}
 	put(&b, "\n");
 	put(&b, "\n");
@@ -512,9 +525,16 @@ static void build_frame(tui_t *t, const tui_state_t *st)
 		"v      PREVIEW (volume knob) ?       hide this list",
 		NULL
 	};
+	static const char *KEYS_SC8820[] =
+	{
+		"space  pause / resume        q, Esc  quit",
+		"m      INST MAP              v       PREVIEW (volume knob)",
+		"?      hide this list",
+		NULL
+	};
 	if (st->show_keys)
 	{
-		const char *const *keys = st->glcd ? KEYS_GLCD : KEYS_LCD;
+		const char *const *keys = st->lamps_only ? KEYS_SC8820 : st->glcd ? KEYS_GLCD : KEYS_LCD;
 		for (int n = 0; keys[n]; n++)
 		{
 			put(&b, " %s%s%s\n", DIM, keys[n], OFF);

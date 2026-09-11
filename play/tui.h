@@ -34,6 +34,7 @@ typedef struct tui_state
 	bool has_efx_led;
 	bool eq_label;               /* the SC-88 calls the SC-88 map button EQ */
 	bool standby_lamp;           /* the SC-55mkII's three: ALL, MUTE and STANDBY */
+	bool lamps_only;             /* the SC-8820: no glass, the level strips and three lamps */
 	double elapsed, total;
 	bool paused;
 	bool show_keys;

@@ -45,8 +45,12 @@ struct unit
 	} next;
 };
 
+/* the SC-8850 reaches four groups over its USB; the SC-8820's USB carries its two, and its one
+ * jack is port A alone */
 static int midi_ports(scemu_model_t model, scemu_computer_switch_t computer)
 {
+	if (model == SCEMU_MODEL_SC8820)
+		return computer == SCEMU_COMPUTER_MAC ? 2 : 1;
 	return model == SCEMU_MODEL_SC8850 && computer == SCEMU_COMPUTER_MAC ? 4 : 2;
 }
 
@@ -396,5 +400,5 @@ void unit_replace(unit_t *u, session_progress_fn progress, void *user)
 
 float unit_output_trim(scemu_model_t model)
 {
-	return model == SCEMU_MODEL_SC8850 ? 2.5f : 2.0f;
+	return model == SCEMU_MODEL_SC8850 || model == SCEMU_MODEL_SC8820 ? 2.5f : 2.0f;
 }

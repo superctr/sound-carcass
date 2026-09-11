@@ -73,7 +73,7 @@ struct machine
 
 const scemu_model_t machine_systems[MACHINE_SYSTEMS] = {
 	SCEMU_MODEL_SC55MK2, SCEMU_MODEL_SC88, SCEMU_MODEL_SC88VL, SCEMU_MODEL_SC88PRO,
-	SCEMU_MODEL_SC8850
+	SCEMU_MODEL_SC8820, SCEMU_MODEL_SC8850
 };
 
 int machine_system_index(scemu_model_t model)

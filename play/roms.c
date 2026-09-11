@@ -1,6 +1,9 @@
 /* scplay: ROM discovery.  Images are recognised by their CRC32 and size, so
  * neither file nor zip entry names matter: every zip and every loose file in
- * the search directories is looked at.
+ * the search directories is looked at.  The one exception is the SC-8820's
+ * CPU ROM, which is sc8820rom's build rather than a dump and so has no fixed
+ * CRC: a 64 KB image is taken for it when it carries that build's version
+ * routine at the address the flash calls.
  *
  * Copyright (c) 2026 ian karlsson
  * SPDX-License-Identifier: BSD-3-Clause
@@ -23,11 +26,14 @@
 
 enum
 {
-	SET_SC88_CTL, SET_SC88VL_CTL, SET_PRO_CTL, SET_8850_CTL, SET_MK2_CTL,
-	SET_SC88_WAVE, SET_PRO_WAVE, SET_8850_WAVE, SET_MK2_WAVE,
-	SET_8850_BOOT, SET_8850_TONE, SET_MK2_BOOT, SET_MK2_SUB,
+	SET_SC88_CTL, SET_SC88VL_CTL, SET_PRO_CTL, SET_8850_CTL, SET_MK2_CTL, SET_8820_CTL,
+	SET_SC88_WAVE, SET_PRO_WAVE, SET_8850_WAVE, SET_MK2_WAVE, SET_8820_WAVE,
+	SET_8850_BOOT, SET_8850_TONE, SET_MK2_BOOT, SET_MK2_SUB, SET_8820_BOOT,
 	SET_NONE = -1
 };
+
+/* the CRC an image is known by, or this for the one recognised by content */
+#define CRC_BY_CONTENT 0
 
 typedef struct rom_image
 {
@@ -69,6 +75,11 @@ static const rom_image_t IMAGES[] =
 	{ 0x2cfe5aa2, 0x1000000, SET_8850_WAVE, 0, 0, NULL, 0, "wave ROM ic53" },
 	{ 0x623015b6, 0x1000000, SET_8850_WAVE, 1, 0, NULL, 0, "wave ROM ic54" },
 
+	{ 0x352ad418, 0x200000, SET_8820_CTL,   0, 100, "1.00", 0, "program flash ic5" },
+	{ CRC_BY_CONTENT, 0x010000, SET_8820_BOOT, 0, 0, NULL, 0, "CPU ROM ic1 (sc8820rom's build)" },
+	{ 0x2cfe5aa2, 0x1000000, SET_8820_WAVE, 0, 0, NULL, 0, "wave ROM ic7" },
+	{ 0x38908222, 0x800000, SET_8820_WAVE,  1, 0, NULL, 0, "wave ROM ic8" },
+
 	{ 0xfcee1e8e, 0x080000, SET_MK2_CTL,    0, 101, "1.01", 0, "control ROM" },
 	{ 0x9b66631f, 0x008000, SET_MK2_BOOT,   0, 0, NULL, 0, "CPU ROM" },
 	{ 0x702c0a82, 0x001000, SET_MK2_SUB,    0, 0, NULL, 0, "sub-CPU ROM" },
@@ -96,15 +107,36 @@ static const model_def_t MODELS[] =
 	{ "sc88",    "SC-88",     SCEMU_MODEL_SC88,    SET_SC88_CTL,   SET_SC88_WAVE, 4, SET_NONE,      SET_NONE },
 	{ "sc88vl",  "SC-88VL",   SCEMU_MODEL_SC88VL,  SET_SC88VL_CTL, SET_SC88_WAVE, 4, SET_NONE,      SET_NONE },
 	{ "sc8850",  "SC-8850",   SCEMU_MODEL_SC8850,  SET_8850_CTL,   SET_8850_WAVE, 2, SET_8850_BOOT, SET_8850_TONE },
+	{ "sc8820",  "SC-8820",   SCEMU_MODEL_SC8820,  SET_8820_CTL,   SET_8820_WAVE, 2, SET_8820_BOOT, SET_NONE },
 	{ "sc55mk2", "SC-55mkII", SCEMU_MODEL_SC55MK2, SET_MK2_CTL,    SET_MK2_WAVE,  2, SET_MK2_BOOT,  SET_NONE },
 };
 
 #define MODEL_COUNT ((int)(sizeof(MODELS) / sizeof(MODELS[0])))
 
-static int image_index(uint32_t crc, uint64_t size)
+/* every table row an image with this CRC and size fills: one image can serve two sets, as the
+ * SC-8850's first wave ROM is the SC-8820's too */
+static int image_indices(uint32_t crc, uint64_t size, int *out, int max)
+{
+	int count = 0;
+	for (int n = 0; n < IMAGE_COUNT && count < max; n++)
+		if (IMAGES[n].crc == crc && IMAGES[n].crc != CRC_BY_CONTENT && IMAGES[n].size == size)
+			out[count++] = n;
+	return count;
+}
+
+/* the SC-8820's CPU ROM: sc8820rom places its version routine at 0x30AC, `mov.w @(disp,pc),r0 / rts /
+ * nop` with the version word 0x0107 at 0x30C2, whatever compiler built it */
+static int content_is_sc8820_boot(const uint8_t *data, uint64_t size)
+{
+	static const uint8_t routine[6] = { 0x90, 0x09, 0x00, 0x0b, 0x00, 0x09 };
+	return size == 0x10000 && memcmp(data + 0x30ac, routine, 6) == 0 && data[0x30c2] == 0x01 && data[0x30c3] == 0x07;
+}
+
+static int content_index(const uint8_t *data, uint64_t size)
 {
 	for (int n = 0; n < IMAGE_COUNT; n++)
-		if (IMAGES[n].crc == crc && IMAGES[n].size == size)
+		if (IMAGES[n].crc == CRC_BY_CONTENT && IMAGES[n].size == size && IMAGES[n].set == SET_8820_BOOT
+		    && content_is_sc8820_boot(data, size))
 			return n;
 	return -1;
 }
@@ -154,6 +186,10 @@ static void record(catalog_t *c, int index, const char *path, int in_zip,
 }
 
 /* ---------------------------------------------------------------- scanning */
+
+static void *read_whole(const char *path, size_t want);
+static void *read_zip_entry(const found_t *f);
+static void probe_zip_entry(catalog_t *c, const char *path, uint32_t offset, uint32_t csize, uint32_t usize, uint32_t method);
 
 static int scan_zip(catalog_t *c, const char *path)
 {
@@ -228,9 +264,15 @@ static int scan_zip(catalog_t *c, const char *path)
 		uint32_t method = rd16(e + 10);
 		uint32_t crc = rd32(e + 16), csize = rd32(e + 20), usize = rd32(e + 24);
 		uint32_t offset = rd32(e + 42);
-		int index = image_index(crc, usize);
-		if (index >= 0 && (method == 0 || method == 8))
-			record(c, index, path, 1, offset, csize, usize, method);
+		int indices[4];
+		int found = image_indices(crc, usize, indices, 4);
+		if (method == 0 || method == 8)
+		{
+			for (int k = 0; k < found; k++)
+				record(c, indices[k], path, 1, offset, csize, usize, method);
+			if (!found && usize == 0x10000)
+				probe_zip_entry(c, path, offset, csize, usize, method);
+		}
 		at += 46u + rd16(e + 28) + rd16(e + 30) + rd16(e + 32);
 	}
 	free(dir);
@@ -253,6 +295,26 @@ static int file_crc(const char *path, uint32_t *crc_out)
 	return ok;
 }
 
+/* a 64 KB zip entry no CRC knows: sc8820rom's build, if its content says so */
+static void probe_zip_entry(catalog_t *c, const char *path, uint32_t offset, uint32_t csize, uint32_t usize, uint32_t method)
+{
+	found_t f;
+	memset(&f, 0, sizeof(f));
+	snprintf(f.path, sizeof(f.path), "%s", path);
+	f.in_zip = 1;
+	f.offset = offset;
+	f.csize = csize;
+	f.usize = usize;
+	f.method = method;
+	uint8_t *data = read_zip_entry(&f);
+	if (!data)
+		return;
+	int index = content_index(data, usize);
+	free(data);
+	if (index >= 0)
+		record(c, index, path, 1, offset, csize, usize, method);
+}
+
 static void scan_file(catalog_t *c, const char *path, uint64_t size)
 {
 	if (!size_is_known(size))
@@ -260,9 +322,20 @@ static void scan_file(catalog_t *c, const char *path, uint64_t size)
 	uint32_t crc;
 	if (!file_crc(path, &crc))
 		return;
-	int index = image_index(crc, size);
-	if (index >= 0)
-		record(c, index, path, 0, 0, 0, (uint32_t)size, 0);
+	int indices[4];
+	int found = image_indices(crc, size, indices, 4);
+	for (int k = 0; k < found; k++)
+		record(c, indices[k], path, 0, 0, 0, (uint32_t)size, 0);
+	if (!found && size == 0x10000)
+	{
+		uint8_t *data = read_whole(path, (size_t)size);
+		if (!data)
+			return;
+		int index = content_index(data, size);
+		free(data);
+		if (index >= 0)
+			record(c, index, path, 0, 0, 0, (uint32_t)size, 0);
+	}
 }
 
 static int name_ends_zip(const char *name)

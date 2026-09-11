@@ -21,7 +21,7 @@ typedef struct machine machine_t;
  * is also the order they are listed in.  It is the order of machine_options_t's
  * computer[] and of the settings file's rows (play/config.h's CONFIG_ROW_*), and
  * the three have to agree. */
-#define MACHINE_SYSTEMS 5
+#define MACHINE_SYSTEMS 6
 extern const scemu_model_t machine_systems[MACHINE_SYSTEMS];
 /* the row a model's switch lives in, or -1 for a model without one */
 int machine_system_index(scemu_model_t model);

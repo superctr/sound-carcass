@@ -57,6 +57,7 @@ static const model_info_t model_infos[] = {
 	{ SCEMU_MODEL_SC88, "sc88", ID_PREFIX "sc88", "SC-88", "Roland SC-88" },
 	{ SCEMU_MODEL_SC88VL, "sc88vl", ID_PREFIX "sc88vl", "SC-88VL", "Roland SC-88VL" },
 	{ SCEMU_MODEL_SC8850, "sc8850", ID_PREFIX "sc8850", "SC-8850", "Roland SC-8850" },
+	{ SCEMU_MODEL_SC8820, "sc8820", ID_PREFIX "sc8820", "SC-8820", "Roland SC-8820" },
 	{ SCEMU_MODEL_SC55MK2, "sc55mk2", ID_PREFIX "sc55mk2", "SC-55mkII", "Roland SC-55mkII" },
 };
 #define MODEL_COUNT ((int)(sizeof model_infos / sizeof model_infos[0]))
@@ -576,8 +577,9 @@ static bool plugin_init(const clap_plugin_t *plugin)
 		      in->info->label, in->rom_error);
 		return true;   /* the instance stands, silent, and its window will say why */
 	}
-	/* the SC-8850's rear switch on USB: MIDI IN A to D, 64 parts, the way a DAW wants it */
-	if (in->info->model == SCEMU_MODEL_SC8850)
+	/* the SC-8850's rear switch on USB: MIDI IN A to D, 64 parts, the way a DAW wants it; the
+	 * SC-8820's likewise, for its two groups */
+	if (in->info->model == SCEMU_MODEL_SC8850 || in->info->model == SCEMU_MODEL_SC8820)
 		unit_set_computer_switch(in->unit, SCEMU_COMPUTER_MAC);
 	in->rate = unit_rate(in->unit);
 	in->channels = scemu_output_count(unit_machine(in->unit)) > 1 ? 4 : 2;

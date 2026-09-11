@@ -54,17 +54,17 @@ extern "C" {
 
 /* The systems whose rear COMPUTER switch the file remembers, one row each,
  * oldest machine first -- the keys are computer_sc55mk2, computer_sc88,
- * computer_sc88vl, computer_sc88pro and computer_sc8850, and app/machine.h's
- * machine_systems[] is the same order. */
+ * computer_sc88vl, computer_sc88pro, computer_sc8820 and computer_sc8850, and
+ * app/machine.h's machine_systems[] is the same order. */
 enum
 {
 	CONFIG_ROW_SC55MK2, CONFIG_ROW_SC88, CONFIG_ROW_SC88VL, CONFIG_ROW_SC88PRO,
-	CONFIG_ROW_SC8850, CONFIG_SYSTEMS
+	CONFIG_ROW_SC8820, CONFIG_ROW_SC8850, CONFIG_SYSTEMS
 };
 
 typedef struct scgui_config
 {
-	char model[16];          /* "sc88pro", "sc88", "sc88vl", "sc8850", "sc55mk2"; "" = the best set found */
+	char model[16];          /* "sc88pro", "sc88", "sc88vl", "sc8850", "sc8820", "sc55mk2"; "" = the best set found */
 	char rom[1024];          /* --rom: a zip or directory; "" = search the usual places */
 	int size;                /* the window size: 4 the small panel, 8 twice as large */
 	char audio_device[128];  /* PortAudio device name; "" = the default */
@@ -74,7 +74,7 @@ typedef struct scgui_config
 	char reset[24];          /* what precedes each song: "none", "gm", "gs", "gm2", "sc88-single", "sc88-double" */
 	char map[16];            /* instrument map override: "native", "sc55", "sc88", "sc88pro" */
 	int midi_rate;           /* baud of the MIDI input: 31250, 38400, 0 */
-	char computer[CONFIG_SYSTEMS][8];  /* the rear switch of each system: "midi", "pc1", "pc2", "mac" ("usb" on the SC-8850) */
+	char computer[CONFIG_SYSTEMS][8];  /* the rear switch of each system: "midi", "pc1", "pc2", "mac" ("usb" on the SC-8850 and the SC-8820, whose pc2 is its Mac position) */
 	bool keep_settings;      /* keep the machine's own settings memory across sessions */
 	bool boot_animation;     /* boot the firmware in the machine's own time, so the display animates */
 	bool swap_buttons;       /* the pointer's right and middle buttons change places on the panel */
@@ -83,9 +83,9 @@ typedef struct scgui_config
 } scgui_config_t;
 
 /* The keys are the field names, the five MIDI ports being midi_in_a,
- * midi_in_b, midi_out, song_a and song_b and the four computer switches
- * computer_sc88, computer_sc88vl, computer_sc88pro, computer_sc8850 and
- * computer_sc55mk2. */
+ * midi_in_b, midi_out, song_a and song_b and the computer switches
+ * computer_sc88, computer_sc88vl, computer_sc88pro, computer_sc8850,
+ * computer_sc8820 and computer_sc55mk2. */
 
 void config_defaults(scgui_config_t *c);
 

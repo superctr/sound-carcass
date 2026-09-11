@@ -13,9 +13,9 @@ machine.  Files on the command line become the playlist and the first one plays.
 
 | option | |
 |---|---|
-| `--model sc88pro \| sc88 \| sc88vl \| sc8850 \| sc55mk2` | which machine; the default is the SC-88Pro when its ROMs are found |
+| `--model sc88pro \| sc88 \| sc88vl \| sc8850 \| sc8820 \| sc55mk2` | which machine; the default is the SC-88Pro when its ROMs are found |
 | `--rom PATH` | a zip or a directory holding the ROM images, whatever they are named |
-| `--size 4 \| 8` | the window size: 4 is the small panel (1399 × 440 for the SC-88 and the SC-88Pro, 1399 × 282 for the shallower SC-88VL and SC-55mkII, 1696 × 692 for the SC-8850), 8 twice that.  The bake is named by the glass's dot pitch, which is 4 and 8 on the 88 family and the SC-55mkII and 3 and 6 on the SC-8850, whose display has more and smaller dots.  On a HiDPI screen the large bake is used for the small size automatically |
+| `--size 4 \| 8` | the window size: 4 is the small panel (1399 × 440 for the SC-88 and the SC-88Pro, 1399 × 282 for the shallower SC-88VL and SC-55mkII, 1696 × 692 for the SC-8850, 1421 × 242 for the SC-8820), 8 twice that.  The bake is named by the glass's dot pitch, which is 4 and 8 on the 88 family and the SC-55mkII and 3 and 6 on the SC-8850, whose display has more and smaller dots; the SC-8820 has no glass and its bake is 7 and 14 pixels a millimetre.  On a HiDPI screen the large bake is used for the small size automatically |
 | `--map sc55 \| sc88 \| sc88pro \| sc8850` | play every part from that instrument map, as in scplay |
 | `--midi-rate BAUD` | the speed of the MIDI input, as in scplay |
 | `--rate native \| 32000 \| 44100 \| 48000` | the rate to ask the output device for, as in scplay; `native`, the default, is the machine's own |
@@ -149,7 +149,7 @@ to the middle button, for a mouse whose middle button is a wheel to press or non
 other half of a ◀ ▶ pair stays on the right button, since it happens while the left button holds the
 first half and no menu is wanted there, and Ctrl with the right button opens the menu either way round.
 
-**System**: which machine this is -- SC-88, SC-88VL, SC-88Pro, SC-8850 or SC-55mkII.  A model whose
+**System**: which machine this is -- SC-88, SC-88VL, SC-88Pro, SC-8820, SC-8850 or SC-55mkII.  A model whose
 ROM images were not found is greyed out.  Choosing another one switches at once: the song is
 unloaded, the machine is replaced and the new one comes up from its own boot cache, so it is instant
 from the second time on; the sound card and the MIDI ties stay as they are.  Below the choice is what
@@ -188,8 +188,9 @@ machine and where its ROMs are, the window size (`size`) and whether the pointer
 0 for the machine's own) and its buffer, the volume knob,
 the nine MIDI ties by the device's name, the message before each song, the instrument
 map, the MIDI speed, the computer switch of each system (`computer_sc88`, `computer_sc88vl`,
-`computer_sc88pro`, `computer_sc8850` and `computer_sc55mk2`, each `midi`, `pc1`, `pc2` or `mac`, with
-`usb` taken as the SC-8850's word for the last), whether the settings memory is kept, and the tail.
+`computer_sc88pro`, `computer_sc8820`, `computer_sc8850` and `computer_sc55mk2`, each `midi`, `pc1`,
+`pc2` or `mac`, with `usb` taken as the SC-8850's and the SC-8820's word for the last), whether the
+settings memory is kept, and the tail.
 It is read at start, written a moment after a setting changes, and written again on exit.  An option
 on the command line overrides the file for that run and does not change it.  The file is `key = value` text with `#` comments; a
 line it cannot make sense of is complained about on stderr and every other line is still taken.

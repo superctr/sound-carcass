@@ -131,6 +131,12 @@ static void panel_advance(panel_t *p, int frames)
 		}
 }
 
+/* the SC-8820's two: its one key, and the volume knob's push */
+static int button_for_key_8820(int key)
+{
+	return key == 'm' ? SCEMU_BUTTON_MAP : key == 'v' ? SCEMU_BUTTON_PREVIEW : -1;
+}
+
 /* the SC-8850's own keys; the models with a character glass take the map below */
 static int button_for_key_8850(int key)
 {
@@ -254,7 +260,7 @@ static void usage(FILE *fp)
 	fprintf(fp,
 	        "usage: scplay [options] song.mid\n"
 	        "\n"
-	        "  --model sc88|sc88pro|sc88vl|sc8850|sc55mk2\n"
+	        "  --model sc88|sc88pro|sc88vl|sc8850|sc8820|sc55mk2\n"
 	        "                                machine to emulate (default sc88pro)\n"
 	        "  --rom PATH                    a zip or a directory holding the ROM images (any names)\n"
 	        "  --wav FILE                    also write what is played, 16-bit stereo at the\n"
@@ -468,12 +474,14 @@ int main(int argc, char **argv)
 		scplay_roms_free(&roms);
 		return 1;
 	}
-	/* the SC-8850 takes four port groups when its rear switch is on USB, everything else two;
-	 * USB is its default, MIDI everyone else's */
-	if (!opt.computer_given && roms.model == SCEMU_MODEL_SC8850)
+	/* the SC-8850 takes four port groups when its rear switch is on USB, the SC-8820 its two
+	 * (one from its jack), everything else two; USB is their default, MIDI everyone else's */
+	if (!opt.computer_given && (roms.model == SCEMU_MODEL_SC8850 || roms.model == SCEMU_MODEL_SC8820))
 		opt.computer = SCEMU_COMPUTER_MAC;
 	scemu_set_computer_switch(m, opt.computer);
-	const int midi_ports = roms.model == SCEMU_MODEL_SC8850 && opt.computer == SCEMU_COMPUTER_MAC ? 4 : 2;
+	const bool usb = opt.computer == SCEMU_COMPUTER_MAC;
+	const int midi_ports = roms.model == SCEMU_MODEL_SC8850 ? (usb ? 4 : 2)
+	                     : roms.model == SCEMU_MODEL_SC8820 ? (usb ? 2 : 1) : 2;
 	if (opt.port >= midi_ports)
 		opt.port = midi_ports - 1;
 	uint32_t rate = scemu_sample_rate(m);
@@ -500,6 +508,7 @@ int main(int argc, char **argv)
 	st.has_efx_led = roms.model == SCEMU_MODEL_SC88PRO;
 	st.eq_label = roms.model != SCEMU_MODEL_SC88PRO;
 	st.standby_lamp = roms.model == SCEMU_MODEL_SC55MK2;
+	st.lamps_only = roms.model == SCEMU_MODEL_SC8820;
 
 	int32_t raw[BLOCK * 2];
 	int16_t pcm[BLOCK * 2];
@@ -574,6 +583,12 @@ int main(int argc, char **argv)
 			}
 			else if (key == '?')
 				st.show_keys = !st.show_keys;
+			else if (st.lamps_only)
+			{
+				int b = button_for_key_8820(key);
+				if (b >= 0)
+					panel_press(&panel, (scemu_button_t)b);
+			}
 			else if (st.glcd)
 			{
 				int steps = dial_for_key(key), b = button_for_key_8850(key);

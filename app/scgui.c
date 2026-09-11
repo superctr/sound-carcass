@@ -27,7 +27,7 @@
 #define MIDI_PORTS_MAX 64
 #define AUDIO_DEVICES_MAX 64
 #define MIDI_SLOTS 9           /* MIDI IN A-D, MIDI OUT, Song A-D; C and D only on an SC-8850 on USB */
-#define COMPUTER_POSITIONS 4   /* the rear switch: MIDI, PC-1, PC-2, Mac (USB on the SC-8850) */
+#define COMPUTER_POSITIONS 4   /* the rear switch: MIDI, PC-1, PC-2, Mac (USB on the SC-8850; MIDI, PC, Mac, USB on the SC-8820) */
 
 typedef struct app
 {
@@ -111,7 +111,7 @@ static void usage(FILE *fp)
 	fprintf(fp,
 	        "usage: scgui [options] [file.mid ...]\n"
 	        "  --model NAME        sc88pro (default when its ROMs are found), sc88, sc88vl, sc8850,\n"
-	        "                      sc55mk2\n"
+	        "                      sc8820, sc55mk2\n"
 	        "  --rom PATH          a zip or directory with the ROM images\n"
 	        "  --map sc55|sc88|sc88pro|sc8850\n"
 	        "                      play every part from that instrument map\n"
@@ -197,9 +197,16 @@ static int word_index(const char *const *words, int count, const char *word, int
 }
 
 /* the rear COMPUTER switch, as the settings file spells it and as the unit
- * prints it; the SC-8850's fourth position is the one the others call Mac */
+ * prints it; the SC-8850's fourth position is the one the others call Mac,
+ * and the SC-8820's four are MIDI, PC, Mac and USB */
 static const char *const computer_words[COMPUTER_POSITIONS] = { "midi", "pc1", "pc2", "mac" };
 static const char *const computer_labels[COMPUTER_POSITIONS] = { "MIDI", "PC-1", "PC-2", "Mac" };
+static const char *const computer_labels_sc8820[COMPUTER_POSITIONS] = { "MIDI", "PC", "Mac", "USB" };
+
+static bool usb_is_fourth(scemu_model_t model)
+{
+	return model == SCEMU_MODEL_SC8850 || model == SCEMU_MODEL_SC8820;
+}
 
 static scemu_computer_switch_t computer_position(const char *word)
 {
@@ -210,11 +217,13 @@ static scemu_computer_switch_t computer_position(const char *word)
 
 static const char *computer_word(scemu_model_t model, scemu_computer_switch_t sw)
 {
-	return sw == SCEMU_COMPUTER_MAC && model == SCEMU_MODEL_SC8850 ? "usb" : computer_words[sw];
+	return sw == SCEMU_COMPUTER_MAC && usb_is_fourth(model) ? "usb" : computer_words[sw];
 }
 
 static const char *computer_label(scemu_model_t model, scemu_computer_switch_t sw)
 {
+	if (model == SCEMU_MODEL_SC8820)
+		return computer_labels_sc8820[sw];
 	return sw == SCEMU_COMPUTER_MAC && model == SCEMU_MODEL_SC8850 ? "USB" : computer_labels[sw];
 }
 
@@ -1501,7 +1510,8 @@ static void draw(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpoin
 }
 
 /* the bake for a panel at the size setting: the glass's dot pitch, 4 and 8 on
- * the 88 family, 3 and 6 on the SC-8850 */
+ * the 88 family, 3 and 6 on the SC-8850, 7 and 14 pixels a millimetre on the
+ * SC-8820 */
 static int panel_pitch_for(panel_model_t model, int size)
 {
 	return panel_sizes[model][size >= 8 ? 1 : 0].pitch;

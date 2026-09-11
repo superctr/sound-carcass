@@ -1,6 +1,6 @@
 # scemu aka SoundCarcass
 
-An emulator of the Roland Sound Canvas SC-55mkII, SC-88, SC-88VL, SC-88Pro and SC-8850 as a C library,
+An emulator of the Roland Sound Canvas SC-55mkII, SC-88, SC-88VL, SC-88Pro, SC-8850 and SC-8820 as a C library,
 with a terminal player and a headless renderer.  It runs the machine's own firmware on an emulated
 board; the H8/510 main CPU (the H8/532 on the SC-55mkII, the SH-2 on the SC-8850), the XP tone
 generator's DSP program and the LSP effect processor's program are all compiled to native code with
@@ -38,7 +38,7 @@ battery-backed settings memory, can be saved and restored.
 
 ## Tools
 
-`scemu-cli <sc88|sc88vl|sc88pro|sc8850|sc55mk2> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--state boot.state] [--computer midi|pc1|pc2|usb] [--rail BITS]
+`scemu-cli <sc88|sc88vl|sc88pro|sc8850|sc8820|sc55mk2> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--state boot.state] [--computer midi|pc1|pc2|usb] [--rail BITS]
 ...` boots the machine (or loads a saved state, saving one after the boot when the file is not there) and
 renders a song to a WAV file; `--rail 29` widens the DSP's output rail for the busy songs that clip on the
 unit's 24 bits.
@@ -92,6 +92,7 @@ mutes itself and goes on running — and renders at its own 66206 Hz.  What is e
 | gate array (interrupts, LEDs, LCD interface), LCD controller | C | firmware behaviour |
 | sub-CPU (MIDI in, panel matrix, MIDI out) | high-level emulation, without its ROM | firmware behaviour |
 | SC-8850 USB controller (the four port groups, the boot's box) | high-level emulation of its mailbox protocol; its ROM is not dumped | firmware behaviour |
+| SC-8820 | the SC-8850's board with one chip, no gate array and no display; its panel on the CPU's own pins, its USB controller's two port groups over the same mailbox protocol | its CPU ROM is not dumped: it runs on `sc8820rom`'s reconstruction of it, which is the SC-8850's ROM carried over and is not a dump |
 | wave ROMs | unscrambled on load | descrambled chips |
 
 `*`: MAME refers to a branch containing a previous version of the XP/LSP emulator created by this author.

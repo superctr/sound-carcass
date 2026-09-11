@@ -1,6 +1,6 @@
 # The plugin
 
-`scemu.clap` is the emulator as a CLAP instrument, one per model: SC-88, SC-88VL, SC-88Pro, SC-8850
+`scemu.clap` is the emulator as a CLAP instrument, one per model: SC-88, SC-88VL, SC-88Pro, SC-8850, SC-8820
 and SC-55mkII appear in the host's instrument list as separate plugins, each running its own firmware
 on its own emulated board.  What comes out is the machine's DAC words, not a rendering of them, so the
 plugin sounds like the players and the command-line renderer to the bit when the host runs at the

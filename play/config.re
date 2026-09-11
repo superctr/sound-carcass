@@ -35,7 +35,7 @@ typedef struct key
 	const char *group;
 } config_key_t;
 
-static const char *const model_words[] = { "", "sc88pro", "sc88", "sc88vl", "sc8850", "sc55mk2", NULL };
+static const char *const model_words[] = { "", "sc88pro", "sc88", "sc88vl", "sc8850", "sc8820", "sc55mk2", NULL };
 static const char *const reset_words[] = { "none", "gm", "gs", "gm2", "sc88-single", "sc88-double", NULL };
 static const char *const map_words[] = { "native", "sc55", "sc88", "sc88pro", "sc8850", NULL };
 static const int size_numbers[] = { 4, 8, -1 };
@@ -47,7 +47,7 @@ static const char group_machine[] = "the machine: which module, where its ROMs a
                                    " and whether it boots in its own time";
 static const char group_window[] = "the window: 4 the small panel, 8 twice as large, and what the"
                                   " pointer's buttons do";
-static const char group_computer[] = "the rear COMPUTER switch of each system: midi, pc1, pc2, mac (usb on the SC-8850)";
+static const char group_computer[] = "the rear COMPUTER switch of each system: midi, pc1, pc2, mac (usb on the SC-8850 and the SC-8820, whose pc2 is its Mac position)";
 static const char group_audio[] = "audio: the output device, the rate asked of it (0 the machine's own), its buffer"
                                   " and the knob";
 static const char group_midi[] = "MIDI: the host ports (C and D only on an SC-8850 on USB), and the speed of the inputs";
@@ -65,6 +65,7 @@ static const config_key_t keys[] = {
 	{ "computer_sc88",    SLOT_TEXT, FIELD(computer[CONFIG_ROW_SC88]),    0, 0, computer_words, NULL, group_computer },
 	{ "computer_sc88vl",  SLOT_TEXT, FIELD(computer[CONFIG_ROW_SC88VL]),  0, 0, computer_words, NULL, group_computer },
 	{ "computer_sc88pro", SLOT_TEXT, FIELD(computer[CONFIG_ROW_SC88PRO]), 0, 0, computer_words, NULL, group_computer },
+	{ "computer_sc8820",  SLOT_TEXT, FIELD(computer[CONFIG_ROW_SC8820]),  0, 0, computer_words, NULL, group_computer },
 	{ "computer_sc8850",  SLOT_TEXT, FIELD(computer[CONFIG_ROW_SC8850]),  0, 0, computer_words, NULL, group_computer },
 	{ "size",             SLOT_INT,  FIELD(size),          0, 0,     NULL,           size_numbers, group_window },
 	{ "swap_buttons",     SLOT_BOOL, FIELD(swap_buttons),  0, 0,     NULL,           NULL,         group_window },
@@ -98,6 +99,7 @@ void config_defaults(scgui_config_t *c)
 	for (int n = 0; n < CONFIG_SYSTEMS; n++)
 		snprintf(c->computer[n], sizeof(c->computer[n]), "midi");
 	snprintf(c->computer[CONFIG_ROW_SC8850], sizeof(c->computer[CONFIG_ROW_SC8850]), "usb");
+	snprintf(c->computer[CONFIG_ROW_SC8820], sizeof(c->computer[CONFIG_ROW_SC8820]), "usb");
 	c->midi_rate = 31250;
 	c->volume = 0.75f;
 	c->swap_buttons = false;

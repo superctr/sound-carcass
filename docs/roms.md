@@ -96,6 +96,24 @@ its two mailboxes is emulated at a high level, so the machine comes up as one wi
 fitted — the boot's box reads "USB On Line" when the rear COMPUTER switch is on USB, and the four
 MIDI port groups A-D, 64 parts, go through it.
 
+## SC-8820
+
+Four images: the CPU's internal ROM, the one 2 MB flash the program and the tone parameters share, and
+the two wave ROMs, 16 MB and 8 MB.
+
+| image | size | CRC32 |
+|---|---|---|
+| CPU ROM, IC1 | 64 KiB | by content, see below |
+| program flash 1.00, IC5 | 2 MiB | `352ad418` |
+| wave ROM IC7 | 16 MiB | `2cfe5aa2` (the SC-8850's IC53, the same chip) |
+| wave ROM IC8 | 8 MiB | `38908222` |
+
+The CPU ROM has never been dumped.  What stands in for it is `sc8820rom`'s reconstruction — the
+SC-8850's ROM carried over to this machine's addresses, built with a local compiler, not a dump and
+not shareable — so it has no fixed CRC: a 64 KiB image is taken for it when it carries that build's
+version routine at the address the flash calls.  The USB controller's ROM is not dumped either and
+is not needed, as on the SC-8850.
+
 ## The sub-CPU
 
 The panel sub-CPU's internal 8 KiB ROM is not dumped on any of the 88-family machines and is not
