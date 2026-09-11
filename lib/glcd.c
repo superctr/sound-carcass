@@ -160,6 +160,17 @@ static void merge(uint8_t *dst, const uint8_t *src, unsigned mx)
 		}
 }
 
+static void deliver(glcd_t *g, const uint8_t *bitmap, bool changed)
+{
+	if (memcmp(bitmap, g->out.bitmap, GLCD_LINES * GLCD_STRIDE) != 0)
+	{
+		memcpy(g->out.bitmap, bitmap, GLCD_LINES * GLCD_STRIDE);
+		changed = true;
+	}
+	if (changed)
+		g->out.changed = true;
+}
+
 static void compose(glcd_t *g)
 {
 	uint8_t bitmap[GLCD_LINES * GLCD_STRIDE];
@@ -170,14 +181,13 @@ static void compose(glcd_t *g)
 
 	g->dirty = false;
 	g->out.display_on = on;
+	memset(bitmap, 0, sizeof bitmap);
 	if (!on)
 	{
-		if (changed)
-			g->out.changed = true;
+		deliver(g, bitmap, changed);
 		return;
 	}
 
-	memset(bitmap, 0, sizeof bitmap);
 	for (unsigned y = 0; y < lines; y++)
 	{
 		uint8_t row[GLCD_ROW], layer[GLCD_ROW];
@@ -237,13 +247,7 @@ static void compose(glcd_t *g)
 				bitmap[y * GLCD_STRIDE + col / GLCD_DOTS_PER_BYTE] |= 0x80u >> (col % GLCD_DOTS_PER_BYTE);
 	}
 
-	if (memcmp(bitmap, g->out.bitmap, sizeof bitmap) != 0)
-	{
-		memcpy(g->out.bitmap, bitmap, sizeof bitmap);
-		changed = true;
-	}
-	if (changed)
-		g->out.changed = true;
+	deliver(g, bitmap, changed);
 }
 
 static void csr_step(glcd_t *g)
