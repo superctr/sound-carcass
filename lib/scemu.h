@@ -28,6 +28,7 @@ typedef enum scemu_model
 	SCEMU_MODEL_VEGSPRO,
 	SCEMU_MODEL_SC8850,
 	SCEMU_MODEL_SC55MK2,
+	SCEMU_MODEL_SC8820,
 	SCEMU_MODEL_COUNT
 } scemu_model_t;
 
@@ -45,7 +46,9 @@ typedef struct scemu_roms
 	int wave_rom_count;
 	/* the SC-8850 only: the CPU's own 64 KB ROM and the 2 MB tone parameter
 	 * flash; program_rom is its 1 MB program flash, and the wave ROMs are
-	 * IC53, IC54 */
+	 * IC53, IC54.  The SC-8820 takes the 64 KB CPU ROM too, its 2 MB flash
+	 * (program and tone parameters in one) as program_rom, no tone_rom, and
+	 * its wave ROMs IC7 (16 MB) and IC8 (8 MB) */
 	const void *boot_rom;
 	size_t boot_rom_size;
 	const void *tone_rom;
@@ -105,7 +108,7 @@ typedef enum scemu_button
 	SCEMU_BUTTON_F2,
 	SCEMU_BUTTON_F3,
 	SCEMU_BUTTON_F4,
-	SCEMU_BUTTON_MAP,             /* SC-8850: Inst Map, the fifth key under the display */
+	SCEMU_BUTTON_MAP,             /* SC-8850: Inst Map, the fifth key under the display; the SC-8820's one key */
 	SCEMU_BUTTON_VALUE,           /* SC-8850: the value dial's push switch */
 	SCEMU_BUTTON_EDIT,            /* SC-8850: Edit / Util */
 	SCEMU_BUTTON_DRUM,
@@ -122,7 +125,9 @@ typedef enum scemu_button
 	SCEMU_BUTTON_COUNT
 } scemu_button_t;
 
-/* Rear panel computer switch, read by the firmware through a resistor ladder. */
+/* Rear panel computer switch, read by the firmware through a resistor ladder
+ * (the SC-8820 asks its USB controller).  MAC is the SC-8850's USB position;
+ * on the SC-8820 PC2 is its Mac position and MAC its USB one. */
 typedef enum scemu_computer_switch
 {
 	SCEMU_COMPUTER_MIDI,
@@ -158,6 +163,17 @@ typedef enum scemu_led
 	SCEMU_LED_DRUM,
 	SCEMU_LED_EFFECTS,
 	SCEMU_LED_STANDBY,            /* SC-55mkII: lit while the machine is in standby */
+	SCEMU_LED_POWER,              /* the SC-8820 from here: the POWER lamp, lit by the firmware */
+	SCEMU_LED_USB,                /* a host is on the USB */
+	SCEMU_LED_MAP,                /* the red lamp inside the INST MAP key */
+	SCEMU_LED_PART_A1,            /* the PART A level strip, three green and an orange */
+	SCEMU_LED_PART_A2,
+	SCEMU_LED_PART_A3,
+	SCEMU_LED_PART_A4,
+	SCEMU_LED_PART_B1,            /* the PART B strip, which also shows the map after the key */
+	SCEMU_LED_PART_B2,
+	SCEMU_LED_PART_B3,
+	SCEMU_LED_PART_B4,
 	SCEMU_LED_COUNT
 } scemu_led_t;
 
@@ -187,7 +203,8 @@ typedef struct scemu_glcd
 } scemu_glcd_t;
 
 /* MIDI ports.  The Pro's front panel jack is a switch onto port B.  The
- * SC-8850 adds C and D, which only its USB port carries. */
+ * SC-8850 adds C and D, which only its USB port carries.  The SC-8820 has one
+ * MIDI IN jack, port A; its USB carries A and B. */
 enum { SCEMU_MIDI_IN_A = 0, SCEMU_MIDI_IN_B = 1, SCEMU_MIDI_IN_C = 2, SCEMU_MIDI_IN_D = 3 };
 
 /* Output pairs.  The SC-88 has one; the Pro adds OUTPUT 2. */

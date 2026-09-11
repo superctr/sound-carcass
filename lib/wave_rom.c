@@ -13,6 +13,8 @@ size_t wave_rom_size(scemu_model_t model)
 		return 0x1400000;
 	case SCEMU_MODEL_SC8850:
 		return 0x2000000;
+	case SCEMU_MODEL_SC8820:
+		return 0x1800000;
 	case SCEMU_MODEL_SC55MK2:
 		return 0x400000;
 	default:
@@ -20,8 +22,11 @@ size_t wave_rom_size(scemu_model_t model)
 	}
 }
 
+/* the SC-8820 numbers its 24 banks straight through, with no chip select, so its two ROMs are one chip */
 uint32_t wave_rom_chip_size(scemu_model_t model)
 {
+	if (model == SCEMU_MODEL_SC8820)
+		return 0x1000000;
 	return (model == SCEMU_MODEL_SC88 || model == SCEMU_MODEL_SC88VL) ? 0x200000 : 0x400000;
 }
 
@@ -80,7 +85,7 @@ static bool build_sc55mk2(const scemu_roms_t *roms, uint8_t *out, size_t out_siz
 bool wave_rom_build(scemu_model_t model, const scemu_roms_t *roms, uint8_t *out, size_t out_size)
 {
 	size_t offset = 0;
-	const uint8_t *address_lines = model == SCEMU_MODEL_SC8850 ? ADDRESS_LINES_SC8850 : ADDRESS_LINES_SC88;
+	const uint8_t *address_lines = model == SCEMU_MODEL_SC8850 || model == SCEMU_MODEL_SC8820 ? ADDRESS_LINES_SC8850 : ADDRESS_LINES_SC88;
 	if (out_size < wave_rom_size(model))
 		return false;
 	if (model == SCEMU_MODEL_SC55MK2)
