@@ -129,6 +129,12 @@ static int32_t mul20x8(int32_t value, int8_t coef)
 	return bit(product, 27) ? (product | ~0x1ffffff) : (product & 0x1ffffff);
 }
 
+static int32_t mul24x8(int32_t value, int8_t coef)
+{
+	const int32_t product = (int32_t)((uint32_t)value * (uint32_t)(int32_t)coef);
+	return bit(product, 31) ? (product | ~0x1fffffff) : (product & 0x1fffffff);
+}
+
 static inline int32_t scaled(int32_t value, int8_t coef) { return mul20x8(value, coef) >> 5; }
 static inline int32_t half(int32_t value) { return (value >> 1) + (value & 1); }
 static inline int32_t blend(int32_t a, int32_t b) { return sat20((int64_t)(a >> 1) + (b >> 1) + ((a | b) & 1)); }
@@ -284,6 +290,11 @@ static inline int32_t filter_rail(int64_t value, int rail)
 	return (int32_t)(value > limit - 1 ? limit - 1 : value < -limit ? -limit : value);
 }
 
+static inline int32_t filter_product(const gp_t *gp, int32_t value, int8_t coef)
+{
+	return (gp->gp4 ? mul24x8(value, coef) : mul20x8(value, coef)) >> 5;
+}
+
 static int32_t run_filter(gp_t *gp, int slot, int32_t input)
 {
 	const uint16_t flags = narrow(gp, slot, N_FLAGS);
@@ -296,12 +307,12 @@ static int32_t run_filter(gp_t *gp, int slot, int32_t input)
 	int32_t low = gp->slots[slot].filter_low;
 	int32_t band = gp->slots[slot].filter_band;
 
-	low = filter_rail((int64_t)low + half(scaled(band, coarse)), rail);
-	low = filter_rail((int64_t)low + half(scaled(band, fine) >> 7), rail);
-	const int32_t inner = filter_rail((int64_t)low + half(scaled(band, resonance)), rail);
+	low = filter_rail((int64_t)low + half(filter_product(gp, band, coarse)), rail);
+	low = filter_rail((int64_t)low + half(filter_product(gp, band, fine) >> 7), rail);
+	const int32_t inner = filter_rail((int64_t)low + half(filter_product(gp, band, resonance)), rail);
 	const int32_t high = filter_rail((int64_t)input - inner, rail);
-	band = filter_rail((int64_t)band + half(scaled(high, coarse)), rail);
-	band = filter_rail((int64_t)band + half(scaled(high, fine) >> 7), rail);
+	band = filter_rail((int64_t)band + half(filter_product(gp, high, coarse)), rail);
+	band = filter_rail((int64_t)band + half(filter_product(gp, high, fine) >> 7), rail);
 
 	gp->slots[slot].filter_low = low;
 	gp->slots[slot].filter_band = band;
