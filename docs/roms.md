@@ -52,10 +52,6 @@ Four images: the control program, the main CPU's own internal ROM and the two wa
 | wave ROM IC15 | 2 MiB | `1519d3b3` |
 | wave ROM IC16 | 1 MiB | `0f826c7f` |
 
-MAME's `sc55mk2` set holds an NVRAM image besides, and that is not needed: the firmware initialises a
-blank battery SRAM by itself, without saying so, and comes up in the state a unit that has had its
-factory setup run is in.
-
 ## SC-88
 
 | image | size | CRC32 |
@@ -124,11 +120,11 @@ the two wave ROMs, 16 MB and 8 MB.
 | wave ROM IC7 | 16 MiB | `2cfe5aa2` (the SC-8850's IC53, the same chip) |
 | wave ROM IC8 | 8 MiB | `38908222` |
 
-The CPU ROM has never been dumped.  What stands in for it is `sc8820rom`'s reconstruction — the
-SC-8850's ROM carried over to this machine's addresses, built with a local compiler, not a dump and
-not shareable — so it has no fixed CRC: a 64 KiB image is taken for it when it carries that build's
-version routine at the address the flash calls.  The USB controller's ROM is not dumped either and
-is not needed, as on the SC-8850.
+The CPU ROM has never been dumped.  What stands in for it is a reconstruction: the
+SC-8850's ROM carried over to this machine's addresses.
+This reconstruction is part of the MAME .290 ROM set, once a proper dump has been made,
+this program will need to be updated.
+The USB controller's ROM is not dumped either and is not needed, as on the SC-8850.
 
 ## The sub-CPU
 
