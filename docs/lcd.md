@@ -64,3 +64,10 @@ Positions in the driver's 720 × 272 rendering of the glass, for a host that wan
 | L mark / R mark | (254, 74) / (254, 234), 11 × 12 |
 
 Colours the SC-88's backlight gives: background `#f8c840`, segment on `#201000`.
+
+## The glass is slower than the memory
+
+A host that draws the memory as it stands is sharper than the machine.  The plainest case: on the
+SC-55mkII the display task repaints the instrument name over a scrolling display message whenever the
+level bars move and puts the message back 63 ms later, which the response time of the real glass
+swallows and a frame-rate sample does not.

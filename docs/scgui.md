@@ -75,6 +75,10 @@ machine.  Files on the command line become the playlist and the first one plays.
   Mode is left out of the menus, since nothing here answers it yet; the power-on combinations that are
   offered (the version display, the MIDI THRU check) do not take effect either, and that file says so.
 
+- **The display** is drawn from the controller's memory as it stands, sharper than the real glass: the
+  SC-55mkII's firmware flashes the instrument name over a scrolling display message, which the hardware's
+  response time would swallow (`docs/lcd.md`).
+
 Keys: `space` pause, `n` / `p` next and previous song, `l` the playlist, `q` quit.
 
 ## The playlist
