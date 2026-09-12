@@ -1,10 +1,7 @@
 # scemu aka SoundCarcass
 
 An emulator of the Roland Sound Canvas SC-55, SC-55mkII, SC-88, SC-88VL, SC-88Pro, SC-8850 and SC-8820 as a C library,
-with a terminal player and a headless renderer.  It runs the machine's own firmware on an emulated
-board; the H8/510 main CPU (the H8/532 on the SC-55 and the SC-55mkII, the SH-2 on the SC-8850), the XP tone
-generator's DSP program and the LSP effect processor's program are all compiled to native code with
-[sljit](https://github.com/zherczeg/sljit).  It comes as a library, two players and a CLAP plugin.
+with headless/TUI/GUI players and an audio plugin.
 
 Clean-room, BSD-3.  You need your own ROM images: see `docs/roms.md`.
 
@@ -40,30 +37,14 @@ battery-backed settings memory, can be saved and restored.
 
 `scemu-cli <sc88|sc88vl|sc88pro|sc8850|sc8820|sc55mk2|sc55> <romdir> <out.wav> [--midi file.mid] [--seconds N] [--state boot.state] [--computer midi|pc1|pc2|usb]
 ...` boots the machine (or loads a saved state, saving one after the boot when the file is not there) and
-renders a song to a WAV file.
+renders a song to a WAV file. This tool is mainly used for debugging.
 
-`scplay song.mid` plays a Standard MIDI File to the speakers with the front panel drawn in the terminal:
-the LCD's text fields, the sixteen level bars animating from the CGRAM patterns the firmware writes, the
-LEDs and a clock, with the panel buttons on the keyboard (on the SC-8850, whose panel is one 160 × 64
-bitmap, that display drawn dot for dot in half-block characters, with the value dial on two keys).  It
-finds its ROM images by itself — recognised by content, in any zip or directory beside the program or
-in `~/.mame/roms` (`docs/roms.md`) — boots the firmware once and
-caches the booted machine, so later runs start instantly from factory settings (`--keep-settings` keeps
-the machine's settings memory across sessions instead).  `--no-audio --wav out.wav` renders a file
-about ten times faster than real time instead, and `--map sc55` (or `sc88`, `sc88pro`) plays every part
-from that instrument map whatever the song selects; `--midi-rate 38400` feeds the file at the
-computer port's speed instead of the cable's, and `--rate 44100` asks the sound card, and writes the
-wav, at that rate instead of the machine's own.  A dual-port file (tracks with port events, the
-32-part songs written for a Pro on both MIDI INs) plays on both blocks, and on an SC-8850, whose
-switch is on USB by default, a four-port file plays on all four groups, 64 parts.  See [docs/scplay.md](docs/scplay.md).
+`scplay song.mid` plays a Standard MIDI File to the speakers with the front panel drawn in the terminal.
+See [docs/scplay.md](docs/scplay.md).
 
 `scgui` is the same player as a desktop window: the front panel drawn from `gui/`'s artwork, its
 buttons under the mouse, the volume knob and the SC-8850's value dial under the wheel, a playlist in a
-second window.  It needs GTK 4 besides zlib.  See [docs/scgui.md](docs/scgui.md).  Both players play
-through PortAudio, convert to the output rate with libsamplerate and `scgui` takes MIDI through
-PortMidi, all built from the submodules (`git submodule update --init`).  The library itself renders
-at the machine's own rate and resamples nothing.
-Without zlib the library and `scemu-cli` still build.
+second window.  It needs GTK 4 besides zlib.  See [docs/scgui.md](docs/scgui.md).
 
 `scemu.clap` is the emulator as a CLAP instrument, one per model, for a DAW: the machine's outputs as
 two stereo ports, its MIDI INs and OUT as note ports, the volume, the map, the MIDI speed and the
