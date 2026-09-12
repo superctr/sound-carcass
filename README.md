@@ -61,4 +61,8 @@ Thanks to:
 - [nukeykt](https://github.com/nukeykt/) for reverse engineering the GP (SC-55 sound chip)
 - [kode54](https://github.com/TabulaSonora) for reverse engineering Sound Canvas VA and its synth engine which was used as a reference for the initial XP implementation.
 
+### Disclaimers
+
+This project is not affiliated with Roland Corporation.
+
 AI disclosure: Claude Opus 5, Claude Fable 5 and 5.1 were used in this project.
