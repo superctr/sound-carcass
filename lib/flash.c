@@ -1,5 +1,6 @@
 #include <string.h>
 #include "flash.h"
+#include "state.h"
 
 #define STATUS_READY 0x80
 #define STATUS_PROGRAM_ERROR 0x10
@@ -89,4 +90,21 @@ void flash_write(flash_t *f, uint32_t offset, uint16_t data)
 	case 0xb0: case 0xd0: f->mode = FLASH_READ_STATUS; break;
 	default: break;
 	}
+}
+
+/* ---------------------------------------------------------------- the state */
+
+static bool state_restored(void *user)
+{
+	flash_t *f = user;
+	f->erased = false;
+	return true;
+}
+
+void flash_state(flash_t *f, state_registry_t *reg)
+{
+	state_var(reg, f->mode);
+	state_var(reg, f->pending);
+	state_var(reg, f->status);
+	state_after_load(reg, state_restored, f);
 }

@@ -1,5 +1,6 @@
 #include <string.h>
 #include "uipc.h"
+#include "state.h"
 
 #define UIPC_STATUS_RX 0x01
 #define UIPC_PACKET_START 0x04
@@ -291,4 +292,50 @@ void uipc_frame(uipc_t *u)
 		u->poll = 0;
 		tx_event(u);
 	}
+}
+
+/* ---------------------------------------------------------------- the state */
+
+/* the mailbox queue from its head, so a load starts it at zero */
+static void put_rx(state_writer_t *w, void *user)
+{
+	const uipc_t *u = user;
+	put16(w, u->rx_count);
+	for (uint16_t n = 0; n < u->rx_count; n++)
+		put16(w, u->rx[(u->rx_head + n) % UIPC_RX]);
+}
+
+static void get_rx(state_reader_t *r, void *user)
+{
+	uipc_t *u = user;
+	const uint16_t count = get16(r);
+	if (count > UIPC_RX)
+	{
+		r->ok = false;
+		return;
+	}
+	u->rx_head = 0;
+	u->rx_count = count;
+	for (uint16_t n = 0; n < count; n++)
+		u->rx[n] = get16(r);
+}
+
+void uipc_state(uipc_t *u, state_registry_t *reg)
+{
+	state_custom(reg, put_rx, get_rx, u);
+	state_array(reg, u->tx);
+	state_var(reg, u->tx_count);
+	state_var(reg, u->boot);
+	state_bool(reg, u->running);
+	state_bool(reg, u->host);
+	state_bool(reg, u->online);
+	for (int n = 0; n < 3; n++)
+		state_field(reg, u->in, UIPC_PORTS, msg[n]);
+	state_field(reg, u->in, UIPC_PORTS, count);
+	state_field(reg, u->in, UIPC_PORTS, need);
+	state_field(reg, u->in, UIPC_PORTS, cin);
+	state_field(reg, u->in, UIPC_PORTS, status);
+	state_bool_field(reg, u->in, UIPC_PORTS, sysex);
+	state_var(reg, u->announce);
+	state_var(reg, u->poll);
 }

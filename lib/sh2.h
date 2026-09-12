@@ -215,4 +215,7 @@ size_t sh2_jit_block_count(const sh2_t *cpu);
 /* blocks run, instructions handed to the interpreter, interrupts taken, peripheral flushes */
 void sh2_jit_stats(const sh2_t *cpu, uint64_t out[4]);
 
+struct state_registry;
+void sh2_state(sh2_t *cpu, struct state_registry *reg);
+
 #endif

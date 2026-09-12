@@ -94,4 +94,7 @@ uint8_t sub55_hle_leds(const sub55_hle_t *sub);
 
 void sub55_hle_frame(sub55_hle_t *sub);
 
+struct state_registry;
+void sub55_hle_state(sub55_hle_t *sub, struct state_registry *reg);
+
 #endif

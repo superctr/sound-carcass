@@ -23,4 +23,7 @@ void lcd_reset(lcd_t *lcd);
 void lcd_command(lcd_t *lcd, uint8_t data);
 void lcd_data(lcd_t *lcd, uint8_t data);
 
+struct state_registry;
+void lcd_state(lcd_t *lcd, struct state_registry *reg);
+
 #endif

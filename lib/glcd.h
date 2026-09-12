@@ -48,4 +48,7 @@ void glcd_write(glcd_t *g, uint32_t offset, uint8_t data);
 void glcd_frame(glcd_t *g);
 const scemu_glcd_t *glcd_out(glcd_t *g);
 
+struct state_registry;
+void glcd_state(glcd_t *g, struct state_registry *reg);
+
 #endif

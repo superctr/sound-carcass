@@ -529,9 +529,53 @@ static bool ops_nvram_set(void *board, const void *buffer, size_t size)
 	return true;
 }
 
-static size_t ops_state_size(const void *b) { return sc55_state_size(b); }
-static size_t ops_state_save(const void *b, void *buffer, size_t size) { return sc55_state_save(b, buffer, size); }
-static bool ops_state_load(void *b, const void *buffer, size_t size) { return sc55_state_load(b, buffer, size); }
+/* ---------------------------------------------------------------- the state */
+
+static bool state_restored(void *user)
+{
+	sc55_t *b = user;
+	h8500_set_irq(&b->cpu, H8500_IRQ0, b->gp.irq_pending);
+	h8500_set_irq(&b->cpu, H8500_IRQ1, (b->int_pending & ~b->int_mask) != 0);
+	return true;
+}
+
+static void ops_state_register(void *board, state_registry_t *reg)
+{
+	sc55_t *b = board;
+
+	state_chunk(reg, "BRD4");
+	state_var(reg, b->cpu_quarter_cycles);
+	state_var(reg, b->gp_pair);
+	state_bool(reg, b->lcd_powered);
+	state_var(reg, b->scan);
+	state_var(reg, b->int_mask);
+	state_var(reg, b->int_pending);
+	state_var(reg, b->lcd_done);
+	state_array(reg, b->keys);
+	state_var(reg, b->gp_written);
+	state_var(reg, b->frame);
+
+	state_chunk(reg, "SRAM");
+	state_array(reg, b->sram);
+
+	state_chunk(reg, "CPU ");
+	h8500_state(&b->cpu, reg);
+
+	state_chunk(reg, "GP  ");
+	gp_state(&b->gp, reg);
+
+	state_chunk(reg, "LCD ");
+	lcd_state(&b->lcd, reg);
+
+	state_chunk(reg, "USRT");
+	i8251_state(&b->usart, reg);
+	state_bool(reg, b->rxrdy);
+
+	state_chunk(reg, "MIDI");
+	midi_queue_state(&b->midi, reg);
+
+	state_after_load(reg, state_restored, b);
+}
 
 const board_ops_t sc55_board_ops =
 {
@@ -540,5 +584,5 @@ const board_ops_t sc55_board_ops =
 	ops_midi, ops_set_midi_out,
 	ops_button, ops_set_computer_switch, ops_leds, ops_lcd, NULL, NULL,
 	ops_nvram_size, ops_nvram_get, ops_nvram_set,
-	ops_state_size, ops_state_save, ops_state_load,
+	ops_state_register,
 };

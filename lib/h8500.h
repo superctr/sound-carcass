@@ -244,4 +244,7 @@ static inline size_t h8500_jit_block_count(const h8500_t *cpu) { (void)cpu; retu
 static inline void h8500_jit_stats(const h8500_t *cpu, uint64_t out[4]) { (void)cpu; out[0] = out[1] = out[2] = out[3] = 0; }
 #endif
 
+struct state_registry;
+void h8500_state(h8500_t *cpu, struct state_registry *reg);
+
 #endif

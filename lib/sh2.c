@@ -1,5 +1,6 @@
 #include <string.h>
 #include "sh2.h"
+#include "state.h"
 #include "sh2_jit.h"
 
 #define SR_T 0x00000001u
@@ -2110,4 +2111,118 @@ int sh2_run(sh2_t *cpu, int cycles)
 	while (ran < cycles)
 		ran += sh2_step(cpu);
 	return ran;
+}
+
+/* ---------------------------------------------------------------- the state */
+
+static bool state_restored(void *user)
+{
+	sh2_t *cpu = user;
+	cpu->irq_ready = false;
+	cpu->jit_pending = 0;
+	cpu->jit_limit = 0;
+	cpu->jit_deadline = 0;
+	return true;
+}
+
+void sh2_state(sh2_t *cpu, state_registry_t *reg)
+{
+	state_array(reg, cpu->r);
+	state_var(reg, cpu->sr);
+	state_var(reg, cpu->gbr);
+	state_var(reg, cpu->vbr);
+	state_var(reg, cpu->mach);
+	state_var(reg, cpu->macl);
+	state_var(reg, cpu->pr);
+	state_var(reg, cpu->pc);
+	state_var(reg, cpu->delay_target);
+	state_bool(reg, cpu->delay);
+	state_bool(reg, cpu->sleeping);
+
+	state_array(reg, cpu->ipr);
+	state_var(reg, cpu->icr);
+	state_var(reg, cpu->isr);
+	state_array(reg, cpu->pending);
+	state_var(reg, cpu->irq_line);
+	state_bool(reg, cpu->nmi_line);
+	state_bool(reg, cpu->nmi_pending);
+
+	state_field(reg, cpu->sci, 2, smr);
+	state_field(reg, cpu->sci, 2, brr);
+	state_field(reg, cpu->sci, 2, scr);
+	state_field(reg, cpu->sci, 2, tdr);
+	state_field(reg, cpu->sci, 2, ssr);
+	state_field(reg, cpu->sci, 2, rdr);
+	state_field(reg, cpu->sci, 2, tx_shift);
+	state_field(reg, cpu->sci, 2, tx_timer);
+	state_bool_field(reg, cpu->sci, 2, tx_busy);
+	state_field(reg, cpu->sci, 2, rx_byte);
+	state_bool_field(reg, cpu->sci, 2, rx_pending);
+	state_bool_field(reg, cpu->sci, 2, int_rxi);
+	state_bool_field(reg, cpu->sci, 2, int_txi);
+	state_bool_field(reg, cpu->sci, 2, int_tei);
+	state_bool_field(reg, cpu->sci, 2, int_eri);
+
+	state_field(reg, cpu->mtu, 3, tcr);
+	state_field(reg, cpu->mtu, 3, tmdr);
+	state_field(reg, cpu->mtu, 3, tiorh);
+	state_field(reg, cpu->mtu, 3, tiorl);
+	state_field(reg, cpu->mtu, 3, tier);
+	state_field(reg, cpu->mtu, 3, tsr);
+	state_field(reg, cpu->mtu, 3, tcnt);
+	for (int n = 0; n < 4; n++)
+		state_field(reg, cpu->mtu, 3, tgr[n]);
+	state_field(reg, cpu->mtu, 3, prescale);
+	state_bool_field(reg, cpu->mtu, 3, active);
+	state_var(reg, cpu->tsyr);
+
+	state_var(reg, cpu->wtcsr);
+	state_var(reg, cpu->wtcnt);
+	state_var(reg, cpu->rstcsr);
+	state_var(reg, cpu->wdt_prescale);
+	state_bool(reg, cpu->wdt_int);
+
+	state_array(reg, cpu->addr_);
+	state_var(reg, cpu->adcsr);
+	state_var(reg, cpu->adcr);
+	state_var(reg, cpu->adc_timer);
+	state_bool(reg, cpu->adc_int);
+
+	state_field(reg, cpu->dma, 2, sar);
+	state_field(reg, cpu->dma, 2, dar);
+	state_field(reg, cpu->dma, 2, chcr);
+	state_field(reg, cpu->dma, 2, dmatcr);
+	state_field(reg, cpu->dma, 2, count);
+	state_field(reg, cpu->dma, 2, timer);
+	state_bool_field(reg, cpu->dma, 2, active);
+	state_bool_field(reg, cpu->dma, 2, int_te);
+	state_var(reg, cpu->dmaor);
+
+	state_var(reg, cpu->padr);
+	state_var(reg, cpu->paior);
+	state_var(reg, cpu->pacr1);
+	state_var(reg, cpu->pacr2);
+	state_var(reg, cpu->pbdr);
+	state_var(reg, cpu->pbior);
+	state_var(reg, cpu->pbcr1);
+	state_var(reg, cpu->pbcr2);
+	state_var(reg, cpu->pedr);
+	state_var(reg, cpu->peior);
+	state_var(reg, cpu->pecr1);
+	state_var(reg, cpu->pecr2);
+	state_array(reg, cpu->port_out);
+
+	state_var(reg, cpu->bcr1);
+	state_var(reg, cpu->bcr2);
+	state_var(reg, cpu->wcr1);
+	state_var(reg, cpu->wcr2);
+	state_var(reg, cpu->dcr);
+	state_var(reg, cpu->rtcsr);
+	state_var(reg, cpu->rtcnt);
+	state_var(reg, cpu->rtcor);
+	state_var(reg, cpu->ccr);
+
+	state_array(reg, cpu->ram);
+	state_var(reg, cpu->cycles);
+	state_after_load(reg, state_restored, cpu);
 }

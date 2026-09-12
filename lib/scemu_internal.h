@@ -2,6 +2,7 @@
 #define SCEMU_INTERNAL_H
 
 #include "scemu.h"
+#include "state.h"
 #include "midi_queue.h"
 #include "midi_map.h"
 #include "sc88.h"
@@ -42,9 +43,8 @@ typedef struct board_ops
 	size_t (*nvram_get)(const void *board, void *buffer, size_t size);
 	bool (*nvram_set)(void *board, const void *buffer, size_t size);
 
-	size_t (*state_size)(const void *board);
-	size_t (*state_save)(const void *board, void *buffer, size_t size);
-	bool (*state_load)(void *board, const void *buffer, size_t size);
+	/* what the board and its chips keep, for state.c to write and read */
+	void (*state_register)(void *board, state_registry_t *reg);
 } board_ops_t;
 
 extern const board_ops_t sc88_board_ops;

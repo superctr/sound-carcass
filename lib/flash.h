@@ -30,4 +30,7 @@ void flash_write(flash_t *f, uint32_t offset, uint16_t data);
 
 static inline bool flash_in_array(const flash_t *f) { return f->mode == FLASH_READ_ARRAY; }
 
+struct state_registry;
+void flash_state(flash_t *f, struct state_registry *reg);
+
 #endif

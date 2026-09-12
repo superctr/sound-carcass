@@ -79,4 +79,7 @@ void sub_hle_midi_byte(sub_hle_t *sub, int source, uint8_t byte);
 void sub_hle_set_key(sub_hle_t *sub, int row, int bit, bool down);
 void sub_hle_frame(sub_hle_t *sub);
 
+struct state_registry;
+void sub_hle_state(sub_hle_t *sub, struct state_registry *reg);
+
 #endif

@@ -750,9 +750,80 @@ static bool ops_nvram_set(void *board, const void *buffer, size_t size)
 	return true;
 }
 
-static size_t ops_state_size(const void *b) { return sc8850_state_size(b); }
-static size_t ops_state_save(const void *b, void *buffer, size_t size) { return sc8850_state_save(b, buffer, size); }
-static bool ops_state_load(void *b, const void *buffer, size_t size) { return sc8850_state_load(b, buffer, size); }
+/* ---------------------------------------------------------------- the state */
+
+static bool state_restored(void *user)
+{
+	sc8850_t *b = user;
+	for (int n = 0; n < b->cpu.region_count; n++)
+	{
+		if (b->cpu.regions[n].data == b->program_flash.data)
+			b->cpu.regions[n].bypass = !flash_in_array(&b->program_flash);
+		if (b->cpu.regions[n].data == b->tone_flash.data)
+			b->cpu.regions[n].bypass = !flash_in_array(&b->tone_flash);
+	}
+	sh2_jit_flush(&b->cpu);
+	return true;
+}
+
+static void ops_state_register(void *board, state_registry_t *reg)
+{
+	sc8850_t *b = board;
+
+	state_chunk(reg, "BRD2");
+	state_var(reg, b->cpu_overshoot);
+	state_bool(reg, b->mute);
+	state_var(reg, b->computer_switch);
+	state_var(reg, b->frame);
+	state_var(reg, b->tg_written);
+
+	state_chunk(reg, "SH2 ");
+	sh2_state(&b->cpu, reg);
+
+	state_chunk(reg, "DRAM");
+	state_array(reg, b->dram);
+
+	state_chunk(reg, "XP1 ");
+	xp_state(&b->master, reg);
+
+	state_chunk(reg, "XP2 ");
+	xp_state(&b->slave, reg);
+
+	state_chunk(reg, "LSP ");
+	lsp_state(&b->lsp, reg);
+
+	state_chunk(reg, "GA2 ");
+	state_array(reg, b->ga.regs);
+	state_var(reg, b->ga.requests);
+	state_var(reg, b->ga.source);
+	state_var(reg, b->ga.event);
+	state_bool(reg, b->ga.pending);
+	state_var(reg, b->ga.encoder);
+	state_array(reg, b->ga.keys);
+	state_array(reg, b->ga.key_state);
+	state_var(reg, b->ga.scan_position);
+	state_bool(reg, b->ga.scan_encoder);
+	state_var(reg, b->ga.scan_frames);
+	state_var(reg, b->ga.tick_frames);
+	state_var(reg, b->ga.sequencer_frames);
+	state_var(reg, b->ga.leds);
+
+	state_chunk(reg, "GLCD");
+	glcd_state(&b->glcd, reg);
+
+	state_chunk(reg, "FLSH");
+	flash_state(&b->program_flash, reg);
+	flash_state(&b->tone_flash, reg);
+	state_block(reg, b->program_rom + SC8850_NVRAM_BASE, SC8850_NVRAM_SIZE);
+
+	state_chunk(reg, "UIPC");
+	uipc_state(&b->uipc, reg);
+
+	state_chunk(reg, "MIDI");
+	midi_queue_state(&b->midi, reg);
+
+	state_after_load(reg, state_restored, b);
+}
 
 const board_ops_t sc8850_board_ops =
 {
@@ -761,5 +832,5 @@ const board_ops_t sc8850_board_ops =
 	ops_midi, ops_set_midi_out,
 	ops_button, ops_set_computer_switch, ops_leds, NULL, ops_glcd, ops_dial,
 	ops_nvram_size, ops_nvram_get, ops_nvram_set,
-	ops_state_size, ops_state_save, ops_state_load,
+	ops_state_register,
 };

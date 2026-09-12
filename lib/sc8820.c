@@ -517,9 +517,61 @@ static size_t ops_nvram_size(const void *b) { (void)b; return 0; }
 static size_t ops_nvram_get(const void *b, void *buffer, size_t size) { (void)b; (void)buffer; (void)size; return 0; }
 static bool ops_nvram_set(void *b, const void *buffer, size_t size) { (void)b; (void)buffer; (void)size; return false; }
 
-static size_t ops_state_size(const void *b) { return sc8820_state_size(b); }
-static size_t ops_state_save(const void *b, void *buffer, size_t size) { return sc8820_state_save(b, buffer, size); }
-static bool ops_state_load(void *b, const void *buffer, size_t size) { return sc8820_state_load(b, buffer, size); }
+/* ---------------------------------------------------------------- the state */
+
+static bool state_restored(void *user)
+{
+	sc8820_t *b = user;
+	for (int n = 0; n < b->cpu.region_count; n++)
+		if (b->cpu.regions[n].data == b->flash.data)
+			b->cpu.regions[n].bypass = !flash_in_array(&b->flash);
+	sh2_jit_flush(&b->cpu);
+	return true;
+}
+
+static void ops_state_register(void *board, state_registry_t *reg)
+{
+	sc8820_t *b = board;
+
+	state_chunk(reg, "BRD2");
+	state_var(reg, b->cpu_overshoot);
+	state_bool(reg, b->mute);
+	state_var(reg, b->computer_switch);
+	state_var(reg, b->frame);
+	state_var(reg, b->tg_written);
+
+	state_chunk(reg, "SH2 ");
+	sh2_state(&b->cpu, reg);
+
+	state_chunk(reg, "DRAM");
+	state_array(reg, b->dram);
+
+	state_chunk(reg, "XP  ");
+	xp_state(&b->xp, reg);
+
+	state_chunk(reg, "LSP ");
+	lsp_state(&b->lsp, reg);
+
+	state_chunk(reg, "FLSH");
+	flash_state(&b->flash, reg);
+
+	state_chunk(reg, "UIPC");
+	uipc_state(&b->uipc, reg);
+
+	state_chunk(reg, "PNL2");
+	state_var(reg, b->panel.pe);
+	state_var(reg, b->panel.pa);
+	state_bool(reg, b->panel.written);
+	state_array(reg, b->panel.column);
+	state_bool(reg, b->panel.map_key);
+	state_bool(reg, b->panel.preview_key);
+	state_var(reg, b->panel.leds);
+
+	state_chunk(reg, "MIDI");
+	midi_queue_state(&b->midi, reg);
+
+	state_after_load(reg, state_restored, b);
+}
 
 const board_ops_t sc8820_board_ops =
 {
@@ -528,5 +580,5 @@ const board_ops_t sc8820_board_ops =
 	ops_midi, ops_set_midi_out,
 	ops_button, ops_set_computer_switch, ops_leds, NULL, NULL, NULL,
 	ops_nvram_size, ops_nvram_get, ops_nvram_set,
-	ops_state_size, ops_state_save, ops_state_load,
+	ops_state_register,
 };

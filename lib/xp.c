@@ -3,6 +3,7 @@
 #include <math.h>
 #include <stddef.h>
 #include "xp.h"
+#include "state.h"
 
 static const int16_t interp_weights[3][128] = {
 	{
@@ -1982,4 +1983,63 @@ int32_t xp_bus_word(const xp_t *xp, int n)
 void xp_set_bus_word(xp_t *xp, int n, int32_t value)
 {
 	xp->iram[cell_of(0x40 + (n & 63), xp->parity)] = value;
+}
+
+/* ---------------------------------------------------------------- the state */
+
+static bool state_restored(void *user)
+{
+	xp_t *xp = user;
+	xp->named_words = 0;
+	xp->sends_dirty = true;
+	xp->program_dirty = true;
+	memset(xp->live, 0, sizeof(xp->live));
+	return true;
+}
+
+void xp_state(xp_t *xp, state_registry_t *reg)
+{
+	state_array(reg, xp->regs);
+	state_field(reg, xp->voices, XP_VOICES, phase);
+	state_field(reg, xp->voices, XP_VOICES, format);
+	state_field(reg, xp->voices, XP_VOICES, fade_entry);
+	state_array(reg, xp->still);
+	state_var(reg, xp->run_mask);
+	state_var(reg, xp->run_pending);
+	state_var(reg, xp->read_latch);
+	state_var(reg, xp->write_latch);
+	state_var(reg, xp->frame_counter);
+	state_var(reg, xp->irq_event);
+	state_bool(reg, xp->irq_active);
+	state_bool(reg, xp->irq_frame_used);
+	state_bool(reg, xp->int_state);
+
+	xp_dsp_state_t *d = &xp->dsp;
+	state_var(reg, d->acc);
+	state_var(reg, d->product);
+	state_var(reg, d->r);
+	state_var(reg, d->input);
+	state_var(reg, d->now);
+	state_var(reg, d->latch);
+	state_var(reg, d->gain);
+	state_array(reg, d->pend);
+	state_var(reg, d->now_valid);
+	state_var(reg, d->cursor);
+	state_var(reg, d->port_a_in);
+	state_var(reg, d->port_b_in);
+	state_array(reg, d->port_a_return);
+	state_array(reg, d->port_b_pair);
+	state_var(reg, d->cycle);
+	state_var(reg, d->land_valid);
+	state_var(reg, d->strobe_a);
+	state_var(reg, d->strobe_bcd);
+	state_var(reg, d->position);
+
+	state_array(reg, xp->iram);
+	state_array(reg, xp->iram_ramping);
+	state_var(reg, xp->parity);
+	state_block(reg, &xp->port_word[0][0], XP_OUTPUT_PORTS * 2);
+	state_array(reg, xp->port_a_out);
+	state_block(reg, xp->eram, XP_ERAM_SIZE);
+	state_after_load(reg, state_restored, xp);
 }

@@ -1,4 +1,5 @@
 #include "i8251.h"
+#include "state.h"
 
 void i8251_reset(i8251_t *u)
 {
@@ -70,4 +71,22 @@ void i8251_receive(i8251_t *u, uint8_t byte)
 bool i8251_rxrdy(const i8251_t *u)
 {
 	return (u->status & I8251_RXRDY) != 0;
+}
+
+/* ---------------------------------------------------------------- the state */
+
+static bool state_restored(void *user)
+{
+	const i8251_t *u = user;
+	return u->next <= I8251_NEXT_COMMAND;
+}
+
+void i8251_state(i8251_t *u, state_registry_t *reg)
+{
+	state_var(reg, u->next);
+	state_var(reg, u->mode);
+	state_var(reg, u->command);
+	state_var(reg, u->status);
+	state_var(reg, u->rx_data);
+	state_after_load(reg, state_restored, u);
 }

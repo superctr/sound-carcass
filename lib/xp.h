@@ -204,4 +204,7 @@ void xp_set_bus_word(xp_t *xp, int n, int32_t value);
 void xp_decode_program(xp_t *xp);
 void xp_schedule(xp_t *xp);
 
+struct state_registry;
+void xp_state(xp_t *xp, struct state_registry *reg);
+
 #endif

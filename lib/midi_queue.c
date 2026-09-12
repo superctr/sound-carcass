@@ -1,5 +1,6 @@
 #include <string.h>
 #include "midi_queue.h"
+#include "state.h"
 
 void midi_queue_init(midi_queue_t *q, int ports, uint32_t rate)
 {
@@ -50,4 +51,51 @@ void midi_queue_deliver(midi_queue_t *q, uint32_t frame, midi_queue_take_fn take
 				q->credit[port] -= q->byte_units;
 		}
 	}
+}
+
+/* ---------------------------------------------------------------- the state */
+
+/* the bytes queued but not yet delivered, from the head */
+static void put_events(state_writer_t *w, void *user)
+{
+	const midi_queue_t *q = user;
+	for (int port = 0; port < q->ports; port++)
+	{
+		put32(w, q->credit[port]);
+		put32(w, q->count[port]);
+		for (uint32_t n = 0; n < q->count[port]; n++)
+		{
+			const midi_queue_event_t *e = &q->events[port][(q->head[port] + n) % MIDI_QUEUE_SIZE];
+			put32(w, e->frame);
+			put8(w, e->byte);
+		}
+	}
+}
+
+static void get_events(state_reader_t *r, void *user)
+{
+	midi_queue_t *q = user;
+	for (int port = 0; port < q->ports; port++)
+	{
+		q->credit[port] = get32(r);
+		const uint32_t count = get32(r);
+		if (count > MIDI_QUEUE_SIZE)
+		{
+			r->ok = false;
+			return;
+		}
+		q->head[port] = 0;
+		q->count[port] = count;
+		for (uint32_t n = 0; n < count; n++)
+		{
+			q->events[port][n].frame = get32(r);
+			q->events[port][n].byte = get8(r);
+		}
+	}
+}
+
+void midi_queue_state(midi_queue_t *q, state_registry_t *reg)
+{
+	state_custom(reg, put_events, get_events, q);
+	state_var(reg, q->drops);
 }

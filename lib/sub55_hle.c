@@ -1,5 +1,6 @@
 #include <string.h>
 #include "sub55_hle.h"
+#include "state.h"
 
 #define DP_TX_BLOCK 0x00
 #define DP_CHANNEL 0x20
@@ -523,4 +524,79 @@ void sub55_hle_init(sub55_hle_t *sub, uint32_t rate,
 
 	memset(sub->keys, 0xff, sizeof(sub->keys));
 	reset(sub, true);
+}
+
+/* ---------------------------------------------------------------- the state */
+
+/* a channel's bytes from its head, so a load starts it at zero */
+static void put_fifos(state_writer_t *w, void *user)
+{
+	const sub55_hle_t *sub = user;
+	for (int n = 0; n < SUB55_CHANNELS; n++)
+	{
+		const sub55_channel_t *ch = &sub->ch[n];
+		put16(w, ch->count);
+		for (uint16_t i = 0; i < ch->count; i++)
+			put8(w, ch->fifo[(ch->head + i) % SUB55_FIFO_SIZE]);
+		put8(w, ch->last_status);
+	}
+	put8(w, sub->tx_count);
+	for (uint8_t i = 0; i < sub->tx_count; i++)
+		put8(w, sub->tx[(sub->tx_head + i) % SUB55_TX_SIZE]);
+}
+
+static void get_fifos(state_reader_t *r, void *user)
+{
+	sub55_hle_t *sub = user;
+	for (int n = 0; n < SUB55_CHANNELS; n++)
+	{
+		sub55_channel_t *ch = &sub->ch[n];
+		const uint16_t count = get16(r);
+		if (count > SUB55_FIFO_SIZE)
+		{
+			r->ok = false;
+			return;
+		}
+		ch->head = 0;
+		ch->count = count;
+		for (uint16_t i = 0; i < count; i++)
+			ch->fifo[i] = get8(r);
+		ch->last_status = get8(r);
+	}
+	const uint8_t count = get8(r);
+	if (count > SUB55_TX_SIZE)
+	{
+		r->ok = false;
+		return;
+	}
+	sub->tx_head = 0;
+	sub->tx_count = count;
+	for (uint8_t i = 0; i < count; i++)
+		sub->tx[i] = get8(r);
+}
+
+void sub55_hle_state(sub55_hle_t *sub, state_registry_t *reg)
+{
+	state_array(reg, sub->dpram);
+	state_array(reg, sub->flags);
+	state_var(reg, sub->reason);
+	state_var(reg, sub->sem);
+	state_var(reg, sub->p0);
+	state_var(reg, sub->p0_dir);
+	state_array(reg, sub->keys);
+	state_bool(reg, sub->started);
+
+	state_field(reg, sub->src, SUB55_SOURCES, status);
+	state_field(reg, sub->src, SUB55_SOURCES, data[0]);
+	state_field(reg, sub->src, SUB55_SOURCES, data[1]);
+	state_field(reg, sub->src, SUB55_SOURCES, count);
+	state_field(reg, sub->src, SUB55_SOURCES, sense);
+
+	state_custom(reg, put_fifos, get_fifos, sub);
+	state_var(reg, sub->tx_status);
+	state_var(reg, sub->tx_frames);
+	state_var(reg, sub->boot_frames);
+	state_var(reg, sub->tick_frames);
+	state_var(reg, sub->sense_div);
+	state_bool(reg, sub->sensing);
 }

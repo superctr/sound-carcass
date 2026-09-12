@@ -1,5 +1,6 @@
 #include <string.h>
 #include "gp.h"
+#include "state.h"
 
 static const int16_t interp_weights[3][128] = {
 	{
@@ -867,4 +868,38 @@ uint32_t gp_wide(const gp_t *gp, int slot, int index)
 uint16_t gp_narrow(const gp_t *gp, int slot, int index)
 {
 	return gp->slots[slot].narrow[index];
+}
+
+/* ---------------------------------------------------------------- the state */
+
+void gp_state(gp_t *gp, state_registry_t *reg)
+{
+	for (int n = 0; n < 6; n++)
+		state_field(reg, gp->slots, GP_SLOTS, wide[n]);
+	for (int n = 0; n < 12; n++)
+		state_field(reg, gp->slots, GP_SLOTS, narrow[n]);
+	state_field(reg, gp->slots, GP_SLOTS, filter_low);
+	state_field(reg, gp->slots, GP_SLOTS, filter_band);
+	state_field(reg, gp->slots, GP_SLOTS, prefetch);
+	state_bool_field(reg, gp->slots, GP_SLOTS, crossed);
+
+	state_var(reg, gp->key_mask);
+	state_var(reg, gp->key_mask_pending);
+	state_bool(reg, gp->key_mask_dirty);
+	state_var(reg, gp->write_latch);
+	state_var(reg, gp->read_latch);
+	state_var(reg, gp->rom_address);
+	state_var(reg, gp->rom_byte);
+	state_var(reg, gp->output_config);
+	state_var(reg, gp->slot_config);
+	state_var(reg, gp->selected_slot);
+	state_var(reg, gp->irq_slot);
+	state_bool(reg, gp->irq_pending);
+	state_var(reg, gp->frame_counter);
+	state_bool(reg, gp->first_frame);
+	state_array(reg, gp->mix);
+	state_array(reg, gp->send);
+	state_array(reg, gp->returns);
+	state_block(reg, &gp->sample[0][0], 4);
+	state_array(reg, gp->eram);
 }

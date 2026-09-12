@@ -112,4 +112,7 @@ void lsp_serial_write(lsp_t *lsp, int channel, int32_t sample);
 int32_t lsp_serial_read(const lsp_t *lsp, int channel);
 void lsp_run_sample(lsp_t *lsp);
 
+struct state_registry;
+void lsp_state(lsp_t *lsp, struct state_registry *reg);
+
 #endif

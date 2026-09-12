@@ -43,4 +43,7 @@ void i8251_write(i8251_t *u, int cd, uint8_t data);
 void i8251_receive(i8251_t *u, uint8_t byte);
 bool i8251_rxrdy(const i8251_t *u);
 
+struct state_registry;
+void i8251_state(i8251_t *u, struct state_registry *reg);
+
 #endif

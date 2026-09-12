@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "lsp.h"
+#include "state.h"
 
 static const int32_t IMMEDIATE[5] = { 0, 1 << 7, 1 << 12, 1 << 17, 1 << 22 };
 
@@ -1433,4 +1434,49 @@ void lsp_run_sample(lsp_t *lsp)
 	lsp->serial_out[0] = lsp->audio_out;
 	lsp->state.buffer_pos = (lsp->state.buffer_pos - 1) & 0x7f;
 	lsp->state.eram_pos--;
+}
+
+/* ---------------------------------------------------------------- the state */
+
+static bool state_restored(void *user)
+{
+	lsp_t *lsp = user;
+	memset(lsp->iram_below, 0, sizeof(lsp->iram_below));
+	memset(lsp->iram_above, 0, sizeof(lsp->iram_above));
+	memcpy(lsp->iram_mirror, lsp->iram, sizeof(lsp->iram_mirror));
+	lsp->dirty = true;
+	return true;
+}
+
+void lsp_state(lsp_t *lsp, state_registry_t *reg)
+{
+	state_array(reg, lsp->program);
+	state_array(reg, lsp->iram);
+	state_array(reg, lsp->eram_cmd);
+
+	lsp_state_t *s = &lsp->state;
+	state_array(reg, s->acc);
+	state_block(reg, &s->hist[0][0], 2 * 3);
+	state_var(reg, s->eram_read);
+	state_array(reg, s->multiplier);
+	state_var(reg, s->eram_latch);
+	state_array(reg, s->eram_base);
+	state_var(reg, s->tap);
+	state_var(reg, s->eram_pos);
+	state_var(reg, s->slot);
+	state_array(reg, s->eram_tap2);
+	state_var(reg, s->prev_offset);
+	state_var(reg, s->buffer_pos);
+
+	state_var(reg, lsp->configuration);
+	state_bool(reg, lsp->running);
+	state_array(reg, lsp->patched);
+	state_array(reg, lsp->serial_in);
+	state_array(reg, lsp->serial_out);
+	state_var(reg, lsp->audio_out);
+	state_var(reg, lsp->host_data);
+	state_var(reg, lsp->host_read);
+	state_var(reg, lsp->host_address);
+	state_block(reg, lsp->eram, LSP_ERAM_SIZE);
+	state_after_load(reg, state_restored, lsp);
 }

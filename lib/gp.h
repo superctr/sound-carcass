@@ -83,4 +83,7 @@ uint32_t gp_output_rate(const gp_t *gp, uint32_t clock);
 uint32_t gp_wide(const gp_t *gp, int slot, int index);
 uint16_t gp_narrow(const gp_t *gp, int slot, int index);
 
+struct state_registry;
+void gp_state(gp_t *gp, struct state_registry *reg);
+
 #endif

@@ -244,29 +244,54 @@ void scemu_dial(scemu_t *m, int steps)
 		m->ops->dial(&m->board, steps);
 }
 
+/* what the board and its chips put in a state, asked for afresh each time, so the registration
+   never outlives the machine it points into */
+static state_registry_t *registry(const scemu_t *m)
+{
+	state_registry_t *reg = malloc(sizeof(*reg));
+	if (!reg)
+		return NULL;
+	state_begin(reg, (uint32_t)m->model, m->ops->rom_id(&m->board), m->ops->frame(&m->board));
+	m->ops->state_register((void *)&m->board, reg);
+	return reg;
+}
+
 size_t scemu_state_size(const scemu_t *m)
 {
-	return m->ops->state_size(&m->board);
+	state_registry_t *reg = registry(m);
+	if (!reg)
+		return 0;
+	const size_t size = state_size(reg);
+	free(reg);
+	return size;
 }
 
 size_t scemu_state_save(const scemu_t *m, void *buffer, size_t size)
 {
-	return m->ops->state_save(&m->board, buffer, size);
+	state_registry_t *reg = registry(m);
+	if (!reg)
+		return 0;
+	const size_t written = state_save(reg, buffer, size);
+	free(reg);
+	return written;
 }
 
 bool scemu_state_load(scemu_t *m, const void *buffer, size_t size)
 {
-	const uint32_t baud = m->ops->midi(&m->board)->baud;
-	if (!m->ops->state_load(&m->board, buffer, size))
+	state_registry_t *reg = registry(m);
+	if (!reg)
 		return false;
-	m->ops->midi(&m->board)->baud = baud;
+	const bool ok = state_load(reg, buffer, size);
+	free(reg);
+	if (!ok)
+		return false;
 	scemu_set_map(m, (scemu_map_t)m->map.map);
 	return true;
 }
 
 bool scemu_state_info(const void *buffer, size_t size, scemu_model_t *model, uint64_t *rom_id, uint64_t *frame)
 {
-	return sc88_state_info(buffer, size, model, rom_id, frame);
+	return state_info(buffer, size, model, rom_id, frame);
 }
 
 uint64_t scemu_rom_id(const scemu_t *m)

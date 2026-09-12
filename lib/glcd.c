@@ -1,5 +1,6 @@
 #include <string.h>
 #include "glcd.h"
+#include "state.h"
 
 #define GLCD_LINES 64
 #define GLCD_STRIDE 27
@@ -545,4 +546,60 @@ const scemu_glcd_t *glcd_out(glcd_t *g)
 	if (g->dirty)
 		compose(g);
 	return &g->out;
+}
+
+/* ---------------------------------------------------------------- the state */
+
+static bool state_restored(void *user)
+{
+	glcd_t *g = user;
+	g->dirty = true;
+	memset(&g->out, 0, sizeof(g->out));
+	glcd_out(g);
+	g->out.changed = true;
+	return true;
+}
+
+void glcd_state(glcd_t *g, state_registry_t *reg)
+{
+	state_array(reg, g->vram);
+	state_var(reg, g->command);
+	state_var(reg, g->param);
+	state_bool(reg, g->display);
+	state_bool(reg, g->sleep);
+	state_var(reg, g->m0);
+	state_var(reg, g->m1);
+	state_var(reg, g->m2);
+	state_var(reg, g->ws);
+	state_var(reg, g->iv);
+	state_var(reg, g->wf);
+	state_var(reg, g->fx);
+	state_var(reg, g->fy);
+	state_var(reg, g->cr);
+	state_var(reg, g->tcr);
+	state_var(reg, g->lf);
+	state_var(reg, g->ap);
+	state_var(reg, g->sad1);
+	state_var(reg, g->sad2);
+	state_var(reg, g->sad3);
+	state_var(reg, g->sad4);
+	state_var(reg, g->sl1);
+	state_var(reg, g->sl2);
+	state_var(reg, g->sag);
+	state_var(reg, g->hdotscr);
+	state_var(reg, g->mx);
+	state_var(reg, g->dm1);
+	state_var(reg, g->dm3);
+	state_var(reg, g->ov);
+	state_var(reg, g->fc);
+	state_var(reg, g->fp);
+	state_var(reg, g->crx);
+	state_var(reg, g->cry);
+	state_var(reg, g->cm);
+	state_var(reg, g->csr);
+	state_var(reg, g->csrdir);
+	state_var(reg, g->flash_count);
+	state_var(reg, g->flash_period);
+	state_var(reg, g->flash_phase);
+	state_after_load(reg, state_restored, g);
 }

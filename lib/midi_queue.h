@@ -37,4 +37,7 @@ void midi_queue_reset(midi_queue_t *q);
 void midi_queue_push(midi_queue_t *q, int port, uint8_t byte, uint32_t frame);
 void midi_queue_deliver(midi_queue_t *q, uint32_t frame, midi_queue_take_fn take, void *user);
 
+struct state_registry;
+void midi_queue_state(midi_queue_t *q, struct state_registry *reg);
+
 #endif

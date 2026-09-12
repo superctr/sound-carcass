@@ -662,9 +662,65 @@ static bool ops_nvram_set(void *board, const void *buffer, size_t size)
 	return true;
 }
 
-static size_t ops_state_size(const void *b) { return sc88_state_size(b); }
-static size_t ops_state_save(const void *b, void *buffer, size_t size) { return sc88_state_save(b, buffer, size); }
-static bool ops_state_load(void *b, const void *buffer, size_t size) { return sc88_state_load(b, buffer, size); }
+/* ---------------------------------------------------------------- the state */
+
+static bool state_restored(void *user)
+{
+	sc88_t *b = user;
+	sc88_display_restored(b);
+	h8500_set_irq(&b->cpu, H8500_IRQ1, b->xp_int);
+	return true;
+}
+
+static void ops_state_register(void *board, state_registry_t *reg)
+{
+	sc88_t *b = board;
+	state_flags(reg, b->has_lsp ? 1 : 0);
+
+	state_chunk(reg, "BRD ");
+	state_var(reg, b->cpu_half_cycles);
+	state_bool(reg, b->xp_int);
+	state_bool(reg, b->mute);
+	state_bool(reg, b->lsp_mute);
+	state_var(reg, b->computer_switch);
+	state_var(reg, b->frame);
+
+	state_chunk(reg, "SRAM");
+	state_array(reg, b->sram);
+
+	state_chunk(reg, "CPU ");
+	h8500_state(&b->cpu, reg);
+
+	state_chunk(reg, "XP  ");
+	xp_state(&b->xp, reg);
+
+	if (b->has_lsp)
+	{
+		state_chunk(reg, "LSP ");
+		lsp_state(&b->lsp, reg);
+	}
+
+	state_chunk(reg, "GA  ");
+	state_array(reg, b->ga.regs);
+	state_var(reg, b->ga.int_pending);
+	state_var(reg, b->ga.int_mask);
+	state_var(reg, b->ga.leds);
+	state_array(reg, b->ga.lcd_fifo);
+	state_var(reg, b->ga.lcd_fifo_count);
+	state_bool(reg, b->ga.lcd_command_pending);
+	state_var(reg, b->ga.lcd_busy_frames);
+
+	state_chunk(reg, "LCD ");
+	lcd_state(&b->lcd, reg);
+
+	state_chunk(reg, "SUB ");
+	sub_hle_state(&b->sub, reg);
+
+	state_chunk(reg, "MIDI");
+	midi_queue_state(&b->midi, reg);
+
+	state_after_load(reg, state_restored, b);
+}
 
 const board_ops_t sc88_board_ops =
 {
@@ -673,5 +729,5 @@ const board_ops_t sc88_board_ops =
 	ops_midi, ops_set_midi_out,
 	ops_button, ops_set_computer_switch, ops_leds, ops_lcd, NULL, NULL,
 	ops_nvram_size, ops_nvram_get, ops_nvram_set,
-	ops_state_size, ops_state_save, ops_state_load,
+	ops_state_register,
 };

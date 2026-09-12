@@ -73,4 +73,7 @@ static inline bool uipc_waiting(const uipc_t *u) { return u->rx_count != 0; }
 static inline bool uipc_can_take(const uipc_t *u) { return u->rx_count + 4 <= UIPC_RX; }
 void uipc_take_midi(uipc_t *u, int port, uint8_t byte);
 
+struct state_registry;
+void uipc_state(uipc_t *u, struct state_registry *reg);
+
 #endif

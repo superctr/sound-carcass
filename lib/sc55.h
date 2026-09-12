@@ -83,9 +83,4 @@ void sc55_button(sc55_t *b, scemu_button_t button, bool down);
 
 void sc55_queue_midi(sc55_t *b, int port, uint8_t byte, uint32_t frame_offset);
 
-/* the whole machine at a frame boundary as a byte stream (state_sc55.c) */
-size_t sc55_state_size(const sc55_t *b);
-size_t sc55_state_save(const sc55_t *b, void *buffer, size_t size);
-bool sc55_state_load(sc55_t *b, const void *buffer, size_t size);
-
 #endif

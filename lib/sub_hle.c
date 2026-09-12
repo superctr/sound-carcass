@@ -1,5 +1,6 @@
 #include <string.h>
 #include "sub_hle.h"
+#include "state.h"
 
 #define BIT(x, n) (((x) >> (n)) & 1)
 
@@ -405,4 +406,52 @@ void sub_hle_frame(sub_hle_t *sub)
 
 	if (sub->tx_running && sub->tx_frames && !--sub->tx_frames)
 		tx_step(sub);
+}
+
+/* ---------------------------------------------------------------- the state */
+
+void sub_hle_state(sub_hle_t *sub, state_registry_t *reg)
+{
+	state_array(reg, sub->dpram);
+	state_array(reg, sub->ipcm);
+	state_array(reg, sub->ipcer);
+	state_array(reg, sub->flags);
+	state_var(reg, sub->sem);
+	state_var(reg, sub->spcon);
+	state_var(reg, sub->pa);
+	state_var(reg, sub->pa_dir);
+	state_var(reg, sub->pb);
+	state_var(reg, sub->pb_dir);
+	state_bool(reg, sub->int_state);
+	state_bool(reg, sub->in_reset);
+
+	state_field(reg, sub->src, SUB_SOURCES, status);
+	state_field(reg, sub->src, SUB_SOURCES, data[0]);
+	state_field(reg, sub->src, SUB_SOURCES, data[1]);
+	state_field(reg, sub->src, SUB_SOURCES, count);
+	state_field(reg, sub->src, SUB_SOURCES, sysex_size);
+	state_bool_field(reg, sub->src, SUB_SOURCES, in_sysex);
+	for (int n = 0; n < SUB_SOURCES; n++)
+		state_array(reg, sub->src[n].sysex);
+
+	state_field(reg, sub->queue, SUB_QUEUE_SIZE, code);
+	state_field(reg, sub->queue, SUB_QUEUE_SIZE, flags);
+	state_field(reg, sub->queue, SUB_QUEUE_SIZE, d1);
+	state_field(reg, sub->queue, SUB_QUEUE_SIZE, d2);
+	state_field(reg, sub->queue, SUB_QUEUE_SIZE, block_size);
+	for (int n = 0; n < SUB_QUEUE_SIZE; n++)
+		state_array(reg, sub->queue[n].block);
+
+	state_var(reg, sub->queue_head);
+	state_var(reg, sub->queue_count);
+	state_bool(reg, sub->busy);
+	state_var(reg, sub->deliver_frames);
+	state_var(reg, sub->queue_drops);
+	state_var(reg, sub->sysex_drops);
+	state_var(reg, sub->tx_rd);
+	state_var(reg, sub->tx_left);
+	state_var(reg, sub->tx_end);
+	state_bool(reg, sub->tx_running);
+	state_var(reg, sub->tx_frames);
+	state_array(reg, sub->keys);
 }

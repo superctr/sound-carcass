@@ -99,8 +99,4 @@ void sc8850_deliver_midi(sc8850_t *b);
 void sc8850_button(sc8850_t *b, scemu_button_t button, bool down);
 void sc8850_dial(sc8850_t *b, int steps);
 
-size_t sc8850_state_size(const sc8850_t *b);
-size_t sc8850_state_save(const sc8850_t *b, void *buffer, size_t size);
-bool sc8850_state_load(sc8850_t *b, const void *buffer, size_t size);
-
 #endif

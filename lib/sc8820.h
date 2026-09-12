@@ -89,8 +89,4 @@ void sc8820_queue_midi(sc8820_t *b, int port, uint8_t byte, uint32_t frame_offse
 void sc8820_deliver_midi(sc8820_t *b);
 void sc8820_button(sc8820_t *b, scemu_button_t button, bool down);
 
-size_t sc8820_state_size(const sc8820_t *b);
-size_t sc8820_state_save(const sc8820_t *b, void *buffer, size_t size);
-bool sc8820_state_load(sc8820_t *b, const void *buffer, size_t size);
-
 #endif

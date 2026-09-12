@@ -1,5 +1,6 @@
 #include <string.h>
 #include "lcd.h"
+#include "state.h"
 
 void lcd_init(lcd_t *lcd)
 {
@@ -78,4 +79,27 @@ void lcd_data(lcd_t *lcd, uint8_t data)
 		lcd->address = (lcd->address + (lcd->increment ? 1 : -1)) & 0x7f;
 	}
 	lcd->out.changed = true;
+}
+
+/* ---------------------------------------------------------------- the state */
+
+static bool state_restored(void *user)
+{
+	lcd_t *lcd = user;
+	lcd->out.changed = true;
+	return true;
+}
+
+void lcd_state(lcd_t *lcd, state_registry_t *reg)
+{
+	state_array(reg, lcd->out.ddram);
+	state_array(reg, lcd->out.cgram);
+	state_bool(reg, lcd->out.display_on);
+	state_var(reg, lcd->address);
+	state_bool(reg, lcd->cgram_mode);
+	state_bool(reg, lcd->increment);
+	state_bool(reg, lcd->shift);
+	state_bool(reg, lcd->two_line);
+	state_var(reg, lcd->display_shift);
+	state_after_load(reg, state_restored, lcd);
 }

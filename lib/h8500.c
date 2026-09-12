@@ -1,6 +1,7 @@
 #include <string.h>
 #include "h8500.h"
 #include "h8500_jit.h"
+#include "state.h"
 
 #define FLAG_C 0x0001u
 #define FLAG_V 0x0002u
@@ -2880,4 +2881,54 @@ int h8500_run(h8500_t *cpu, int cycles)
 	while (ran < cycles)
 		ran += h8500_step(cpu);
 	return ran;
+}
+
+/* ---------------------------------------------------------------- the state */
+
+static bool state_restored(void *user)
+{
+	h8500_t *cpu = user;
+	cpu->irq_ready = false;
+	cpu->jit_pending = 0;
+	cpu->jit_limit = 0;
+	cpu->jit_deadline = 0;
+	return true;
+}
+
+void h8500_state(h8500_t *cpu, state_registry_t *reg)
+{
+	state_var(reg, cpu->pc);
+	state_var(reg, cpu->sr);
+	state_var(reg, cpu->cp);
+	state_var(reg, cpu->dp);
+	state_var(reg, cpu->ep);
+	state_var(reg, cpu->tp);
+	state_var(reg, cpu->br);
+	state_array(reg, cpu->r);
+	state_bool(reg, cpu->sleeping);
+	state_var(reg, cpu->irq_lines);
+	state_var(reg, cpu->irq_req);
+	state_array(reg, cpu->irq_pend);
+	state_bool(reg, cpu->no_irq);
+	state_array(reg, cpu->io);
+	state_block(reg, cpu->frt_count, (size_t)cpu->var->frt_count);
+	state_block(reg, cpu->frt_prescale, (size_t)cpu->var->frt_count);
+	if (cpu->var->frt_temp)
+		state_block(reg, cpu->frt_temp, (size_t)cpu->var->frt_count);
+	state_var(reg, cpu->tmr_count);
+	state_var(reg, cpu->tmr_prescale);
+	state_var(reg, cpu->wdt_prescale);
+	state_var(reg, cpu->adc_busy);
+	state_var(reg, cpu->adc_channel);
+	state_field(reg, cpu->sci, 2, rx_byte);
+	state_bool_field(reg, cpu->sci, 2, rx_pending);
+	state_field(reg, cpu->sci, 2, tx_timer);
+	state_field(reg, cpu->sci, 2, tx_shift);
+	state_field(reg, cpu->sci, 2, ssr_read);
+	state_bool_field(reg, cpu->sci, 2, tx_busy);
+	state_block(reg, cpu->port_out, (size_t)cpu->var->port_count + 1);
+	if (cpu->var->ram_size)
+		state_block(reg, cpu->iram, cpu->var->ram_size);
+	state_var(reg, cpu->cycles);
+	state_after_load(reg, state_restored, cpu);
 }
