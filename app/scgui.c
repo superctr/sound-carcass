@@ -503,7 +503,8 @@ static void song_menu(app_t *app)
 	};
 	GSimpleActionGroup *group = g_simple_action_group_new();
 	g_action_map_add_action_entries(G_ACTION_MAP(group), entries, G_N_ELEMENTS(entries), app);
-	gtk_widget_insert_action_group(app->list, "song", G_ACTION_GROUP(group));
+	/* on the popover's own parent: action lookup only walks upward */
+	gtk_widget_insert_action_group(app->list_scroll, "song", G_ACTION_GROUP(group));
 	g_object_unref(group);
 
 	GMenu *menu = g_menu_new();
