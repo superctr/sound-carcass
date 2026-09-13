@@ -1810,7 +1810,7 @@ static void brush_tick_app(app_t *app)
 	pl.bars = app->state.bars;
 	pl.tempo = app->state.tempo;
 	pl.frame = app->state.frame;
-	pl.bytes = app->state.bytes;
+	pl.reads = app->state.reads;
 	brush_tick(&app->brush, now_ms(), &pl);
 	int song = brush_song(&app->brush);
 	if (song != app->current)
@@ -1991,7 +1991,7 @@ static gboolean on_brush_close(GtkWindow *w, gpointer user)
 	app_t *app = user;
 	gtk_widget_set_visible(GTK_WIDGET(w), FALSE);
 	app->brush_engaged = false;
-	machine_set_title_display(app->mc, false);
+	machine_set_brush(app->mc, false);
 	app->paused = app->brush.paused;
 	app->current = brush_song(&app->brush);
 	if (app->brush.countdown)
@@ -2009,7 +2009,7 @@ static void brush_engage(app_t *app)
 	app->brush_engaged = true;
 	bool playing = app->current >= 0 && app->loaded_song == app->current && (app->state.playing || app->paused);
 	brush_attach(&app->brush, (int)app->songs->len, app->current, playing, app->paused, now_ms());
-	machine_set_title_display(app->mc, true);
+	machine_set_brush(app->mc, true);
 	brush_tick_app(app);
 }
 

@@ -35,7 +35,7 @@ static void take_title(char *out, size_t size, const uint8_t *p, size_t length)
 	out[0] = 0;
 }
 
-static smf_event_t *smf_add(smf_t *s)
+static smf_event_t *smf_add(smf_t *s, unsigned track)
 {
 	if (s->count == s->capacity)
 	{
@@ -49,6 +49,7 @@ static smf_event_t *smf_add(smf_t *s)
 	smf_event_t *e = &s->events[s->count];
 	memset(e, 0, sizeof(*e));
 	e->order = (uint32_t)s->count++;
+	e->track = (uint16_t)track;
 	return e;
 }
 
@@ -74,7 +75,7 @@ static int parse_track(smf_t *s, unsigned track, const uint8_t *p, const uint8_t
 				length = (uint32_t)(end - p);
 			if (type == 0x51 && length == 3)
 			{
-				smf_event_t *e = smf_add(s);
+				smf_event_t *e = smf_add(s, track);
 				if (!e)
 					return 0;
 				e->tick = tick;
@@ -123,7 +124,7 @@ static int parse_track(smf_t *s, unsigned track, const uint8_t *p, const uint8_t
 			uint32_t length = read_vlq(&p, end);
 			if (length > (uint32_t)(end - p))
 				length = (uint32_t)(end - p);
-			smf_event_t *e = smf_add(s);
+			smf_event_t *e = smf_add(s, track);
 			if (!e)
 				return 0;
 			e->tick = tick;
@@ -150,7 +151,7 @@ static int parse_track(smf_t *s, unsigned track, const uint8_t *p, const uint8_t
 			if (!status)
 				return 0;
 			int data = (status >= 0xc0 && status < 0xe0) ? 1 : 2;
-			smf_event_t *e = smf_add(s);
+			smf_event_t *e = smf_add(s, track);
 			if (!e)
 				return 0;
 			e->tick = tick;
@@ -231,6 +232,7 @@ int smf_load(smf_t *s, const char *path, uint32_t rate)
 			smf_free(s);
 			return 0;
 		}
+		s->tracks = (uint16_t)(t + 1);
 		p = end;
 	}
 	if (!s->name[0] && text[0])

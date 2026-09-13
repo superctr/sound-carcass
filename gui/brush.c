@@ -13,8 +13,7 @@
 #define TEMPO_SHOW_MS 1000     /* the tempo after a TEMPO key */
 #define PROG_BLINK_MS 300      /* the PROG lamp's half period while a program is entered */
 #define DISK_MS 500            /* the DISK lamp while a song is read in */
-#define DISK_CHUNK 4096        /* and for each of these many bytes of it as it plays */
-#define DISK_READ_MS 150
+#define DISK_READ_MS 150       /* and for each read the player reports as it plays */
 #define CHORD_MS 50            /* a key acts this long after going down, unless its pair partner joins it */
 #define TEMPO_MIN 5
 #define TEMPO_MAX 260
@@ -63,7 +62,7 @@ static void clear_played(brush_t *b) { memset(b->played, 0, sizeof(b->played)); 
 
 static void disk_read(brush_t *b) { b->disk_until = b->now + DISK_MS; }
 
-/* a chunk of the song came off the disk: a shorter flash, unless a longer one is on */
+/* a read as the song plays: a shorter flash, unless a longer one is on */
 static void disk_chunk(brush_t *b)
 {
 	if (b->now + DISK_READ_MS > b->disk_until)
@@ -870,9 +869,9 @@ void brush_tick(brush_t *b, uint64_t now, const brush_player_t *player)
 	b->now = now;
 	if (player != &b->player)
 		b->player = *player;
-	if (b->player.loaded && b->player.bytes / DISK_CHUNK != b->bytes_seen / DISK_CHUNK)
+	if (b->player.loaded && b->player.reads != b->reads_seen)
 		disk_chunk(b);
-	b->bytes_seen = b->player.bytes;
+	b->reads_seen = b->player.reads;
 	for (int key = 0; key < BRUSH_KEY_COUNT; key++)
 		if (((b->pending >> key) & 1) && now - b->down_at[key] >= CHORD_MS)
 		{

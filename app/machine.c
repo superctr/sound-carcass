@@ -19,13 +19,15 @@
 #define BLOCK_MAX 1024
 #define BLOCK_DEFAULT 256
 #define QUEUE_SIZE 64
+#define TRACK_BUFFER 1024   /* the reader's buffer per track: a read every time one runs dry */
+
 #define PENDING_MAX 256
 #define PENDING_BYTES 65536
 
 typedef enum command_kind
 {
 	CMD_LOAD, CMD_START, CMD_PAUSE, CMD_STOP, CMD_UNLOAD, CMD_SEEK, CMD_TEMPO, CMD_BUTTON, CMD_DIAL, CMD_POWER,
-	CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT, CMD_RESET, CMD_MAP, CMD_MODEL, CMD_SEND, CMD_ANIMATE, CMD_TITLE,
+	CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT, CMD_RESET, CMD_MAP, CMD_MODEL, CMD_SEND, CMD_ANIMATE, CMD_BRUSH,
 	CMD_QUIT
 } command_kind_t;
 
@@ -63,9 +65,10 @@ struct machine
 	bool chase_pending;       /* the position moved: what the song set before it is owed to the parts */
 	uint64_t pos, end_frame, lead;   /* the position on the song's clock: its frames, the lead included */
 	double pos_frac;          /* the part of a song frame left over by the tempo factor */
-	uint64_t read_bytes;      /* the events fed since the song was loaded */
+	uint32_t *track_bytes;    /* the events fed from each track since the song was loaded */
+	uint64_t reads;           /* how often a track's buffer ran dry and was refilled */
 	double tempo_factor;
-	bool title_display;       /* the title goes to the module before each song */
+	bool brush;               /* the Sound Brush is in front: the title before each song, a pause holds the song alone */
 	size_t next_event;
 	float gain;
 	machine_reset_t reset;
@@ -167,7 +170,7 @@ static void publish(machine_t *mc, bool booting)
 	s.position = (double)mc->pos / mc->rate;
 	s.length = mc->have_smf ? (double)mc->end_frame / mc->rate : 0;
 	s.frame = mc->pos;
-	s.bytes = mc->read_bytes;
+	s.reads = mc->reads;
 	if (mc->have_smf)
 	{
 		uint64_t tick = smf_tick_at_frame(&mc->smf, mc->pos > mc->lead ? mc->pos - mc->lead : 0, mc->rate);
@@ -192,7 +195,7 @@ static void publish(machine_t *mc, bool booting)
 	if (panel_changed || s.booting != mc->state.booting || s.playing != mc->state.playing || s.paused != mc->state.paused
 	    || s.finished != mc->state.finished || s.position != mc->state.position || s.underruns != mc->state.underruns
 	    || s.loaded != mc->state.loaded || s.ended != mc->state.ended || s.bar != mc->state.bar
-	    || s.bars != mc->state.bars || s.tempo != mc->state.tempo || s.bytes != mc->state.bytes
+	    || s.bars != mc->state.bars || s.tempo != mc->state.tempo || s.reads != mc->state.reads
 	    || strcmp(s.audio, mc->state.audio) != 0 || s.latency != mc->state.latency)
 		s.generation++;
 	mc->state = s;
@@ -271,11 +274,13 @@ static void unload_song(machine_t *mc)
 {
 	if (mc->have_smf)
 		smf_free(&mc->smf);
+	free(mc->track_bytes);
+	mc->track_bytes = NULL;
+	mc->reads = 0;
 	mc->have_smf = mc->playing = mc->paused = mc->song_started = mc->chase_pending = false;
 	mc->pos = mc->end_frame = 0;
 	mc->pos_frac = 0;
 	mc->next_event = 0;
-	mc->read_bytes = 0;
 }
 
 const uint8_t *machine_reset_message(machine_reset_t reset, size_t *size)
@@ -318,6 +323,7 @@ static void load_song(machine_t *mc, const char *path)
 		return;
 	}
 	mc->have_smf = true;
+	mc->track_bytes = calloc(mc->smf.tracks ? mc->smf.tracks : 1, sizeof(uint32_t));
 	size_t msg_size;
 	mc->lead = machine_reset_message(mc->reset, &msg_size) ? mc->rate / 4 : 0;
 	mc->end_frame = (uint64_t)mc->smf.last_frame + mc->lead + (uint64_t)(mc->opt.tail * mc->rate);
@@ -387,7 +393,13 @@ static void feed_events(machine_t *mc, uint64_t until)
 	while (mc->next_event < mc->smf.count && mc->smf.events[mc->next_event].frame + mc->lead < until)
 	{
 		const smf_event_t *e = &mc->smf.events[mc->next_event++];
-		mc->read_bytes += e->length;
+		if (mc->track_bytes && e->track < mc->smf.tracks)
+		{
+			uint32_t *had = &mc->track_bytes[e->track];
+			if ((*had + e->length) / TRACK_BUFFER != *had / TRACK_BUFFER)
+				mc->reads++;
+			*had += e->length;
+		}
 		uint64_t at = e->frame + mc->lead;
 		double ahead = at > mc->pos ? (double)(at - mc->pos) / mc->tempo_factor : 0;
 		emit_event(mc, e, (uint32_t)ahead);
@@ -520,7 +532,7 @@ static void start_song(machine_t *mc, uint64_t frame)
 	const uint8_t *msg = machine_reset_message(mc->reset, &msg_size);
 	if (msg)
 		send_both(mc, msg, msg_size);
-	if (mc->title_display)
+	if (mc->brush)
 		send_title(mc);
 	uint64_t end = (uint64_t)mc->smf.last_frame + mc->lead;
 	mc->pos = frame < end ? frame : end;
@@ -668,8 +680,8 @@ static void handle(machine_t *mc, const command_t *c)
 	case CMD_TEMPO:
 		mc->tempo_factor = c->f < 0.01f ? 0.01 : c->f > 20 ? 20 : c->f;
 		break;
-	case CMD_TITLE:
-		mc->title_display = c->a != 0;
+	case CMD_BRUSH:
+		mc->brush = c->a != 0;
 		break;
 	case CMD_BUTTON:
 		if (c->c > 0)
@@ -845,7 +857,7 @@ static void *run(void *user)
 			sleep_ms(10);
 			continue;
 		}
-		if (mc->paused && mc->playing)
+		if (mc->paused && mc->playing && !mc->brush)
 		{
 			if (mc->audio)
 				audio_pause(mc->audio, true);
@@ -882,7 +894,7 @@ static void *run(void *user)
 		}
 
 		deliver_midi(mc);
-		if (mc->playing)
+		if (mc->playing && !mc->paused)
 		{
 			if (mc->chase_pending)
 				chase(mc);
@@ -1040,9 +1052,9 @@ void machine_set_tempo(machine_t *mc, double factor)
 	post(mc, c);
 }
 
-void machine_set_title_display(machine_t *mc, bool on)
+void machine_set_brush(machine_t *mc, bool on)
 {
-	command_t c = { CMD_TITLE, on, 0, 0, 0, 0, NULL };
+	command_t c = { CMD_BRUSH, on, 0, 0, 0, 0, NULL };
 	post(mc, c);
 }
 

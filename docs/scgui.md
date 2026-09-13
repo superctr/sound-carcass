@@ -127,7 +127,8 @@ message).
 - **The slot** takes files: drop Standard MIDI Files on the window, or click the slot for the file
   chooser.  **EJECT** takes the disk out, which clears the list.  **MIDI IN 2** opens the playlist
   window, as MIDI IN B does on the module.  The **DISK** lamp flashes as the drive's would: for a song
-  read in, for each SONG key, and for every 4 KB of the song as it plays.
+  read in, for each SONG key, and as the song plays for every read the player makes, which keeps a
+  buffer per track as the SB-55 does, so a song of many tracks flashes it more.
 - **The display** shows the song number, `.01`, with `---` for no disk; the tempo (`.120`, with the
   point at the left) for a second after a TEMPO key; the bar while REW or FF is held; and the seconds
   left before the next song, `- 4`, `- 3`..., while it waits between songs.  SONG ◀ and ▶ pressed
@@ -137,7 +138,9 @@ message).
   **TEMPO ◀ ▶** change the tempo a beat a minute at a time, 5 to 260, scaling the song's own tempo
   map; CLEAR + TEMPO puts it back, and every song starts at its own.
 - **PLAY**, **STOP**, **PAUSE**: PLAY lights while a song plays, PAUSE beside it while it is paused
-  and PLAY or PAUSE goes on; STOP silences and, with auto rewind on, goes back to the start, otherwise
+  and PLAY or PAUSE goes on -- and a pause here holds the song alone, the module running on (its
+  reverb rings out, the display keeps moving, MIDI IN still plays), where the playlist's pause with the
+  Brush's window closed stands the whole machine still; STOP silences and, with auto rewind on, goes back to the start, otherwise
   PLAY goes on from where it stopped.  **REW** and **FF** held step through the bars, one at once, the
   next after half a second and then eight a second, silent meanwhile, and the song goes on from the
   new bar when the key comes up, with the controllers, programs and system exclusives it had set before

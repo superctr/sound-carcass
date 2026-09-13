@@ -52,7 +52,7 @@ typedef struct machine_state
 	bool ended;               /* the song has gone past its last event (the tail may still be running) */
 	double position, length;  /* seconds into the song, and its length with the tail */
 	uint64_t frame;           /* the position on the song's own clock, for starting again from it */
-	uint64_t bytes;           /* of the song's events fed since it was loaded: the read activity */
+	uint64_t reads;           /* the song's reads from its disk so far: a track's buffer refilled */
 	uint32_t bar, bars;       /* the bar the position is in, from 1, and the bar the song ends in; 0 with no song */
 	double tempo;             /* the song's own tempo at the position, beats a minute, before the factor */
 	char song[256];           /* the file's name, empty when nothing is loaded */
@@ -97,6 +97,8 @@ void machine_play(machine_t *mc, const char *path);    /* load the song and star
  * as the song had them. */
 void machine_load(machine_t *mc, const char *path);
 void machine_start_song(machine_t *mc, uint64_t frame);
+/* the song held where it is: the whole machine stands still, unless the Brush is in front (see
+ * machine_set_brush), when the song alone waits and the machine runs on */
 void machine_pause(machine_t *mc, bool paused);
 void machine_stop_song(machine_t *mc);                 /* silence; the song stays loaded where it stopped */
 void machine_unload(machine_t *mc);
@@ -105,8 +107,9 @@ void machine_unload(machine_t *mc);
 void machine_seek_bar(machine_t *mc, uint32_t bar);
 /* the song's tempo scaled: 1 is the song's own */
 void machine_set_tempo(machine_t *mc, double factor);
-/* the song's title on the module's display before each song, as the Sound Brush sends it; off by default */
-void machine_set_title_display(machine_t *mc, bool on);
+/* the Sound Brush in front of the player (off by default): each song's title goes to the module's
+ * display before it, as the Brush sends it, and a pause holds the song alone */
+void machine_set_brush(machine_t *mc, bool on);
 void machine_button(machine_t *mc, scemu_button_t b, bool down);
 void machine_dial(machine_t *mc, int steps);           /* the value dial, positive clockwise */
 /* the same, ms of the machine's own time later (a boot the host does not

@@ -17,6 +17,7 @@ typedef struct smf_event
 	uint16_t length;
 	uint8_t tempo_change;
 	uint8_t port;
+	uint16_t track;           /* the track it came from, from 0 */
 	const uint8_t *bytes;
 	uint8_t status[3];
 	uint32_t tempo;
@@ -50,6 +51,7 @@ typedef struct smf
 	 * track's name at its first tick, padded with spaces; empty when there is none */
 	char raw_name[32];
 	uint8_t ports;
+	uint16_t tracks;          /* the tracks the file holds */
 	smf_meter_t *meters;
 	size_t meter_count;
 	smf_tempo_t *tempos;
