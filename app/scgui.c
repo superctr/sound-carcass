@@ -43,6 +43,7 @@ typedef struct app
 	GtkWidget *logo_popover, *system_popover, *list_popover;
 	int menu_index;            /* the song the right-click menu is on, or -1 */
 	GSimpleAction *system_model_action;   /* the system menu's radio state */
+	GSimpleAction *system_sb55_action;    /* and its SB-55 check */
 	scgui_config_t cfg;
 	char config_file[1024];
 	guint config_timer;
@@ -1470,8 +1471,6 @@ static void on_menu_open(GSimpleAction *a, GVariant *parameter, gpointer user)
 	const char *what = g_action_get_name(G_ACTION(a));
 	if (!strcmp(what, "playlist"))
 		playlist_show(app);
-	else if (!strcmp(what, "brush"))
-		brush_toggle(app);
 	else if (!strcmp(what, "audio"))
 		settings_show(app, SETTINGS_TAB_AUDIO);
 	else if (!strcmp(what, "interface"))
@@ -1515,7 +1514,6 @@ static void logo_menu(app_t *app, double x, double y)
 		static const GActionEntry entries[] =
 		{
 			{ "playlist", on_menu_open, NULL, NULL, NULL, { 0 } },
-			{ "brush", on_menu_open, NULL, NULL, NULL, { 0 } },
 			{ "audio", on_menu_open, NULL, NULL, NULL, { 0 } },
 			{ "interface", on_menu_open, NULL, NULL, NULL, { 0 } },
 			{ "system", on_menu_open, NULL, NULL, NULL, { 0 } },
@@ -1545,7 +1543,6 @@ static void logo_menu(app_t *app, double x, double y)
 		GMenu *menu = g_menu_new();
 		GMenu *windows = g_menu_new();
 		menu_append(windows, "Playlist and MIDI", "logo.playlist", -1);
-		menu_append(windows, "Sound Brush", "logo.brush", -1);
 		menu_append(windows, "Audio", "logo.audio", -1);
 		menu_append(windows, "Interface", "logo.interface", -1);
 		menu_append(windows, "System", "logo.system", -1);
@@ -1568,7 +1565,7 @@ static void logo_menu(app_t *app, double x, double y)
 	gtk_popover_popup(GTK_POPOVER(app->logo_popover));
 }
 
-/* the menu on the model name: the systems whose ROMs are there, and a reset */
+/* the menu on the model name: the systems whose ROMs are there, the SB-55 under them, and a reset */
 static void on_menu_system(GSimpleAction *action, GVariant *parameter, gpointer user)
 {
 	app_t *app = user;
@@ -1587,6 +1584,14 @@ static void on_menu_reset(GSimpleAction *action, GVariant *parameter, gpointer u
 	controls_power_cycle(&app->ctl);
 }
 
+/* the SB-55 check: the Brush's panel shown or hidden */
+static void on_menu_sb55(GSimpleAction *action, GVariant *parameter, gpointer user)
+{
+	app_t *app = user;
+	brush_toggle(app);
+	g_simple_action_set_state(action, g_variant_new_boolean(app->brush_engaged));
+}
+
 static void system_menu(app_t *app, double x, double y)
 {
 	if (!app->system_popover)
@@ -1599,8 +1604,12 @@ static void system_menu(app_t *app, double x, double y)
 		GSimpleAction *reset = g_simple_action_new("reset", NULL);
 		g_signal_connect(reset, "activate", G_CALLBACK(on_menu_reset), app);
 		g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(reset));
+		GSimpleAction *sb55 = g_simple_action_new_stateful("sb55", NULL, g_variant_new_boolean(app->brush_engaged));
+		g_signal_connect(sb55, "activate", G_CALLBACK(on_menu_sb55), app);
+		g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(sb55));
 		gtk_widget_insert_action_group(app->area, "system", G_ACTION_GROUP(group));
 		app->system_model_action = model;
+		app->system_sb55_action = sb55;
 		g_object_unref(reset);
 		g_object_unref(group);
 
@@ -1611,10 +1620,14 @@ static void system_menu(app_t *app, double x, double y)
 			if (have & (1u << machine_systems[n]))
 				menu_append(models, scplay_model_label(machine_systems[n]), "system.model", (int)machine_systems[n]);
 		g_menu_append_section(menu, NULL, G_MENU_MODEL(models));
+		GMenu *brush = g_menu_new();
+		menu_append(brush, "SB-55", "system.sb55", -1);
+		g_menu_append_section(menu, NULL, G_MENU_MODEL(brush));
 		GMenu *actions = g_menu_new();
 		menu_append(actions, "Reset", "system.reset", -1);
 		g_menu_append_section(menu, NULL, G_MENU_MODEL(actions));
 		g_object_unref(models);
+		g_object_unref(brush);
 		g_object_unref(actions);
 
 		app->system_popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
@@ -1623,6 +1636,7 @@ static void system_menu(app_t *app, double x, double y)
 		gtk_popover_set_has_arrow(GTK_POPOVER(app->system_popover), FALSE);
 	}
 	g_simple_action_set_state(app->system_model_action, g_variant_new_int32((int)machine_model(app->mc)));
+	g_simple_action_set_state(app->system_sb55_action, g_variant_new_boolean(app->brush_engaged));
 	GdkRectangle at = { (int)x, (int)y, 1, 1 };
 	gtk_popover_set_pointing_to(GTK_POPOVER(app->system_popover), &at);
 	gtk_popover_popup(GTK_POPOVER(app->system_popover));
@@ -2677,6 +2691,7 @@ int main(int argc, char **argv)
 	{
 		gtk_widget_unparent(app.system_popover);
 		g_object_unref(app.system_model_action);
+		g_object_unref(app.system_sb55_action);
 	}
 	if (app.brush_window)
 		gtk_window_destroy(GTK_WINDOW(app.brush_window));

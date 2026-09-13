@@ -54,9 +54,10 @@ machine.  Files on the command line become the playlist and the first one plays.
 - **The MIDI IN B jack** opens the playlist (on the SC-8850 and the SC-8820, whose MIDI comes in over
   USB, it is **the USB mark**), **the PHONES jack** the Settings window.
 - **The model name** beside the logotype opens a menu of the systems whose ROMs are there, to switch
-  between them, and a Reset that power-cycles the machine.  The SC-55 carries no name there, only the
+  between them, an **SB-55** check that shows and hides the Sound Brush, and a Reset that power-cycles
+  the machine.  The SC-55 carries no name there, only the
   logotype, and the bare panel where the SC-55mkII has its name opens the same menu.
-- **The logotype** at the bottom left opens a menu where the pointer is: the playlist, the Sound Brush,
+- **The logotype** at the bottom left opens a menu where the pointer is: the playlist,
   the Settings window on its Audio or its System tab, a **Send** submenu, and About.  Send puts a message on both of
   the machine's inputs at once (and on the song outputs, for a unit playing along): GM System On, GS
   Reset, GM2 System On, the SC-88 mode sets, or a bank select and program change that puts every part
@@ -112,15 +113,15 @@ file from playlist**; removing the song that is playing stops it, the way the st
 
 The SB-55 Sound Brush was Roland's floppy-disk MIDI file player, the SC-55's case with a drive in it,
 made to sit under a Sound Canvas and drive it: a three-digit display, a song number, PLAY, STOP, PAUSE,
-REW and FF, and modes for the disk.  Here it is the front of the playlist: **Sound Brush** on the logo
-menu, or `b`, shows its panel above the module's in the same window, standing on its rubber feet, as
+REW and FF, and modes for the disk.  Here it is the front of the playlist: **SB-55** on the model
+name's menu, or `b`, shows its panel above the module's in the same window, standing on its rubber feet, as
 wide as the module's panel whatever the model, so the two stack as the units did and move together (a
 window cannot be placed beside another or made to follow it on Wayland, so they share one; the
 Interface tab can give the Brush a window of its own instead), and while that panel is shown the
 playlist is the disk in its slot -- a disk is in while the list holds a song, the song number is the
 row, and the Brush's keys work the list and the player.  It behaves as the real unit's firmware does,
 measured on the MAME driver of the machine (`docs/panel/README.md`, "The SB-55's behaviour, measured",
-in the project), without the recorder.  **Sound Brush** or `b` again hides the panel, and the list runs
+in the project), without the recorder.  **SB-55** or `b` again hides the panel, and the list runs
 as it always did from there, from the song and the pause the Brush left it at; show it again and the
 Brush takes the list as it stands, its modes and settings as they were.
 While it is shown each song is also preceded by its title on the module's display, as the SB-55
