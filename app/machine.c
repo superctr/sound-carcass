@@ -19,7 +19,7 @@
 #define BLOCK_MAX 1024
 #define BLOCK_DEFAULT 256
 #define QUEUE_SIZE 64
-#define TRACK_BUFFER 1024   /* the reader's buffer per track: a read every time one runs dry */
+#define SECTOR 512   /* the SB-55 reads a track a sector at a time into a buffer of its own */
 
 #define PENDING_MAX 256
 #define PENDING_BYTES 65536
@@ -65,8 +65,8 @@ struct machine
 	bool chase_pending;       /* the position moved: what the song set before it is owed to the parts */
 	uint64_t pos, end_frame, lead;   /* the position on the song's clock: its frames, the lead included */
 	double pos_frac;          /* the part of a song frame left over by the tempo factor */
-	uint32_t *track_bytes;    /* the events fed from each track since the song was loaded */
-	uint64_t reads;           /* how often a track's buffer ran dry and was refilled */
+	uint32_t *track_sectors;  /* the sectors of each track read so far, the first with the song */
+	uint64_t reads;           /* the sectors read since the song was loaded, beyond each track's first */
 	double tempo_factor;
 	bool brush;               /* the Sound Brush is in front: the title before each song, a pause holds the song alone */
 	size_t next_event;
@@ -274,8 +274,8 @@ static void unload_song(machine_t *mc)
 {
 	if (mc->have_smf)
 		smf_free(&mc->smf);
-	free(mc->track_bytes);
-	mc->track_bytes = NULL;
+	free(mc->track_sectors);
+	mc->track_sectors = NULL;
 	mc->reads = 0;
 	mc->have_smf = mc->playing = mc->paused = mc->song_started = mc->chase_pending = false;
 	mc->pos = mc->end_frame = 0;
@@ -323,7 +323,7 @@ static void load_song(machine_t *mc, const char *path)
 		return;
 	}
 	mc->have_smf = true;
-	mc->track_bytes = calloc(mc->smf.tracks ? mc->smf.tracks : 1, sizeof(uint32_t));
+	mc->track_sectors = calloc(mc->smf.tracks ? mc->smf.tracks : 1, sizeof(uint32_t));
 	size_t msg_size;
 	mc->lead = machine_reset_message(mc->reset, &msg_size) ? mc->rate / 4 : 0;
 	mc->end_frame = (uint64_t)mc->smf.last_frame + mc->lead + (uint64_t)(mc->opt.tail * mc->rate);
@@ -393,12 +393,17 @@ static void feed_events(machine_t *mc, uint64_t until)
 	while (mc->next_event < mc->smf.count && mc->smf.events[mc->next_event].frame + mc->lead < until)
 	{
 		const smf_event_t *e = &mc->smf.events[mc->next_event++];
-		if (mc->track_bytes && e->track < mc->smf.tracks)
+		if (mc->track_sectors && e->track < mc->smf.tracks)
 		{
-			uint32_t *had = &mc->track_bytes[e->track];
-			if ((*had + e->length) / TRACK_BUFFER != *had / TRACK_BUFFER)
-				mc->reads++;
-			*had += e->length;
+			uint32_t *had = &mc->track_sectors[e->track];
+			uint32_t need = e->offset ? (e->offset - 1) / SECTOR + 1 : 1;
+			if (!*had)
+				*had = 1;
+			if (need > *had)
+			{
+				mc->reads += need - *had;
+				*had = need;
+			}
 		}
 		uint64_t at = e->frame + mc->lead;
 		double ahead = at > mc->pos ? (double)(at - mc->pos) / mc->tempo_factor : 0;

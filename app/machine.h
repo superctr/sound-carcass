@@ -52,7 +52,8 @@ typedef struct machine_state
 	bool ended;               /* the song has gone past its last event (the tail may still be running) */
 	double position, length;  /* seconds into the song, and its length with the tail */
 	uint64_t frame;           /* the position on the song's own clock, for starting again from it */
-	uint64_t reads;           /* the song's reads from its disk so far: a track's buffer refilled */
+	uint64_t reads;           /* the song's sector reads so far, as the SB-55 would make them: one
+	                             512-byte buffer per track, refilled a sector at a time */
 	uint32_t bar, bars;       /* the bar the position is in, from 1, and the bar the song ends in; 0 with no song */
 	double tempo;             /* the song's own tempo at the position, beats a minute, before the factor */
 	char song[256];           /* the file's name, empty when nothing is loaded */

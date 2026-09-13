@@ -58,8 +58,10 @@ static int parse_track(smf_t *s, unsigned track, const uint8_t *p, const uint8_t
 	uint64_t tick = 0;
 	uint8_t running = 0;
 	uint8_t port = SMF_PORT_UNSET;
+	const uint8_t *start = p;
 	while (p < end)
 	{
+		size_t had = s->count;
 		tick += read_vlq(&p, end);
 		if (p >= end)
 			break;
@@ -161,6 +163,8 @@ static int parse_track(smf_t *s, unsigned track, const uint8_t *p, const uint8_t
 				e->status[1 + n] = *p++;
 			e->length = (uint16_t)(1 + data);
 		}
+		if (s->count > had)
+			s->events[s->count - 1].offset = (uint32_t)(p - start);
 	}
 	return 1;
 }

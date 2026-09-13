@@ -130,8 +130,9 @@ message).
 - **The slot** takes files: drop Standard MIDI Files on the window, or click the slot for the file
   chooser.  **EJECT** takes the disk out, which clears the list.  **MIDI IN 2** opens the playlist
   window, as MIDI IN B does on the module.  The **DISK** lamp flashes as the drive's would: for a song
-  read in, for each SONG key, and as the song plays for every read the player makes, which keeps a
-  buffer per track as the SB-55 does, so a song of many tracks flashes it more.
+  read in, for each SONG key, and as the song plays for every sector the player fetches, which reads
+  a track at a time into a 512-byte buffer of its own as the SB-55's firmware does -- so a song of many
+  tracks flashes it more, and a song whose every track fits its first sector never flashes it.
 - **The display** shows the song number, `.01`, with `---` for no disk; the tempo (`.120`, with the
   point at the left) for a second after a TEMPO key; the bar while REW or FF is held; and the seconds
   left before the next song, `- 4`, `- 3`..., while it waits between songs.  SONG ◀ and ▶ pressed

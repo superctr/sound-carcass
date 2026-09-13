@@ -18,6 +18,7 @@ typedef struct smf_event
 	uint8_t tempo_change;
 	uint8_t port;
 	uint16_t track;           /* the track it came from, from 0 */
+	uint32_t offset;          /* the byte offset in that track just past it: what a reader has consumed */
 	const uint8_t *bytes;
 	uint8_t status[3];
 	uint32_t tempo;
