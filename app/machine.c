@@ -63,6 +63,7 @@ struct machine
 	bool chase_pending;       /* the position moved: what the song set before it is owed to the parts */
 	uint64_t pos, end_frame, lead;   /* the position on the song's clock: its frames, the lead included */
 	double pos_frac;          /* the part of a song frame left over by the tempo factor */
+	uint64_t read_bytes;      /* the events fed since the song was loaded */
 	double tempo_factor;
 	bool title_display;       /* the title goes to the module before each song */
 	size_t next_event;
@@ -138,6 +139,12 @@ static bool take(machine_t *mc, command_t *c)
 	return got;
 }
 
+/* past the last event: nothing is left to sound but the tail */
+static bool song_ended(const machine_t *mc)
+{
+	return mc->have_smf && mc->pos >= (uint64_t)mc->smf.last_frame + mc->lead;
+}
+
 /* ---------------------------------------------------------------- the snapshot */
 
 static void publish(machine_t *mc, bool booting)
@@ -156,10 +163,11 @@ static void publish(machine_t *mc, bool booting)
 	s.playing = mc->playing;
 	s.paused = mc->paused;
 	s.finished = mc->have_smf && !mc->playing && mc->pos >= mc->end_frame;
-	s.ended = mc->have_smf && mc->song_started && mc->pos >= (uint64_t)mc->smf.last_frame + mc->lead;
+	s.ended = mc->song_started && song_ended(mc);
 	s.position = (double)mc->pos / mc->rate;
 	s.length = mc->have_smf ? (double)mc->end_frame / mc->rate : 0;
 	s.frame = mc->pos;
+	s.bytes = mc->read_bytes;
 	if (mc->have_smf)
 	{
 		uint64_t tick = smf_tick_at_frame(&mc->smf, mc->pos > mc->lead ? mc->pos - mc->lead : 0, mc->rate);
@@ -184,7 +192,7 @@ static void publish(machine_t *mc, bool booting)
 	if (panel_changed || s.booting != mc->state.booting || s.playing != mc->state.playing || s.paused != mc->state.paused
 	    || s.finished != mc->state.finished || s.position != mc->state.position || s.underruns != mc->state.underruns
 	    || s.loaded != mc->state.loaded || s.ended != mc->state.ended || s.bar != mc->state.bar
-	    || s.bars != mc->state.bars || s.tempo != mc->state.tempo
+	    || s.bars != mc->state.bars || s.tempo != mc->state.tempo || s.bytes != mc->state.bytes
 	    || strcmp(s.audio, mc->state.audio) != 0 || s.latency != mc->state.latency)
 		s.generation++;
 	mc->state = s;
@@ -267,6 +275,7 @@ static void unload_song(machine_t *mc)
 	mc->pos = mc->end_frame = 0;
 	mc->pos_frac = 0;
 	mc->next_event = 0;
+	mc->read_bytes = 0;
 }
 
 const uint8_t *machine_reset_message(machine_reset_t reset, size_t *size)
@@ -378,6 +387,7 @@ static void feed_events(machine_t *mc, uint64_t until)
 	while (mc->next_event < mc->smf.count && mc->smf.events[mc->next_event].frame + mc->lead < until)
 	{
 		const smf_event_t *e = &mc->smf.events[mc->next_event++];
+		mc->read_bytes += e->length;
 		uint64_t at = e->frame + mc->lead;
 		double ahead = at > mc->pos ? (double)(at - mc->pos) / mc->tempo_factor : 0;
 		emit_event(mc, e, (uint32_t)ahead);
@@ -640,7 +650,8 @@ static void handle(machine_t *mc, const command_t *c)
 		mc->paused = c->a != 0;
 		break;
 	case CMD_STOP:
-		if (unit_power_on(mc->unit) && mc->playing && !mc->paused)
+		/* a song stopped past its last event has nothing sounding to cut off: its tail rings out */
+		if (unit_power_on(mc->unit) && mc->playing && !mc->paused && !song_ended(mc))
 			quiet(mc);
 		mc->playing = mc->paused = false;
 		break;

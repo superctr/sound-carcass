@@ -55,6 +55,7 @@ typedef struct brush_player
 	uint32_t bar, bars;       /* the bar the position is in and the bar the song ends in, from 1 */
 	double tempo;             /* the song's own tempo at the position, beats a minute */
 	uint64_t frame;           /* the position on the song's clock */
+	uint64_t bytes;           /* of the song read since it was loaded */
 } brush_player_t;
 
 typedef struct brush_actions
@@ -110,7 +111,8 @@ typedef struct brush
 	int next;                  /* the song the countdown leads to */
 	int tempo;                 /* the tempo set by hand, or 0 for the song's own */
 	double tempo_factor;
-	uint64_t disk_until;       /* the DISK lamp is lit while a song is being read */
+	uint64_t disk_until;       /* the DISK lamp is lit while the disk is being read */
+	uint64_t bytes_seen;       /* what the player had read at the last tick */
 	uint8_t digits[3];
 	uint32_t lamps;
 	bool dirty;

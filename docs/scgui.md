@@ -126,7 +126,8 @@ message).
 
 - **The slot** takes files: drop Standard MIDI Files on the window, or click the slot for the file
   chooser.  **EJECT** takes the disk out, which clears the list.  **MIDI IN 2** opens the playlist
-  window, as MIDI IN B does on the module.
+  window, as MIDI IN B does on the module.  The **DISK** lamp flashes as the drive's would: for a song
+  read in, for each SONG key, and for every 4 KB of the song as it plays.
 - **The display** shows the song number, `.01`, with `---` for no disk; the tempo (`.120`, with the
   point at the left) for a second after a TEMPO key; the bar while REW or FF is held; and the seconds
   left before the next song, `- 4`, `- 3`..., while it waits between songs.  SONG ◀ and ▶ pressed
@@ -142,7 +143,8 @@ message).
   new bar when the key comes up, with the controllers, programs and system exclusives it had set before
   that point sent first, so the parts stand as they should (the Brush's MIDI Update).  STOP + REW and
   STOP + FF jump to the start and the end.
-- **The modes**: **SINGLE** stops after each song with the next selected; **REPT** goes round the
+- **The modes**: after the last song the Brush stops with the first selected, and does not start
+  again on its own; **SINGLE** stops after each song with the next selected; **REPT** goes round the
   list, and with SINGLE repeats the song; **RND** plays each song once in a random order and stops,
   or with REPT starts another round.  Between songs the Brush waits the interval -- four seconds by
   default -- counting it down on the display.

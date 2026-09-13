@@ -12,7 +12,9 @@
 #define SCAN_SHOW_MS 800       /* the bar stays on the display after the key comes up */
 #define TEMPO_SHOW_MS 1000     /* the tempo after a TEMPO key */
 #define PROG_BLINK_MS 300      /* the PROG lamp's half period while a program is entered */
-#define DISK_MS 500            /* the DISK lamp while a song is read */
+#define DISK_MS 500            /* the DISK lamp while a song is read in */
+#define DISK_CHUNK 4096        /* and for each of these many bytes of it as it plays */
+#define DISK_READ_MS 150
 #define CHORD_MS 50            /* a key acts this long after going down, unless its pair partner joins it */
 #define TEMPO_MIN 5
 #define TEMPO_MAX 260
@@ -60,6 +62,13 @@ static void mark_played(brush_t *b, int n) { if (n >= 0 && n < BRUSH_SONGS_MAX) 
 static void clear_played(brush_t *b) { memset(b->played, 0, sizeof(b->played)); }
 
 static void disk_read(brush_t *b) { b->disk_until = b->now + DISK_MS; }
+
+/* a chunk of the song came off the disk: a shorter flash, unless a longer one is on */
+static void disk_chunk(brush_t *b)
+{
+	if (b->now + DISK_READ_MS > b->disk_until)
+		b->disk_until = b->now + DISK_READ_MS;
+}
 
 static void load(brush_t *b, int song)
 {
@@ -198,7 +207,12 @@ static void song_over(brush_t *b)
 			if (first != b->song)
 				load(b, first);
 			else
+			{
+				/* the player is still running the song's tail: stopped before it is put back,
+				 * or it would play the song again from there */
+				b->act->stop(b->user);
 				b->act->seek(b->user, 1);
+			}
 		}
 	}
 	if (next < 0)
@@ -856,6 +870,9 @@ void brush_tick(brush_t *b, uint64_t now, const brush_player_t *player)
 	b->now = now;
 	if (player != &b->player)
 		b->player = *player;
+	if (b->player.loaded && b->player.bytes / DISK_CHUNK != b->bytes_seen / DISK_CHUNK)
+		disk_chunk(b);
+	b->bytes_seen = b->player.bytes;
 	for (int key = 0; key < BRUSH_KEY_COUNT; key++)
 		if (((b->pending >> key) & 1) && now - b->down_at[key] >= CHORD_MS)
 		{

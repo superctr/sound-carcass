@@ -1810,6 +1810,7 @@ static void brush_tick_app(app_t *app)
 	pl.bars = app->state.bars;
 	pl.tempo = app->state.tempo;
 	pl.frame = app->state.frame;
+	pl.bytes = app->state.bytes;
 	brush_tick(&app->brush, now_ms(), &pl);
 	int song = brush_song(&app->brush);
 	if (song != app->current)
