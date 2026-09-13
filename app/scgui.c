@@ -61,6 +61,7 @@ typedef struct app
 	GtkWidget *brush_window;   /* the Brush's own window, when not docked; NULL until wanted */
 	bool brush_engaged;        /* its panel is shown: it runs the list; hidden, the list runs as it always did */
 	int brush_pressed;         /* the element under the held left button, or -1 */
+	int brush_opposite;        /* the other half of its pair, pressed with the right button meanwhile, or -1 */
 	panel_set_t brush_queued, brush_held;   /* elements the right button queues for the next key, or holds down */
 	double brush_x, brush_y;   /* the pointer over the Brush, in its window's pixels */
 	int loaded_song;           /* the row the machine holds, or -1 */
@@ -2083,10 +2084,21 @@ static void brush_release_held(app_t *app)
 	panel_set_clear(&app->brush_queued);
 }
 
+/* the element of the Brush's panel a key is, or -1 */
+static int brush_element_of(brush_key_t key)
+{
+	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
+		if (brush_key_of(e) == (int)key)
+			return e;
+	return -1;
+}
+
 /* The Brush's keys under the mouse, the way the module's are: the left button presses, a plain
  * right-click queues a key to go down with the next left-click (the manual's "simultaneously"),
  * Shift and the right button hold one down from now ("while holding"), and all of them come up
- * with the left button.  The slot takes files; the MIDI IN 2 jack opens the list. */
+ * with the left button; while the left button holds one half of a ◀ ▶ pair the right button
+ * presses the other half for as long as it is down, which runs the value through ten at a time.
+ * The slot takes files; the MIDI IN 2 jack opens the list. */
 static gboolean on_brush_button(GtkEventControllerLegacy *c, GdkEvent *event, gpointer user)
 {
 	app_t *app = user;
@@ -2121,6 +2133,17 @@ static gboolean on_brush_button(GtkEventControllerLegacy *c, GdkEvent *event, gp
 			else if (e == PANEL_JACK_MIDI_IN_B)
 				playlist_show(app);
 		}
+		else if (button == GDK_BUTTON_SECONDARY && app->brush_pressed >= 0)
+		{
+			int other = brush_partner((brush_key_t)brush_key_of(app->brush_pressed));
+			int oe = other >= 0 ? brush_element_of((brush_key_t)other) : -1;
+			if (oe >= 0 && app->brush_opposite < 0)
+			{
+				app->brush_opposite = oe;
+				panel_set_pressed(p, (panel_element_t)oe, true);
+				brush_key(&app->brush, (brush_key_t)other, true, now);
+			}
+		}
 		else if (button == GDK_BUTTON_SECONDARY && key >= 0)
 		{
 			GdkModifierType mods = gdk_event_get_modifier_state(event);
@@ -2141,12 +2164,26 @@ static gboolean on_brush_button(GtkEventControllerLegacy *c, GdkEvent *event, gp
 			panel_set_pressed(p, (panel_element_t)e, panel_set_has(&app->brush_held, e) || panel_set_has(&app->brush_queued, e));
 		}
 	}
+	else if (button == GDK_BUTTON_SECONDARY && app->brush_opposite >= 0)
+	{
+		int oe = app->brush_opposite;
+		app->brush_opposite = -1;
+		panel_set_pressed(p, (panel_element_t)oe, false);
+		brush_key(&app->brush, (brush_key_t)brush_key_of(oe), false, now);
+	}
 	else if (button == GDK_BUTTON_PRIMARY && app->brush_pressed >= 0)
 	{
 		int e = app->brush_pressed;
 		app->brush_pressed = -1;
 		panel_set_pressed(p, (panel_element_t)e, false);
 		brush_key(&app->brush, (brush_key_t)brush_key_of(e), false, now);
+		if (app->brush_opposite >= 0)
+		{
+			int oe = app->brush_opposite;
+			app->brush_opposite = -1;
+			panel_set_pressed(p, (panel_element_t)oe, false);
+			brush_key(&app->brush, (brush_key_t)brush_key_of(oe), false, now);
+		}
 		if (!panel_set_empty(&app->brush_held) || !panel_set_empty(&app->brush_queued))
 			brush_release_held(app);
 	}
@@ -2739,7 +2776,7 @@ int main(int argc, char **argv)
 	app.brush.auto_play = app.cfg.sb55_auto_play;
 	app.brush.auto_rewind = app.cfg.sb55_auto_rewind;
 	app.brush.seed = (uint32_t)g_get_monotonic_time();
-	app.brush_pressed = -1;
+	app.brush_pressed = app.brush_opposite = -1;
 	app.loaded_song = -1;
 	if (app.cfg.sb55_window)
 		brush_show(&app);

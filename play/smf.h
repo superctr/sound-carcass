@@ -90,7 +90,8 @@ typedef struct smf_take
 
 /* The takes, in time order, as a type 1 file at `tempo` beats a minute in 4/4 and 480 ticks a
  * quarter: a conductor track, then a track per port that took anything, each opened with its
- * port event; `frames` is the recording's length, where every track ends.  Returns the file's
+ * port event; `frames` is the recording's length, where every track ends, after a note off for
+ * every note still held there and a pedal up for every sustain still down.  Returns the file's
  * bytes, the caller's to free, with their count in *size; NULL with no message in the takes. */
 uint8_t *smf_write_takes(const smf_take_t *takes, size_t count, const uint8_t *bytes, uint64_t frames, uint32_t rate,
                          int tempo, size_t *size);

@@ -15,6 +15,8 @@
 #define DISK_MS 500            /* the DISK lamp while a song is read in */
 #define DISK_READ_MS 150       /* and for each read the player reports as it plays */
 #define CHORD_MS 50            /* a key acts this long after going down, unless its pair partner joins it */
+#define REPEAT_FIRST_MS 500    /* a held SONG or TEMPO key steps again after this */
+#define REPEAT_MS 100          /* and then this often */
 #define TEMPO_MIN 5
 #define TEMPO_MAX 260
 
@@ -44,6 +46,7 @@ void brush_init(brush_t *b, const brush_actions_t *act, void *user)
 	b->auto_play = b->auto_rewind = true;
 	b->tempo_factor = 1;
 	b->record_tempo = 120;
+	b->repeat_key = -1;
 	b->dirty = true;
 }
 
@@ -214,12 +217,7 @@ static void song_over(brush_t *b)
 			if (first != b->song)
 				load(b, first);
 			else
-			{
-				/* the player is still running the song's tail: stopped before it is put back,
-				 * or it would play the song again from there */
-				b->act->stop(b->user);
-				b->act->seek(b->user, 1);
-			}
+				b->act->seek(b->user, 1);   /* the player ends its run there, its tail ringing on */
 		}
 	}
 	if (next < 0)
@@ -309,6 +307,11 @@ static void scan_end(brush_t *b)
 		b->act->pause(b->user, false);
 	}
 }
+
+/* a SONG or TEMPO key's step: one its own way, or ten with the other half of its pair held --
+ * the way of whichever went down first, since holding one and pressing the other is how a value
+ * is run through */
+static void value_key(brush_t *b, brush_key_t key);
 
 static void step_song(brush_t *b, int by)
 {
@@ -428,8 +431,7 @@ static void entry_key(brush_t *b, brush_key_t key)
 	}
 }
 
-/* the other half of a ◀ ▶ pair, or -1 */
-static int partner(brush_key_t key)
+int brush_partner(brush_key_t key)
 {
 	switch (key)
 	{
@@ -553,16 +555,10 @@ static void press(brush_t *b, brush_key_t key)
 	{
 	/* the other half of a pair, pressed while this one is held, moves faster the held one's way */
 	case BRUSH_KEY_SONG_LEFT:
-		step_song(b, held(b, BRUSH_KEY_SONG_RIGHT) ? 10 : -1);
-		break;
 	case BRUSH_KEY_SONG_RIGHT:
-		step_song(b, held(b, BRUSH_KEY_SONG_LEFT) ? -10 : 1);
-		break;
 	case BRUSH_KEY_TEMPO_LEFT:
-		set_tempo(b, shown_tempo(b) + (held(b, BRUSH_KEY_TEMPO_RIGHT) ? 10 : -1));
-		break;
 	case BRUSH_KEY_TEMPO_RIGHT:
-		set_tempo(b, shown_tempo(b) + (held(b, BRUSH_KEY_TEMPO_LEFT) ? -10 : 1));
+		value_key(b, key);
 		break;
 	case BRUSH_KEY_PROG:
 		if (!b->program_len)
@@ -627,10 +623,30 @@ static void press(brush_t *b, brush_key_t key)
 	}
 }
 
+static void value_key(brush_t *b, brush_key_t key)
+{
+	int other = brush_partner(key);
+	bool fast = other >= 0 && held(b, (brush_key_t)other);
+	brush_key_t way = fast && b->repeat_key != (int)key ? (brush_key_t)other : key;
+	int by = (way == BRUSH_KEY_SONG_RIGHT || way == BRUSH_KEY_TEMPO_RIGHT ? 1 : -1) * (fast ? 10 : 1);
+	if (key == BRUSH_KEY_SONG_LEFT || key == BRUSH_KEY_SONG_RIGHT)
+		step_song(b, by);
+	else
+		set_tempo(b, shown_tempo(b) + by);
+}
+
+static bool repeats(brush_key_t key)
+{
+	return key == BRUSH_KEY_SONG_LEFT || key == BRUSH_KEY_SONG_RIGHT || key == BRUSH_KEY_TEMPO_LEFT
+	       || key == BRUSH_KEY_TEMPO_RIGHT;
+}
+
 static void release(brush_t *b, brush_key_t key)
 {
 	if ((key == BRUSH_KEY_REW || key == BRUSH_KEY_FF) && b->scan)
 		scan_end(b);
+	if (b->repeat_key == (int)key)
+		b->repeat_key = -1;
 }
 
 void brush_key(brush_t *b, brush_key_t key, bool down, uint64_t now)
@@ -643,15 +659,24 @@ void brush_key(brush_t *b, brush_key_t key, bool down, uint64_t now)
 			return;
 		b->down |= bit;
 		b->down_at[key] = now;
-		int other = partner(key);
+		int other = brush_partner(key);
 		if (other >= 0 && (b->pending >> other) & 1)
 		{
 			/* the two halves within the window: neither acts on its own */
 			b->pending &= ~(1u << other);
+			b->repeat_key = -1;
 			chord(b, key);
 		}
 		else
+		{
 			b->pending |= bit;
+			/* the first of a pair held steps again after a while, until it comes up */
+			if (repeats(key) && b->repeat_key < 0)
+			{
+				b->repeat_key = (int)key;
+				b->repeat_next = now + REPEAT_FIRST_MS;
+			}
+		}
 	}
 	else
 	{
@@ -931,6 +956,11 @@ void brush_tick(brush_t *b, uint64_t now, const brush_player_t *player)
 	{
 		scan_step(b);
 		b->scan_next += SCAN_STEP_MS;
+	}
+	if (b->repeat_key >= 0 && now >= b->repeat_next && !((b->pending >> b->repeat_key) & 1))
+	{
+		press(b, (brush_key_t)b->repeat_key);
+		b->repeat_next += REPEAT_MS;
 	}
 	if (b->transient && !b->scan && now >= b->transient_until)
 		b->transient = SHOW_NONE;

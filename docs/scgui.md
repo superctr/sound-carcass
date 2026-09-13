@@ -140,6 +140,9 @@ message).
   together, or TEMPO ◀ and ▶, or REW and FF, make the number, the tempo or the bar what the display shows
   when nothing else is going on -- so REW + FF gives a bar counter while the song plays.
 - **SONG ◀ ▶** step the song, without wrapping; while a song plays the new one starts at once.
+  These and the TEMPO keys step once when pressed and, held, again and again after half a second,
+  as the module's own keys do; holding one half of the pair and pressing the other runs the value
+  ten at a time the held one's way.
   **TEMPO ◀ ▶** change the tempo a beat a minute at a time, 5 to 260: while a song plays, its own
   tempo map scaled, which CLEAR + TEMPO puts back and every song starts at its own; while none plays,
   the recorder's tempo, 120 to begin with, which the tempo display shows then, disk or no disk, and
@@ -172,13 +175,16 @@ message).
 - **REC** records: whatever the machine's MIDI INs take from then on is taken down, stamped on the
   machine's clock, with any song stopped, REC lit and the display counting bars at the recorder's
   tempo; REC again or STOP ends it and asks where to save the take, a Standard MIDI File at that
-  tempo in 4/4 with a track per port, which then goes on the end of the list.  (The unit's REC waits for PLAY and records
-  onto the disk; this one does not.)  Hiding the panel ends a take too.
+  tempo in 4/4 with a track per port, a note off at its end for every note still held and a pedal
+  up for every sustain still down, which then goes on the end of the list.  (The unit's REC waits
+  for PLAY and records onto the disk; this one does not.)  Hiding the panel ends a take too.
 
 The keys work under the mouse as the module's do: the left button presses, a plain right-click
 queues a key to go down with the next left-click (the manual's "press both"), Shift and the right
-button hold a key down from now ("while holding"), and everything comes up with the left button.  The
-Brush's window remembers whether it was open.
+button hold a key down from now ("while holding"), and everything comes up with the left button.
+While the left button holds one half of a ◀ ▶ pair, the right button presses the other half for as
+long as it is down, so a value runs through ten at a time.  The Brush's window remembers whether it
+was open.
 
 ## MIDI ports
 

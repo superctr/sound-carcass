@@ -414,6 +414,8 @@ typedef struct bytes
 	size_t used, cap;
 	uint64_t tick;            /* of the last event written, for the deltas */
 	bool failed;
+	uint8_t notes[16][16];    /* a bit per key held on each channel */
+	uint16_t sustain;         /* a bit per channel whose pedal is down */
 } bytes_t;
 
 static void put(bytes_t *b, const uint8_t *p, size_t n)
@@ -541,7 +543,52 @@ static void put_chunk(bytes_t *t, uint64_t tick, const uint8_t *p, size_t n)
 		put_delta(t, tick);
 		put_byte(t, status);
 		put(t, p + i, (size_t)want);
+		uint8_t ch = status & 0x0f, key = p[i] & 0x7f;
+		switch (status & 0xf0)
+		{
+		case 0x90:   /* a note on at zero is a note off */
+			if (p[i + 1])
+				t->notes[ch][key / 8] |= (uint8_t)(1 << (key % 8));
+			else
+				t->notes[ch][key / 8] &= (uint8_t)~(1 << (key % 8));
+			break;
+		case 0x80:
+			t->notes[ch][key / 8] &= (uint8_t)~(1 << (key % 8));
+			break;
+		case 0xb0:
+			if (key == 64)
+			{
+				if (p[i + 1] >= 64)
+					t->sustain |= (uint16_t)(1 << ch);
+				else
+					t->sustain &= (uint16_t)~(1 << ch);
+			}
+			break;
+		default:
+			break;
+		}
 		i += (size_t)want;
+	}
+}
+
+/* what a take ended in the middle of: every note still held let go, every pedal still down lifted */
+static void put_release(bytes_t *t, uint64_t tick)
+{
+	for (int ch = 0; ch < 16; ch++)
+	{
+		for (int key = 0; key < 128; key++)
+			if ((t->notes[ch][key / 8] >> (key % 8)) & 1)
+			{
+				uint8_t off[3] = { (uint8_t)(0x80 | ch), (uint8_t)key, 0x40 };
+				put_delta(t, tick);
+				put(t, off, 3);
+			}
+		if ((t->sustain >> ch) & 1)
+		{
+			uint8_t up[3] = { (uint8_t)(0xb0 | ch), 64, 0 };
+			put_delta(t, tick);
+			put(t, up, 3);
+		}
 	}
 }
 
@@ -607,6 +654,7 @@ uint8_t *smf_write_takes(const smf_take_t *takes, size_t count, const uint8_t *b
 		for (int n = 0; n < SMF_PORTS; n++)
 			if (track[n].used > 5)
 			{
+				put_release(&track[n], end);
 				put_delta(&track[n], end);
 				put(&track[n], finish, 3);
 				put_track(&file, &track[n]);

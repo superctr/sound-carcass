@@ -564,6 +564,10 @@ static void seek_bar(machine_t *mc, uint32_t bar)
 	uint64_t last = smf_bar_at_tick(&mc->smf, mc->smf.last_tick);
 	uint64_t tick = bar > last ? mc->smf.last_tick : smf_tick_of_bar(&mc->smf, bar);
 	uint64_t frame = smf_frame_at_tick(&mc->smf, tick, mc->rate) + mc->lead;
+	/* past the last event the run is over: a seek there is a rewind for the next start, and the
+	 * tail rings on rather than the song playing again from the bar */
+	if (mc->playing && song_ended(mc))
+		mc->playing = false;
 	if (mc->playing && !mc->paused)
 		quiet(mc);
 	mc->pos = frame;
@@ -674,8 +678,8 @@ static void handle(machine_t *mc, const command_t *c)
 		mc->paused = c->a != 0;
 		break;
 	case CMD_STOP:
-		/* a song stopped past its last event has nothing sounding to cut off: its tail rings out */
-		if (unit_power_on(mc->unit) && mc->playing && !mc->paused && !song_ended(mc))
+		/* the tail too: a song that ends without its note offs is still sounding */
+		if (unit_power_on(mc->unit) && mc->playing && !mc->paused)
 			quiet(mc);
 		mc->playing = mc->paused = false;
 		break;
