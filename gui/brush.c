@@ -43,6 +43,7 @@ void brush_init(brush_t *b, const brush_actions_t *act, void *user)
 	b->interval = 4;
 	b->auto_play = b->auto_rewind = true;
 	b->tempo_factor = 1;
+	b->record_tempo = 120;
 	b->dirty = true;
 }
 
@@ -183,7 +184,7 @@ static void stop(brush_t *b)
 static void record_end(brush_t *b)
 {
 	b->recording = false;
-	b->act->record(b->user, false);
+	b->act->record(b->user, false, b->record_tempo);
 }
 
 /* the song has run out: the next one after the interval, selected from the start of the count so
@@ -241,18 +242,28 @@ static void show_transient(brush_t *b, int what, unsigned ms)
 	b->transient_until = b->now + ms;
 }
 
-/* the tempo the display would show: the one set by hand, or the song's own */
+/* the tempo the display would show: the recorder's while no song plays, else the one set by
+ * hand, or the song's own */
 static int shown_tempo(const brush_t *b)
 {
+	if (!b->playing)
+		return b->record_tempo;
 	if (b->tempo)
 		return b->tempo;
 	double t = b->player.tempo > 0 ? b->player.tempo : 120;
 	return (int)(t + 0.5);
 }
 
+/* the song's tempo while one plays; the recorder's otherwise */
 static void set_tempo(brush_t *b, int tempo)
 {
 	tempo = tempo < TEMPO_MIN ? TEMPO_MIN : tempo > TEMPO_MAX ? TEMPO_MAX : tempo;
+	if (!b->playing)
+	{
+		b->record_tempo = tempo;
+		show_transient(b, SHOW_TEMPO, TEMPO_SHOW_MS);
+		return;
+	}
 	b->tempo = tempo;
 	double own = b->player.tempo > 0 ? b->player.tempo : 120;
 	b->tempo_factor = tempo / own;
@@ -519,9 +530,14 @@ static void press(brush_t *b, brush_key_t key)
 			program_cancel(b);
 		else if (key == BRUSH_KEY_TEMPO_LEFT || key == BRUSH_KEY_TEMPO_RIGHT)
 		{
-			b->tempo = 0;
-			b->tempo_factor = 1;
-			b->act->tempo(b->user, 1);
+			if (b->playing)
+			{
+				b->tempo = 0;
+				b->tempo_factor = 1;
+				b->act->tempo(b->user, 1);
+			}
+			else
+				b->record_tempo = 120;
 			show_transient(b, SHOW_TEMPO, TEMPO_SHOW_MS);
 		}
 		return;
@@ -543,12 +559,10 @@ static void press(brush_t *b, brush_key_t key)
 		step_song(b, held(b, BRUSH_KEY_SONG_LEFT) ? -10 : 1);
 		break;
 	case BRUSH_KEY_TEMPO_LEFT:
-		if (b->songs)
-			set_tempo(b, shown_tempo(b) + (held(b, BRUSH_KEY_TEMPO_RIGHT) ? 10 : -1));
+		set_tempo(b, shown_tempo(b) + (held(b, BRUSH_KEY_TEMPO_RIGHT) ? 10 : -1));
 		break;
 	case BRUSH_KEY_TEMPO_RIGHT:
-		if (b->songs)
-			set_tempo(b, shown_tempo(b) + (held(b, BRUSH_KEY_TEMPO_LEFT) ? -10 : 1));
+		set_tempo(b, shown_tempo(b) + (held(b, BRUSH_KEY_TEMPO_LEFT) ? -10 : 1));
 		break;
 	case BRUSH_KEY_PROG:
 		if (!b->program_len)
@@ -599,7 +613,7 @@ static void press(brush_t *b, brush_key_t key)
 		stop(b);
 		b->recording = true;
 		b->record_at = b->now;
-		b->act->record(b->user, true);
+		b->act->record(b->user, true, b->record_tempo);
 		break;
 	case BRUSH_KEY_REW:
 	case BRUSH_KEY_FF:
@@ -841,8 +855,8 @@ static void compose(brush_t *b)
 		case BRUSH_FUNCTION_AUTO_PLAY: digits_text(d, b->auto_play ? " on" : "oFF"); break;
 		case BRUSH_FUNCTION_AUTO_REWIND: digits_text(d, b->auto_rewind ? " on" : "oFF"); break;
 		default:
-			if (b->recording)   /* the bar the take is in, at the 120 beats a minute it is written at */
-				digits_number(d, (unsigned)(1 + (b->now - b->record_at) / 2000), 3);
+			if (b->recording)   /* the bar the take is in, four beats at its tempo */
+				digits_number(d, (unsigned)(1 + (b->now - b->record_at) * (uint64_t)b->record_tempo / 240000), 3);
 			else if (!b->songs)
 				digits_text(d, "---");
 			else if (b->prog_entry && !b->prog_shown)

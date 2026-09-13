@@ -1860,14 +1860,14 @@ static void on_take_saved(GObject *source, GAsyncResult *result, gpointer user)
 	free(take);
 }
 
-static void brush_act_record(void *user, bool on)
+static void brush_act_record(void *user, bool on, int tempo)
 {
 	app_t *app = user;
 	machine_record(app->mc, on);
 	if (on)
 		return;
 	size_t size;
-	uint8_t *bytes = machine_recording(app->mc, &size);
+	uint8_t *bytes = machine_recording(app->mc, tempo, &size);
 	if (!bytes)
 		return;
 	take_t *take = malloc(sizeof(*take));

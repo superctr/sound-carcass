@@ -69,7 +69,8 @@ typedef struct brush_actions
 	void (*tempo)(void *user, double factor);             /* the song's tempo scaled */
 	void (*eject)(void *user);                            /* the disk is out: the list goes */
 	void (*settings)(void *user);                         /* a system function was stored */
-	void (*record)(void *user, bool on);                  /* MIDI IN taken down from now; off: the take is to be kept */
+	void (*record)(void *user, bool on, int tempo);       /* MIDI IN taken down from now; off: the take is to be kept,
+	                                                         written at the tempo (beats a minute) */
 } brush_actions_t;
 
 typedef struct brush
@@ -112,6 +113,7 @@ typedef struct brush
 	uint64_t countdown_at;
 	bool recording;            /* REC: MIDI IN is being taken down, the display counting its bars */
 	uint64_t record_at;
+	int record_tempo;          /* the take's tempo, set with TEMPO while no song plays; 120 to begin with */
 	int tempo;                 /* the tempo set by hand, or 0 for the song's own */
 	double tempo_factor;
 	uint64_t disk_until;       /* the DISK lamp is lit while the disk is being read */

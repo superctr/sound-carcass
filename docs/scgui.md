@@ -140,8 +140,10 @@ message).
   together, or TEMPO ◀ and ▶, or REW and FF, make the number, the tempo or the bar what the display shows
   when nothing else is going on -- so REW + FF gives a bar counter while the song plays.
 - **SONG ◀ ▶** step the song, without wrapping; while a song plays the new one starts at once.
-  **TEMPO ◀ ▶** change the tempo a beat a minute at a time, 5 to 260, scaling the song's own tempo
-  map; CLEAR + TEMPO puts it back, and every song starts at its own.
+  **TEMPO ◀ ▶** change the tempo a beat a minute at a time, 5 to 260: while a song plays, its own
+  tempo map scaled, which CLEAR + TEMPO puts back and every song starts at its own; while none plays,
+  the recorder's tempo, 120 to begin with, which the tempo display shows then and CLEAR + TEMPO puts
+  back to 120.
 - **PLAY**, **STOP**, **PAUSE**: PLAY lights while a song plays, PAUSE beside it while it is paused
   and PLAY or PAUSE goes on -- and a pause here holds the song alone, the module running on (its
   reverb rings out, the display keeps moving, MIDI IN still plays), where the playlist's pause with the
@@ -168,9 +170,9 @@ message).
 - **POWER** puts the Brush into standby, its display dark and STANDBY lit, playing stopped and its
   keys dead until POWER again; it is the Brush's own, not the module's.
 - **REC** records: whatever the machine's MIDI INs take from then on is taken down, stamped on the
-  machine's clock, with any song stopped, REC lit and the display counting bars; REC again or STOP
-  ends it and asks where to save the take, a Standard MIDI File at 120 beats a minute in 4/4 with a
-  track per port, which then goes on the end of the list.  (The unit's REC waits for PLAY and records
+  machine's clock, with any song stopped, REC lit and the display counting bars at the recorder's
+  tempo; REC again or STOP ends it and asks where to save the take, a Standard MIDI File at that
+  tempo in 4/4 with a track per port, which then goes on the end of the list.  (The unit's REC waits for PLAY and records
   onto the disk; this one does not.)  Hiding the panel ends a take too.
 
 The keys work under the mouse as the module's do: the left button presses, a plain right-click

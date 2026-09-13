@@ -1126,10 +1126,10 @@ void machine_record(machine_t *mc, bool on)
 	pthread_mutex_unlock(&mc->lock);
 }
 
-uint8_t *machine_recording(machine_t *mc, size_t *size)
+uint8_t *machine_recording(machine_t *mc, int tempo, size_t *size)
 {
 	pthread_mutex_lock(&mc->lock);
-	uint8_t *file = smf_write_takes(mc->takes, mc->take_count, mc->take_bytes, mc->take_frames, mc->rate, size);
+	uint8_t *file = smf_write_takes(mc->takes, mc->take_count, mc->take_bytes, mc->take_frames, mc->rate, tempo, size);
 	pthread_mutex_unlock(&mc->lock);
 	return file;
 }

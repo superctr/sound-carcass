@@ -407,7 +407,6 @@ uint64_t smf_tick_at_frame(const smf_t *s, uint64_t frame, uint32_t rate)
 /* ---------------------------------------------------------------- the writer */
 
 #define TAKE_DIVISION 480
-#define TAKE_TEMPO 500000
 
 typedef struct bytes
 {
@@ -466,10 +465,10 @@ static void put_delta(bytes_t *b, uint64_t tick)
 		b->tick = tick;
 }
 
-static uint64_t tick_of_frame(uint64_t frame, uint32_t rate)
+static uint64_t tick_of_frame(uint64_t frame, uint32_t rate, int tempo)
 {
-	/* 120 beats a minute: a quarter is half a second */
-	return rate ? (frame * (TAKE_DIVISION * 2) + rate / 2) / rate : 0;
+	uint64_t per_minute = (uint64_t)rate * 60;
+	return rate ? (frame * TAKE_DIVISION * (uint64_t)tempo + per_minute / 2) / per_minute : 0;
 }
 
 /* the data bytes a status byte takes; -1 for one the file cannot hold */
@@ -555,8 +554,10 @@ static void put_track(bytes_t *file, const bytes_t *track)
 }
 
 uint8_t *smf_write_takes(const smf_take_t *takes, size_t count, const uint8_t *bytes, uint64_t frames, uint32_t rate,
-                         size_t *size)
+                         int tempo, size_t *size)
 {
+	if (tempo < 1)
+		tempo = 120;
 	bytes_t track[SMF_PORTS];
 	memset(track, 0, sizeof(track));
 	for (size_t n = 0; n < count; n++)
@@ -571,9 +572,9 @@ uint8_t *smf_write_takes(const smf_take_t *takes, size_t count, const uint8_t *b
 			put(t, port, 4);
 			put_byte(t, k->port);
 		}
-		put_chunk(t, tick_of_frame(k->frame, rate), bytes + k->at, k->length);
+		put_chunk(t, tick_of_frame(k->frame, rate, tempo), bytes + k->at, k->length);
 	}
-	uint64_t end = tick_of_frame(frames, rate);
+	uint64_t end = tick_of_frame(frames, rate, tempo);
 	int tracks = 0;
 	for (int n = 0; n < SMF_PORTS; n++)
 		if (track[n].used > 5)   /* more than its port event */
@@ -583,9 +584,10 @@ uint8_t *smf_write_takes(const smf_take_t *takes, size_t count, const uint8_t *b
 	if (tracks)
 	{
 		static const uint8_t head[8] = { 'M', 'T', 'h', 'd', 0, 0, 0, 6 };
-		static const uint8_t conductor[15] = {
+		uint32_t quarter = 60000000u / (uint32_t)tempo;   /* microseconds */
+		const uint8_t conductor[15] = {
 			0x00, 0xff, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08,   /* 4/4 */
-			0x00, 0xff, 0x51, 0x03, TAKE_TEMPO >> 16, (TAKE_TEMPO >> 8) & 0xff, TAKE_TEMPO & 0xff
+			0x00, 0xff, 0x51, 0x03, (uint8_t)(quarter >> 16), (uint8_t)(quarter >> 8), (uint8_t)quarter
 		};
 		static const uint8_t finish[3] = { 0xff, 0x2f, 0x00 };
 		put(&file, head, 8);
