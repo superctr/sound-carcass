@@ -101,7 +101,7 @@ void machine_start_song(machine_t *mc, uint64_t frame);
 /* the song held where it is: the whole machine stands still, unless the Brush is in front (see
  * machine_set_brush), when the song alone waits and the machine runs on */
 void machine_pause(machine_t *mc, bool paused);
-void machine_stop_song(machine_t *mc);                 /* silence; the song stays loaded where it stopped */
+void machine_stop_song(machine_t *mc);                 /* silence, run out or not; the song stays loaded where it stopped */
 void machine_unload(machine_t *mc);
 /* to the start of a bar (from 1; past the last bar is the end), playing or not; the
  * controllers are chased when the song plays on from there */

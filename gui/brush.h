@@ -137,7 +137,7 @@ void brush_move(brush_t *b, int from, int to);
 void brush_insert(brush_t *b, int index);
 
 /* a key of the panel, down or up, at this time; a SONG or TEMPO key held steps again and again
- * after a first wait, and ten at a time with the other half of its pair held too */
+ * after a first wait, and at every tick with the other half of its pair held too */
 void brush_key(brush_t *b, brush_key_t key, bool down, uint64_t now);
 /* the other half of a ◀ ▶ pair, or -1 */
 int brush_partner(brush_key_t key);

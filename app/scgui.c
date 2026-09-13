@@ -2097,7 +2097,7 @@ static int brush_element_of(brush_key_t key)
  * right-click queues a key to go down with the next left-click (the manual's "simultaneously"),
  * Shift and the right button hold one down from now ("while holding"), and all of them come up
  * with the left button; while the left button holds one half of a ◀ ▶ pair the right button
- * presses the other half for as long as it is down, which runs the value through ten at a time.
+ * presses the other half for as long as it is down, which runs the value through at speed.
  * The slot takes files; the MIDI IN 2 jack opens the list. */
 static gboolean on_brush_button(GtkEventControllerLegacy *c, GdkEvent *event, gpointer user)
 {

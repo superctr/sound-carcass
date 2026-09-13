@@ -142,7 +142,7 @@ message).
 - **SONG ◀ ▶** step the song, without wrapping; while a song plays the new one starts at once.
   These and the TEMPO keys step once when pressed and, held, again and again after half a second,
   as the module's own keys do; holding one half of the pair and pressing the other runs the value
-  ten at a time the held one's way.
+  through at speed, the held one's way.
   **TEMPO ◀ ▶** change the tempo a beat a minute at a time, 5 to 260: while a song plays, its own
   tempo map scaled, which CLEAR + TEMPO puts back and every song starts at its own; while none plays,
   the recorder's tempo, 120 to begin with, which the tempo display shows then, disk or no disk, and
@@ -151,7 +151,8 @@ message).
   and PLAY or PAUSE goes on -- and a pause here holds the song alone, the module running on (its
   reverb rings out, the display keeps moving, MIDI IN still plays), where the playlist's pause with the
   Brush hidden stands the whole machine still; STOP silences and, with auto rewind on, goes back to the start, otherwise
-  PLAY goes on from where it stopped.  **REW** and **FF** held step through the bars, one at once, the
+  PLAY goes on from where it stopped, and a STOP after a song has run out silences whatever it left
+  sounding.  **REW** and **FF** held step through the bars, one at once, the
   next after half a second and then eight a second, silent meanwhile, and the song goes on from the
   new bar when the key comes up, with the controllers, programs and system exclusives it had set before
   that point sent first, so the parts stand as they should (the Brush's MIDI Update).  STOP + REW and
@@ -183,8 +184,8 @@ The keys work under the mouse as the module's do: the left button presses, a pla
 queues a key to go down with the next left-click (the manual's "press both"), Shift and the right
 button hold a key down from now ("while holding"), and everything comes up with the left button.
 While the left button holds one half of a ◀ ▶ pair, the right button presses the other half for as
-long as it is down, so a value runs through ten at a time.  The Brush's window remembers whether it
-was open.
+long as it is down, so a value runs through at speed.  The Brush's window remembers whether it was
+open.
 
 ## MIDI ports
 

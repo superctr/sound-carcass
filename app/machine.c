@@ -678,8 +678,8 @@ static void handle(machine_t *mc, const command_t *c)
 		mc->paused = c->a != 0;
 		break;
 	case CMD_STOP:
-		/* the tail too: a song that ends without its note offs is still sounding */
-		if (unit_power_on(mc->unit) && mc->playing && !mc->paused)
+		/* playing or run out: a song that ends without its note offs is still sounding */
+		if (unit_power_on(mc->unit) && mc->have_smf && !mc->paused)
 			quiet(mc);
 		mc->playing = mc->paused = false;
 		break;
