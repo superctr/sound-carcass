@@ -117,6 +117,9 @@ if(ZLIB_FOUND)
 	foreach(pitch 7 14)  # the SC-8820 has no glass; its pitch is pixels per millimetre
 		list(APPEND PANEL_ART panel_sc8820_base_p${pitch} panel_sc8820_atlas_p${pitch})
 	endforeach()
+	foreach(pitch 8 16)  # the SB-55, the player under the module: scaled to the module's window, so baked wider
+		list(APPEND PANEL_ART panel_sb55_base_p${pitch} panel_sb55_atlas_p${pitch})
+	endforeach()
 	foreach(art ${PANEL_ART})
 		set(src ${CMAKE_CURRENT_SOURCE_DIR}/gui/${art}.png)
 		set(dst ${CMAKE_CURRENT_BINARY_DIR}/gui/${art}_png.c)
@@ -129,7 +132,7 @@ if(ZLIB_FOUND)
 		list(APPEND PANEL_EMBEDS ${dst})
 	endforeach()
 	add_library(scemu_gui STATIC gui/panel.c gui/png.c gui/lcd_font.c gui/combos.c gui/controls.c gui/text.c gui/menu.c
-		${PANEL_EMBEDS})
+		gui/brush.c ${PANEL_EMBEDS})
 	target_include_directories(scemu_gui PUBLIC gui)
 	target_link_libraries(scemu_gui PUBLIC scemu PRIVATE ZLIB::ZLIB)
 	if(NOT MSVC)

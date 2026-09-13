@@ -19,6 +19,7 @@
 ART_MODEL(sc88pro) ART_MODEL(sc88) ART_MODEL(sc88vl) ART_MODEL(sc55mk2) ART_MODEL(sc55)
 ART_DECLARE(sc8850, 3) ART_DECLARE(sc8850, 6)
 ART_DECLARE(sc8820, 7) ART_DECLARE(sc8820, 14)
+ART_DECLARE(sb55, 8) ART_DECLARE(sb55, 16)
 
 #define ART_ROW(m, p) { p, panel_##m##_base_p##p##_png, panel_##m##_atlas_p##p##_png, \
                         &panel_##m##_base_p##p##_png_size, &panel_##m##_atlas_p##p##_png_size }
@@ -35,6 +36,7 @@ static const struct
 	[PANEL_MODEL_SC8850] = { ART_ROW(sc8850, 3), ART_ROW(sc8850, 6) },
 	[PANEL_MODEL_SC8820] = { ART_ROW(sc8820, 7), ART_ROW(sc8820, 14) },
 	[PANEL_MODEL_SC55] = { ART_ROW(sc55, 4), ART_ROW(sc55, 8) },
+	[PANEL_MODEL_SB55] = { ART_ROW(sb55, 8), ART_ROW(sb55, 16) },
 };
 
 #define SEG_COLOR 0xff201000u
@@ -52,8 +54,9 @@ struct panel
 	uint32_t leds;
 	float knob;
 	int dial;
-	uint64_t pressed;
+	panel_set_t pressed;
 	bool standby;
+	uint8_t lit[PANEL_SPRITE_COUNT];
 	bool dirty;
 };
 
@@ -192,11 +195,32 @@ void panel_set_standby(panel_t *p, bool standby)
 
 void panel_set_pressed(panel_t *p, panel_element_t e, bool down)
 {
-	uint64_t bit = (uint64_t)1 << e;
-	uint64_t was = p->pressed;
-	p->pressed = down ? (was | bit) : (was & ~bit);
-	if (p->pressed != was)
-		p->dirty = true;
+	if (e < 0 || e >= PANEL_ELEMENT_COUNT || panel_set_has(&p->pressed, e) == down)
+		return;
+	if (down)
+		panel_set_add(&p->pressed, e);
+	else
+		panel_set_remove(&p->pressed, e);
+	p->dirty = true;
+}
+
+void panel_set_lit(panel_t *p, panel_sprite_id_t id, bool on)
+{
+	if (id < 0 || id >= PANEL_SPRITE_COUNT || p->lit[id] == on)
+		return;
+	p->lit[id] = on;
+	p->dirty = true;
+}
+
+void panel_set_digits(panel_t *p, const uint8_t segments[3])
+{
+	for (int d = 0; d < 3; d++)
+		for (int s = 0; s < 8; s++)
+		{
+			/* the sprites run digit 2 (leftmost) a-g, digit 1 a-g, digit 0 a-g, then the three points */
+			panel_sprite_id_t id = s < 7 ? PANEL_SPRITE_DIGIT2_A + d * 7 + s : PANEL_SPRITE_DIGIT2_DP + d;
+			panel_set_lit(p, id, (segments[d] >> s) & 1);
+		}
 }
 
 bool panel_dirty(const panel_t *p) { return p->dirty; }
@@ -252,8 +276,8 @@ static void blit_sprite(panel_t *p, uint32_t *pixels, size_t stride, panel_sprit
 static void draw_knob(panel_t *p, uint32_t *pixels, size_t stride)
 {
 	int frame = (int)(p->knob * (PANEL_KNOB_FRAMES - 1) + 0.5f);
-	blit(p, pixels, stride, &p->size->knob[frame], (p->pressed >> PANEL_BUTTON_PREVIEW) & 1);
-	blit(p, pixels, stride, &p->size->dial[p->dial], (p->pressed >> PANEL_BUTTON_VALUE) & 1);
+	blit(p, pixels, stride, &p->size->knob[frame], panel_set_has(&p->pressed, PANEL_BUTTON_PREVIEW));
+	blit(p, pixels, stride, &p->size->dial[p->dial], panel_set_has(&p->pressed, PANEL_BUTTON_VALUE));
 }
 
 static const uint8_t *cell_pattern(const panel_t *p, uint8_t code, uint8_t *rows)
@@ -357,7 +381,7 @@ void panel_render(panel_t *p, uint32_t *pixels, size_t stride)
 		memcpy(pixels + (size_t)y * stride, p->base.pixels + (size_t)y * p->base.width, (size_t)p->base.width * sizeof(uint32_t));
 	if (p->size->glass.dot_cols)
 		draw_glcd(p, pixels, stride);
-	else
+	else if (p->size->glass.cell_pitch)
 		draw_glass(p, pixels, stride);
 	uint32_t standby = 1u << SCEMU_LED_STANDBY;
 	uint32_t leds = p->leds & ~standby;
@@ -369,8 +393,11 @@ void panel_render(panel_t *p, uint32_t *pixels, size_t stride)
 		blit_sprite(p, pixels, stride, PANEL_SPRITE_LED_USER_INST_EFX);
 	if (p->standby || (p->leds & standby))
 		blit_sprite(p, pixels, stride, PANEL_SPRITE_LED_STANDBY);
+	for (int s = 0; s < PANEL_SPRITE_COUNT; s++)
+		if (p->lit[s])
+			blit_sprite(p, pixels, stride, (panel_sprite_id_t)s);
 	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
-		if ((p->pressed & ((uint64_t)1 << e)) && panel_element_sprite[e] >= 0)
+		if (panel_set_has(&p->pressed, e) && panel_element_sprite[e] >= 0)
 			blit(p, pixels, stride, &p->size->sprite[panel_element_sprite[e]], true);
 	draw_knob(p, pixels, stride);
 	p->dirty = false;
@@ -422,6 +449,13 @@ int panel_element_button(panel_element_t e)
 		[PANEL_BUTTON_EXIT] = SCEMU_BUTTON_EXIT, [PANEL_BUTTON_ENTER] = SCEMU_BUTTON_ENTER,
 		[PANEL_BUTTON_SOLO] = SCEMU_BUTTON_SOLO, [PANEL_BUTTON_DEC] = SCEMU_BUTTON_DEC,
 		[PANEL_BUTTON_INC] = SCEMU_BUTTON_INC,
+		/* the SB-55's are the host's: no machine is behind them */
+		[PANEL_DISK_SLOT] = -1, [PANEL_BUTTON_EJECT] = -1,
+		[PANEL_BUTTON_SONG_LEFT] = -1, [PANEL_BUTTON_SONG_RIGHT] = -1, [PANEL_BUTTON_PROG] = -1,
+		[PANEL_BUTTON_SET] = -1, [PANEL_BUTTON_TEMPO_LEFT] = -1, [PANEL_BUTTON_TEMPO_RIGHT] = -1,
+		[PANEL_BUTTON_RND] = -1, [PANEL_BUTTON_CLEAR] = -1, [PANEL_BUTTON_PAUSE] = -1, [PANEL_BUTTON_REC] = -1,
+		[PANEL_BUTTON_SINGLE] = -1, [PANEL_BUTTON_REPT] = -1, [PANEL_BUTTON_STOP] = -1, [PANEL_BUTTON_PLAY] = -1,
+		[PANEL_BUTTON_REW] = -1, [PANEL_BUTTON_FF] = -1,
 	};
 	return e >= 0 && e < PANEL_ELEMENT_COUNT ? button[e] : -1;
 }

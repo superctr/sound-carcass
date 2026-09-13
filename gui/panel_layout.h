@@ -40,11 +40,12 @@ typedef enum panel_model
 	PANEL_MODEL_SC8850,
 	PANEL_MODEL_SC8820,
 	PANEL_MODEL_SC55,
+	PANEL_MODEL_SB55,
 	PANEL_MODEL_COUNT
 } panel_model_t;
 
 static const char *const panel_model_name[PANEL_MODEL_COUNT] = {
-	"sc88pro", "sc88", "sc88vl", "sc55mk2", "sc8850", "sc8820", "sc55"
+	"sc88pro", "sc88", "sc88vl", "sc55mk2", "sc8850", "sc8820", "sc55", "sb55"
 };
 
 typedef enum panel_element
@@ -104,6 +105,24 @@ typedef enum panel_element
 	PANEL_BUTTON_DEC,
 	PANEL_BUTTON_INC,
 	PANEL_BUTTON_VALUE,
+	PANEL_DISK_SLOT,
+	PANEL_BUTTON_EJECT,
+	PANEL_BUTTON_SONG_LEFT,
+	PANEL_BUTTON_SONG_RIGHT,
+	PANEL_BUTTON_PROG,
+	PANEL_BUTTON_SET,
+	PANEL_BUTTON_TEMPO_LEFT,
+	PANEL_BUTTON_TEMPO_RIGHT,
+	PANEL_BUTTON_RND,
+	PANEL_BUTTON_CLEAR,
+	PANEL_BUTTON_PAUSE,
+	PANEL_BUTTON_REC,
+	PANEL_BUTTON_SINGLE,
+	PANEL_BUTTON_REPT,
+	PANEL_BUTTON_STOP,
+	PANEL_BUTTON_PLAY,
+	PANEL_BUTTON_REW,
+	PANEL_BUTTON_FF,
 	PANEL_ELEMENT_COUNT
 } panel_element_t;
 
@@ -184,12 +203,62 @@ typedef enum panel_sprite_id
 	PANEL_SPRITE_LED_PART_B2,
 	PANEL_SPRITE_LED_PART_B3,
 	PANEL_SPRITE_LED_PART_B4,
+	PANEL_SPRITE_LED_PAUSE,
+	PANEL_SPRITE_LED_REC,
+	PANEL_SPRITE_LED_PLAY,
+	PANEL_SPRITE_LED_PROG,
+	PANEL_SPRITE_LED_RND,
+	PANEL_SPRITE_LED_SINGLE,
+	PANEL_SPRITE_LED_REPT,
+	PANEL_SPRITE_LED_DISK,
+	PANEL_SPRITE_SLOT_DISK,
+	PANEL_SPRITE_DIGIT2_A,
+	PANEL_SPRITE_DIGIT2_B,
+	PANEL_SPRITE_DIGIT2_C,
+	PANEL_SPRITE_DIGIT2_D,
+	PANEL_SPRITE_DIGIT2_E,
+	PANEL_SPRITE_DIGIT2_F,
+	PANEL_SPRITE_DIGIT2_G,
+	PANEL_SPRITE_DIGIT1_A,
+	PANEL_SPRITE_DIGIT1_B,
+	PANEL_SPRITE_DIGIT1_C,
+	PANEL_SPRITE_DIGIT1_D,
+	PANEL_SPRITE_DIGIT1_E,
+	PANEL_SPRITE_DIGIT1_F,
+	PANEL_SPRITE_DIGIT1_G,
+	PANEL_SPRITE_DIGIT0_A,
+	PANEL_SPRITE_DIGIT0_B,
+	PANEL_SPRITE_DIGIT0_C,
+	PANEL_SPRITE_DIGIT0_D,
+	PANEL_SPRITE_DIGIT0_E,
+	PANEL_SPRITE_DIGIT0_F,
+	PANEL_SPRITE_DIGIT0_G,
+	PANEL_SPRITE_DIGIT2_DP,
+	PANEL_SPRITE_DIGIT1_DP,
+	PANEL_SPRITE_DIGIT0_DP,
+	PANEL_SPRITE_BUTTON_EJECT,
+	PANEL_SPRITE_BUTTON_SONG_LEFT,
+	PANEL_SPRITE_BUTTON_SONG_RIGHT,
+	PANEL_SPRITE_BUTTON_PROG,
+	PANEL_SPRITE_BUTTON_SET,
+	PANEL_SPRITE_BUTTON_TEMPO_LEFT,
+	PANEL_SPRITE_BUTTON_TEMPO_RIGHT,
+	PANEL_SPRITE_BUTTON_RND,
+	PANEL_SPRITE_BUTTON_CLEAR,
+	PANEL_SPRITE_BUTTON_PAUSE,
+	PANEL_SPRITE_BUTTON_REC,
+	PANEL_SPRITE_BUTTON_SINGLE,
+	PANEL_SPRITE_BUTTON_REPT,
+	PANEL_SPRITE_BUTTON_STOP,
+	PANEL_SPRITE_BUTTON_PLAY,
+	PANEL_SPRITE_BUTTON_REW,
+	PANEL_SPRITE_BUTTON_FF,
 	PANEL_SPRITE_COUNT
 } panel_sprite_id_t;
 
 /* the sprite that is an element's key, for drawing it pressed; -1 for the rest */
 static const int16_t panel_element_sprite[PANEL_ELEMENT_COUNT] = {
-	-1, -1, -1, -1, -1, -1, -1, -1, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, -1, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63
+	-1, -1, -1, -1, -1, -1, -1, -1, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, -1, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, -1, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124
 };
 
 typedef struct panel_size
@@ -204,11 +273,11 @@ typedef struct panel_size
 } panel_size_t;
 
 static const char *const panel_element_name[PANEL_ELEMENT_COUNT] = {
-	"switch-power", "knob-volume", "jack-midi-in-b", "jack-phones", "lcd-glass", "lens-user-inst", "logo", "logo-model", "button-all", "button-mute", "button-sc55-map", "button-sc88-map", "button-part-left", "button-part-right", "button-instrument-left", "button-instrument-right", "button-level-left", "button-level-right", "button-pan-left", "button-pan-right", "button-reverb-left", "button-reverb-right", "button-chorus-left", "button-chorus-right", "button-key-shift-left", "button-key-shift-right", "button-midi-ch-left", "button-midi-ch-right", "button-user-inst", "button-select", "button-edit1-left", "button-edit1-right", "button-edit2-left", "button-edit2-right", "button-edit3-left", "button-edit3-right", "button-preview", "dial-value", "button-f1", "button-f2", "button-f3", "button-f4", "button-map", "button-edit", "button-drum", "button-down", "button-up", "button-effects", "button-exit", "button-enter", "button-shift", "button-solo", "button-dec", "button-inc", "button-value"
+	"switch-power", "knob-volume", "jack-midi-in-b", "jack-phones", "lcd-glass", "lens-user-inst", "logo", "logo-model", "button-all", "button-mute", "button-sc55-map", "button-sc88-map", "button-part-left", "button-part-right", "button-instrument-left", "button-instrument-right", "button-level-left", "button-level-right", "button-pan-left", "button-pan-right", "button-reverb-left", "button-reverb-right", "button-chorus-left", "button-chorus-right", "button-key-shift-left", "button-key-shift-right", "button-midi-ch-left", "button-midi-ch-right", "button-user-inst", "button-select", "button-edit1-left", "button-edit1-right", "button-edit2-left", "button-edit2-right", "button-edit3-left", "button-edit3-right", "button-preview", "dial-value", "button-f1", "button-f2", "button-f3", "button-f4", "button-map", "button-edit", "button-drum", "button-down", "button-up", "button-effects", "button-exit", "button-enter", "button-shift", "button-solo", "button-dec", "button-inc", "button-value", "disk-slot", "button-eject", "button-song-left", "button-song-right", "button-prog", "button-set", "button-tempo-left", "button-tempo-right", "button-rnd", "button-clear", "button-pause", "button-rec", "button-single", "button-rept", "button-stop", "button-play", "button-rew", "button-ff"
 };
 
 static const char *const panel_sprite_name[PANEL_SPRITE_COUNT] = {
-	"led-all", "led-mute", "led-sc55-map", "led-sc88-map", "led-user-inst", "led-user-inst-red", "led-user-inst-efx", "led-edit1", "led-edit2", "led-edit3", "lcd-mark-l", "lcd-mark-r", "lcd-glass-off", "button-all", "button-mute", "button-sc55-map", "button-sc88-map", "button-part-left", "button-part-right", "button-instrument-left", "button-instrument-right", "button-level-left", "button-level-right", "button-pan-left", "button-pan-right", "button-reverb-left", "button-reverb-right", "button-chorus-left", "button-chorus-right", "button-key-shift-left", "button-key-shift-right", "button-midi-ch-left", "button-midi-ch-right", "button-user-inst", "button-select", "button-edit1-left", "button-edit1-right", "button-edit2-left", "button-edit2-right", "button-edit3-left", "button-edit3-right", "button-preview", "led-standby", "led-solo", "led-edit", "led-drum", "led-effects", "button-f1", "button-f2", "button-f3", "button-f4", "button-map", "button-edit", "button-drum", "button-down", "button-up", "button-effects", "button-exit", "button-enter", "button-shift", "button-solo", "button-dec", "button-inc", "button-value", "led-power", "led-usb", "led-map", "led-part-a1", "led-part-a2", "led-part-a3", "led-part-a4", "led-part-b1", "led-part-b2", "led-part-b3", "led-part-b4"
+	"led-all", "led-mute", "led-sc55-map", "led-sc88-map", "led-user-inst", "led-user-inst-red", "led-user-inst-efx", "led-edit1", "led-edit2", "led-edit3", "lcd-mark-l", "lcd-mark-r", "lcd-glass-off", "button-all", "button-mute", "button-sc55-map", "button-sc88-map", "button-part-left", "button-part-right", "button-instrument-left", "button-instrument-right", "button-level-left", "button-level-right", "button-pan-left", "button-pan-right", "button-reverb-left", "button-reverb-right", "button-chorus-left", "button-chorus-right", "button-key-shift-left", "button-key-shift-right", "button-midi-ch-left", "button-midi-ch-right", "button-user-inst", "button-select", "button-edit1-left", "button-edit1-right", "button-edit2-left", "button-edit2-right", "button-edit3-left", "button-edit3-right", "button-preview", "led-standby", "led-solo", "led-edit", "led-drum", "led-effects", "button-f1", "button-f2", "button-f3", "button-f4", "button-map", "button-edit", "button-drum", "button-down", "button-up", "button-effects", "button-exit", "button-enter", "button-shift", "button-solo", "button-dec", "button-inc", "button-value", "led-power", "led-usb", "led-map", "led-part-a1", "led-part-a2", "led-part-a3", "led-part-a4", "led-part-b1", "led-part-b2", "led-part-b3", "led-part-b4", "led-pause", "led-rec", "led-play", "led-prog", "led-rnd", "led-single", "led-rept", "led-disk", "slot-disk", "digit2-a", "digit2-b", "digit2-c", "digit2-d", "digit2-e", "digit2-f", "digit2-g", "digit1-a", "digit1-b", "digit1-c", "digit1-d", "digit1-e", "digit1-f", "digit1-g", "digit0-a", "digit0-b", "digit0-c", "digit0-d", "digit0-e", "digit0-f", "digit0-g", "digit2-dp", "digit1-dp", "digit0-dp", "button-eject", "button-song-left", "button-song-right", "button-prog", "button-set", "button-tempo-left", "button-tempo-right", "button-rnd", "button-clear", "button-pause", "button-rec", "button-single", "button-rept", "button-stop", "button-play", "button-rew", "button-ff"
 };
 
 #define PANEL_SIZE_COUNT 2
@@ -275,6 +344,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-dec */
 			{ 0, 0, 0, 0 },  /* button-inc */
 			{ 0, 0, 0, 0 },  /* button-value */
+			{ 0, 0, 0, 0 },  /* disk-slot */
+			{ 0, 0, 0, 0 },  /* button-eject */
+			{ 0, 0, 0, 0 },  /* button-song-left */
+			{ 0, 0, 0, 0 },  /* button-song-right */
+			{ 0, 0, 0, 0 },  /* button-prog */
+			{ 0, 0, 0, 0 },  /* button-set */
+			{ 0, 0, 0, 0 },  /* button-tempo-left */
+			{ 0, 0, 0, 0 },  /* button-tempo-right */
+			{ 0, 0, 0, 0 },  /* button-rnd */
+			{ 0, 0, 0, 0 },  /* button-clear */
+			{ 0, 0, 0, 0 },  /* button-pause */
+			{ 0, 0, 0, 0 },  /* button-rec */
+			{ 0, 0, 0, 0 },  /* button-single */
+			{ 0, 0, 0, 0 },  /* button-rept */
+			{ 0, 0, 0, 0 },  /* button-stop */
+			{ 0, 0, 0, 0 },  /* button-play */
+			{ 0, 0, 0, 0 },  /* button-rew */
+			{ 0, 0, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 486, 0, 74, 73 }, 926, 20 },  /* led-all */
@@ -352,6 +439,56 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b2 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b3 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* slot-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-eject */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-set */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-clear */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-stop */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rew */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 736, 269, 16, 17 }, 209, 95 }, { { 753, 269, 17, 17 }, 208, 95 }, { { 912, 269, 18, 16 }, 207, 95 },
@@ -487,6 +624,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-dec */
 			{ 0, 0, 0, 0 },  /* button-inc */
 			{ 0, 0, 0, 0 },  /* button-value */
+			{ 0, 0, 0, 0 },  /* disk-slot */
+			{ 0, 0, 0, 0 },  /* button-eject */
+			{ 0, 0, 0, 0 },  /* button-song-left */
+			{ 0, 0, 0, 0 },  /* button-song-right */
+			{ 0, 0, 0, 0 },  /* button-prog */
+			{ 0, 0, 0, 0 },  /* button-set */
+			{ 0, 0, 0, 0 },  /* button-tempo-left */
+			{ 0, 0, 0, 0 },  /* button-tempo-right */
+			{ 0, 0, 0, 0 },  /* button-rnd */
+			{ 0, 0, 0, 0 },  /* button-clear */
+			{ 0, 0, 0, 0 },  /* button-pause */
+			{ 0, 0, 0, 0 },  /* button-rec */
+			{ 0, 0, 0, 0 },  /* button-single */
+			{ 0, 0, 0, 0 },  /* button-rept */
+			{ 0, 0, 0, 0 },  /* button-stop */
+			{ 0, 0, 0, 0 },  /* button-play */
+			{ 0, 0, 0, 0 },  /* button-rew */
+			{ 0, 0, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 1269, 0, 149, 146 }, 1852, 40 },  /* led-all */
@@ -564,6 +719,56 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b2 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b3 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* slot-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-eject */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-set */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-clear */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-stop */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rew */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 1603, 536, 32, 32 }, 418, 191 }, { { 1636, 536, 33, 32 }, 417, 190 }, { { 1670, 536, 33, 32 }, 416, 189 },
@@ -701,6 +906,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-dec */
 			{ 0, 0, 0, 0 },  /* button-inc */
 			{ 0, 0, 0, 0 },  /* button-value */
+			{ 0, 0, 0, 0 },  /* disk-slot */
+			{ 0, 0, 0, 0 },  /* button-eject */
+			{ 0, 0, 0, 0 },  /* button-song-left */
+			{ 0, 0, 0, 0 },  /* button-song-right */
+			{ 0, 0, 0, 0 },  /* button-prog */
+			{ 0, 0, 0, 0 },  /* button-set */
+			{ 0, 0, 0, 0 },  /* button-tempo-left */
+			{ 0, 0, 0, 0 },  /* button-tempo-right */
+			{ 0, 0, 0, 0 },  /* button-rnd */
+			{ 0, 0, 0, 0 },  /* button-clear */
+			{ 0, 0, 0, 0 },  /* button-pause */
+			{ 0, 0, 0, 0 },  /* button-rec */
+			{ 0, 0, 0, 0 },  /* button-single */
+			{ 0, 0, 0, 0 },  /* button-rept */
+			{ 0, 0, 0, 0 },  /* button-stop */
+			{ 0, 0, 0, 0 },  /* button-play */
+			{ 0, 0, 0, 0 },  /* button-rew */
+			{ 0, 0, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 486, 0, 74, 73 }, 926, 20 },  /* led-all */
@@ -778,6 +1001,56 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b2 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b3 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* slot-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-eject */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-set */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-clear */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-stop */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rew */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 646, 267, 16, 17 }, 209, 95 }, { { 663, 267, 17, 17 }, 208, 95 }, { { 822, 267, 18, 16 }, 207, 95 },
@@ -913,6 +1186,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-dec */
 			{ 0, 0, 0, 0 },  /* button-inc */
 			{ 0, 0, 0, 0 },  /* button-value */
+			{ 0, 0, 0, 0 },  /* disk-slot */
+			{ 0, 0, 0, 0 },  /* button-eject */
+			{ 0, 0, 0, 0 },  /* button-song-left */
+			{ 0, 0, 0, 0 },  /* button-song-right */
+			{ 0, 0, 0, 0 },  /* button-prog */
+			{ 0, 0, 0, 0 },  /* button-set */
+			{ 0, 0, 0, 0 },  /* button-tempo-left */
+			{ 0, 0, 0, 0 },  /* button-tempo-right */
+			{ 0, 0, 0, 0 },  /* button-rnd */
+			{ 0, 0, 0, 0 },  /* button-clear */
+			{ 0, 0, 0, 0 },  /* button-pause */
+			{ 0, 0, 0, 0 },  /* button-rec */
+			{ 0, 0, 0, 0 },  /* button-single */
+			{ 0, 0, 0, 0 },  /* button-rept */
+			{ 0, 0, 0, 0 },  /* button-stop */
+			{ 0, 0, 0, 0 },  /* button-play */
+			{ 0, 0, 0, 0 },  /* button-rew */
+			{ 0, 0, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 1269, 0, 149, 146 }, 1852, 40 },  /* led-all */
@@ -990,6 +1281,56 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b2 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b3 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* slot-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-eject */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-set */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-clear */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-stop */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rew */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 1400, 530, 32, 32 }, 418, 191 }, { { 1433, 530, 33, 32 }, 417, 190 }, { { 1467, 530, 33, 32 }, 416, 189 },
@@ -1127,6 +1468,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-dec */
 			{ 0, 0, 0, 0 },  /* button-inc */
 			{ 0, 0, 0, 0 },  /* button-value */
+			{ 0, 0, 0, 0 },  /* disk-slot */
+			{ 0, 0, 0, 0 },  /* button-eject */
+			{ 0, 0, 0, 0 },  /* button-song-left */
+			{ 0, 0, 0, 0 },  /* button-song-right */
+			{ 0, 0, 0, 0 },  /* button-prog */
+			{ 0, 0, 0, 0 },  /* button-set */
+			{ 0, 0, 0, 0 },  /* button-tempo-left */
+			{ 0, 0, 0, 0 },  /* button-tempo-right */
+			{ 0, 0, 0, 0 },  /* button-rnd */
+			{ 0, 0, 0, 0 },  /* button-clear */
+			{ 0, 0, 0, 0 },  /* button-pause */
+			{ 0, 0, 0, 0 },  /* button-rec */
+			{ 0, 0, 0, 0 },  /* button-single */
+			{ 0, 0, 0, 0 },  /* button-rept */
+			{ 0, 0, 0, 0 },  /* button-stop */
+			{ 0, 0, 0, 0 },  /* button-play */
+			{ 0, 0, 0, 0 },  /* button-rew */
+			{ 0, 0, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 486, 0, 74, 73 }, 926, 20 },  /* led-all */
@@ -1204,6 +1563,56 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b2 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b3 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* slot-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-eject */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-set */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-clear */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-stop */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rew */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 793, 228, 17, 17 }, 194, 97 }, { { 987, 228, 17, 16 }, 194, 97 }, { { 811, 228, 17, 17 }, 193, 96 },
@@ -1339,6 +1748,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-dec */
 			{ 0, 0, 0, 0 },  /* button-inc */
 			{ 0, 0, 0, 0 },  /* button-value */
+			{ 0, 0, 0, 0 },  /* disk-slot */
+			{ 0, 0, 0, 0 },  /* button-eject */
+			{ 0, 0, 0, 0 },  /* button-song-left */
+			{ 0, 0, 0, 0 },  /* button-song-right */
+			{ 0, 0, 0, 0 },  /* button-prog */
+			{ 0, 0, 0, 0 },  /* button-set */
+			{ 0, 0, 0, 0 },  /* button-tempo-left */
+			{ 0, 0, 0, 0 },  /* button-tempo-right */
+			{ 0, 0, 0, 0 },  /* button-rnd */
+			{ 0, 0, 0, 0 },  /* button-clear */
+			{ 0, 0, 0, 0 },  /* button-pause */
+			{ 0, 0, 0, 0 },  /* button-rec */
+			{ 0, 0, 0, 0 },  /* button-single */
+			{ 0, 0, 0, 0 },  /* button-rept */
+			{ 0, 0, 0, 0 },  /* button-stop */
+			{ 0, 0, 0, 0 },  /* button-play */
+			{ 0, 0, 0, 0 },  /* button-rew */
+			{ 0, 0, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 1270, 0, 149, 146 }, 1852, 40 },  /* led-all */
@@ -1416,6 +1843,56 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b2 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b3 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* slot-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-eject */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-set */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-clear */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-stop */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rew */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 1607, 455, 32, 33 }, 388, 195 }, { { 1674, 455, 33, 32 }, 386, 195 }, { { 1708, 455, 34, 32 }, 385, 194 },
@@ -1553,6 +2030,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-dec */
 			{ 0, 0, 0, 0 },  /* button-inc */
 			{ 0, 0, 0, 0 },  /* button-value */
+			{ 0, 0, 0, 0 },  /* disk-slot */
+			{ 0, 0, 0, 0 },  /* button-eject */
+			{ 0, 0, 0, 0 },  /* button-song-left */
+			{ 0, 0, 0, 0 },  /* button-song-right */
+			{ 0, 0, 0, 0 },  /* button-prog */
+			{ 0, 0, 0, 0 },  /* button-set */
+			{ 0, 0, 0, 0 },  /* button-tempo-left */
+			{ 0, 0, 0, 0 },  /* button-tempo-right */
+			{ 0, 0, 0, 0 },  /* button-rnd */
+			{ 0, 0, 0, 0 },  /* button-clear */
+			{ 0, 0, 0, 0 },  /* button-pause */
+			{ 0, 0, 0, 0 },  /* button-rec */
+			{ 0, 0, 0, 0 },  /* button-single */
+			{ 0, 0, 0, 0 },  /* button-rept */
+			{ 0, 0, 0, 0 },  /* button-stop */
+			{ 0, 0, 0, 0 },  /* button-play */
+			{ 0, 0, 0, 0 },  /* button-rew */
+			{ 0, 0, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 486, 0, 74, 73 }, 926, 20 },  /* led-all */
@@ -1630,6 +2125,56 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b2 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b3 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* slot-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-eject */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-set */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-clear */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-stop */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rew */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 612, 228, 17, 17 }, 221, 93 }, { { 630, 228, 16, 17 }, 221, 93 }, { { 806, 228, 17, 16 }, 220, 93 },
@@ -1765,6 +2310,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-dec */
 			{ 0, 0, 0, 0 },  /* button-inc */
 			{ 0, 0, 0, 0 },  /* button-value */
+			{ 0, 0, 0, 0 },  /* disk-slot */
+			{ 0, 0, 0, 0 },  /* button-eject */
+			{ 0, 0, 0, 0 },  /* button-song-left */
+			{ 0, 0, 0, 0 },  /* button-song-right */
+			{ 0, 0, 0, 0 },  /* button-prog */
+			{ 0, 0, 0, 0 },  /* button-set */
+			{ 0, 0, 0, 0 },  /* button-tempo-left */
+			{ 0, 0, 0, 0 },  /* button-tempo-right */
+			{ 0, 0, 0, 0 },  /* button-rnd */
+			{ 0, 0, 0, 0 },  /* button-clear */
+			{ 0, 0, 0, 0 },  /* button-pause */
+			{ 0, 0, 0, 0 },  /* button-rec */
+			{ 0, 0, 0, 0 },  /* button-single */
+			{ 0, 0, 0, 0 },  /* button-rept */
+			{ 0, 0, 0, 0 },  /* button-stop */
+			{ 0, 0, 0, 0 },  /* button-play */
+			{ 0, 0, 0, 0 },  /* button-rew */
+			{ 0, 0, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 1120, 0, 149, 146 }, 1852, 40 },  /* led-all */
@@ -1842,6 +2405,56 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b2 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b3 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* slot-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-eject */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-set */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-clear */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-stop */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rew */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 1211, 455, 32, 32 }, 442, 188 }, { { 1244, 455, 33, 32 }, 440, 187 }, { { 1278, 455, 34, 32 }, 439, 186 },
@@ -1979,6 +2592,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 1411, 355, 48, 48 },  /* button-dec */
 			{ 1543, 355, 48, 48 },  /* button-inc */
 			{ 1413, 112, 177, 177 },  /* button-value */
+			{ 0, 0, 0, 0 },  /* disk-slot */
+			{ 0, 0, 0, 0 },  /* button-eject */
+			{ 0, 0, 0, 0 },  /* button-song-left */
+			{ 0, 0, 0, 0 },  /* button-song-right */
+			{ 0, 0, 0, 0 },  /* button-prog */
+			{ 0, 0, 0, 0 },  /* button-set */
+			{ 0, 0, 0, 0 },  /* button-tempo-left */
+			{ 0, 0, 0, 0 },  /* button-tempo-right */
+			{ 0, 0, 0, 0 },  /* button-rnd */
+			{ 0, 0, 0, 0 },  /* button-clear */
+			{ 0, 0, 0, 0 },  /* button-pause */
+			{ 0, 0, 0, 0 },  /* button-rec */
+			{ 0, 0, 0, 0 },  /* button-single */
+			{ 0, 0, 0, 0 },  /* button-rept */
+			{ 0, 0, 0, 0 },  /* button-stop */
+			{ 0, 0, 0, 0 },  /* button-play */
+			{ 0, 0, 0, 0 },  /* button-rew */
+			{ 0, 0, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-all */
@@ -2056,6 +2687,56 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b2 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b3 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* slot-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-eject */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-set */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-clear */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-stop */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rew */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 0, 2017, 20, 20 }, 92, 284 }, { { 639, 1991, 21, 21 }, 91, 283 }, { { 21, 2017, 20, 20 }, 91, 283 },
@@ -2191,6 +2872,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 2822, 710, 96, 97 },  /* button-dec */
 			{ 3086, 710, 97, 97 },  /* button-inc */
 			{ 2825, 224, 355, 354 },  /* button-value */
+			{ 0, 0, 0, 0 },  /* disk-slot */
+			{ 0, 0, 0, 0 },  /* button-eject */
+			{ 0, 0, 0, 0 },  /* button-song-left */
+			{ 0, 0, 0, 0 },  /* button-song-right */
+			{ 0, 0, 0, 0 },  /* button-prog */
+			{ 0, 0, 0, 0 },  /* button-set */
+			{ 0, 0, 0, 0 },  /* button-tempo-left */
+			{ 0, 0, 0, 0 },  /* button-tempo-right */
+			{ 0, 0, 0, 0 },  /* button-rnd */
+			{ 0, 0, 0, 0 },  /* button-clear */
+			{ 0, 0, 0, 0 },  /* button-pause */
+			{ 0, 0, 0, 0 },  /* button-rec */
+			{ 0, 0, 0, 0 },  /* button-single */
+			{ 0, 0, 0, 0 },  /* button-rept */
+			{ 0, 0, 0, 0 },  /* button-stop */
+			{ 0, 0, 0, 0 },  /* button-play */
+			{ 0, 0, 0, 0 },  /* button-rew */
+			{ 0, 0, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-all */
@@ -2268,6 +2967,56 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b2 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b3 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* slot-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-eject */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-set */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-clear */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-stop */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rew */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 1256, 3968, 39, 40 }, 185, 568 }, { { 1457, 3968, 40, 39 }, 183, 567 }, { { 0, 4017, 40, 39 }, 182, 566 },
@@ -2405,6 +3154,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-dec */
 			{ 0, 0, 0, 0 },  /* button-inc */
 			{ 0, 0, 0, 0 },  /* button-value */
+			{ 0, 0, 0, 0 },  /* disk-slot */
+			{ 0, 0, 0, 0 },  /* button-eject */
+			{ 0, 0, 0, 0 },  /* button-song-left */
+			{ 0, 0, 0, 0 },  /* button-song-right */
+			{ 0, 0, 0, 0 },  /* button-prog */
+			{ 0, 0, 0, 0 },  /* button-set */
+			{ 0, 0, 0, 0 },  /* button-tempo-left */
+			{ 0, 0, 0, 0 },  /* button-tempo-right */
+			{ 0, 0, 0, 0 },  /* button-rnd */
+			{ 0, 0, 0, 0 },  /* button-clear */
+			{ 0, 0, 0, 0 },  /* button-pause */
+			{ 0, 0, 0, 0 },  /* button-rec */
+			{ 0, 0, 0, 0 },  /* button-single */
+			{ 0, 0, 0, 0 },  /* button-rept */
+			{ 0, 0, 0, 0 },  /* button-stop */
+			{ 0, 0, 0, 0 },  /* button-play */
+			{ 0, 0, 0, 0 },  /* button-rew */
+			{ 0, 0, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-all */
@@ -2482,6 +3249,56 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 535, 0, 90, 76 }, 819, 81 },  /* led-part-b2 */
 			{ { 626, 0, 90, 76 }, 861, 81 },  /* led-part-b3 */
 			{ { 717, 0, 90, 76 }, 903, 81 },  /* led-part-b4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* slot-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-eject */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-set */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-clear */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-stop */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rew */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 1606, 0, 15, 16 }, 1061, 135 }, { { 32, 79, 15, 15 }, 1061, 135 }, { { 48, 79, 16, 15 }, 1060, 135 },
@@ -2617,6 +3434,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-dec */
 			{ 0, 0, 0, 0 },  /* button-inc */
 			{ 0, 0, 0, 0 },  /* button-value */
+			{ 0, 0, 0, 0 },  /* disk-slot */
+			{ 0, 0, 0, 0 },  /* button-eject */
+			{ 0, 0, 0, 0 },  /* button-song-left */
+			{ 0, 0, 0, 0 },  /* button-song-right */
+			{ 0, 0, 0, 0 },  /* button-prog */
+			{ 0, 0, 0, 0 },  /* button-set */
+			{ 0, 0, 0, 0 },  /* button-tempo-left */
+			{ 0, 0, 0, 0 },  /* button-tempo-right */
+			{ 0, 0, 0, 0 },  /* button-rnd */
+			{ 0, 0, 0, 0 },  /* button-clear */
+			{ 0, 0, 0, 0 },  /* button-pause */
+			{ 0, 0, 0, 0 },  /* button-rec */
+			{ 0, 0, 0, 0 },  /* button-single */
+			{ 0, 0, 0, 0 },  /* button-rept */
+			{ 0, 0, 0, 0 },  /* button-stop */
+			{ 0, 0, 0, 0 },  /* button-play */
+			{ 0, 0, 0, 0 },  /* button-rew */
+			{ 0, 0, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-all */
@@ -2694,6 +3529,56 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 1064, 0, 180, 152 }, 1638, 162 },  /* led-part-b2 */
 			{ { 1245, 0, 180, 152 }, 1722, 162 },  /* led-part-b3 */
 			{ { 1426, 0, 180, 152 }, 1806, 162 },  /* led-part-b4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* slot-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-eject */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-set */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-clear */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-stop */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rew */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 3366, 0, 29, 30 }, 2123, 271 }, { { 31, 159, 29, 29 }, 2122, 271 }, { { 61, 159, 30, 29 }, 2121, 270 },
@@ -2831,6 +3716,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-dec */
 			{ 0, 0, 0, 0 },  /* button-inc */
 			{ 0, 0, 0, 0 },  /* button-value */
+			{ 0, 0, 0, 0 },  /* disk-slot */
+			{ 0, 0, 0, 0 },  /* button-eject */
+			{ 0, 0, 0, 0 },  /* button-song-left */
+			{ 0, 0, 0, 0 },  /* button-song-right */
+			{ 0, 0, 0, 0 },  /* button-prog */
+			{ 0, 0, 0, 0 },  /* button-set */
+			{ 0, 0, 0, 0 },  /* button-tempo-left */
+			{ 0, 0, 0, 0 },  /* button-tempo-right */
+			{ 0, 0, 0, 0 },  /* button-rnd */
+			{ 0, 0, 0, 0 },  /* button-clear */
+			{ 0, 0, 0, 0 },  /* button-pause */
+			{ 0, 0, 0, 0 },  /* button-rec */
+			{ 0, 0, 0, 0 },  /* button-single */
+			{ 0, 0, 0, 0 },  /* button-rept */
+			{ 0, 0, 0, 0 },  /* button-stop */
+			{ 0, 0, 0, 0 },  /* button-play */
+			{ 0, 0, 0, 0 },  /* button-rew */
+			{ 0, 0, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 486, 0, 74, 73 }, 926, 20 },  /* led-all */
@@ -2908,6 +3811,56 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b2 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b3 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* slot-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-eject */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-set */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-clear */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-stop */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rew */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 612, 228, 17, 17 }, 221, 93 }, { { 630, 228, 16, 17 }, 221, 93 }, { { 806, 228, 17, 16 }, 220, 93 },
@@ -3043,6 +3996,24 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ 0, 0, 0, 0 },  /* button-dec */
 			{ 0, 0, 0, 0 },  /* button-inc */
 			{ 0, 0, 0, 0 },  /* button-value */
+			{ 0, 0, 0, 0 },  /* disk-slot */
+			{ 0, 0, 0, 0 },  /* button-eject */
+			{ 0, 0, 0, 0 },  /* button-song-left */
+			{ 0, 0, 0, 0 },  /* button-song-right */
+			{ 0, 0, 0, 0 },  /* button-prog */
+			{ 0, 0, 0, 0 },  /* button-set */
+			{ 0, 0, 0, 0 },  /* button-tempo-left */
+			{ 0, 0, 0, 0 },  /* button-tempo-right */
+			{ 0, 0, 0, 0 },  /* button-rnd */
+			{ 0, 0, 0, 0 },  /* button-clear */
+			{ 0, 0, 0, 0 },  /* button-pause */
+			{ 0, 0, 0, 0 },  /* button-rec */
+			{ 0, 0, 0, 0 },  /* button-single */
+			{ 0, 0, 0, 0 },  /* button-rept */
+			{ 0, 0, 0, 0 },  /* button-stop */
+			{ 0, 0, 0, 0 },  /* button-play */
+			{ 0, 0, 0, 0 },  /* button-rew */
+			{ 0, 0, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 1120, 0, 149, 146 }, 1852, 40 },  /* led-all */
@@ -3120,6 +4091,56 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b2 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b3 */
 			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* slot-disk */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-a */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-b */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-c */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-d */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-e */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-f */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-g */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit2-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit1-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* digit0-dp */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-eject */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-song-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-prog */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-set */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-tempo-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rnd */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-clear */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pause */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-single */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rept */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-stop */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-play */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-rew */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-ff */
 		},
 		{
 			{ { 1211, 455, 32, 32 }, 442, 188 }, { { 1244, 455, 33, 32 }, 440, 187 }, { { 1278, 455, 34, 32 }, 439, 186 },
@@ -3183,6 +4204,568 @@ static const panel_size_t panel_sizes[PANEL_MODEL_COUNT][PANEL_SIZE_COUNT] = {
 			{ { 184, 496, 36, 29 }, 520, 181 }, { { 1838, 455, 36, 30 }, 519, 182 }, { { 1875, 455, 35, 30 }, 519, 183 },
 			{ { 1911, 455, 34, 30 }, 518, 184 }, { { 1417, 455, 34, 32 }, 517, 184 }, { { 1452, 455, 33, 32 }, 517, 185 },
 			{ { 1486, 455, 33, 32 }, 516, 186 },
+		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+		},
+	},
+	},
+	{  /* sb55 */
+	{
+		8, 1744, 352,
+		"panel_sb55_base_p8.png", "panel_sb55_atlas_p8.png",
+		{ { 0, 0 }, { 0, 0, 0, 0 }, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+		{
+			{ 10, 47, 206, 51 },  /* switch-power */
+			{ 0, 0, 0, 0 },  /* knob-volume */
+			{ 83, 156, 130, 130 },  /* jack-midi-in-b */
+			{ 0, 0, 0, 0 },  /* jack-phones */
+			{ 1083, 0, 165, 352 },  /* lcd-glass */
+			{ 0, 0, 0, 0 },  /* lens-user-inst */
+			{ 0, 0, 0, 0 },  /* logo */
+			{ 0, 0, 0, 0 },  /* logo-model */
+			{ 0, 0, 0, 0 },  /* button-all */
+			{ 0, 0, 0, 0 },  /* button-mute */
+			{ 0, 0, 0, 0 },  /* button-sc55-map */
+			{ 0, 0, 0, 0 },  /* button-sc88-map */
+			{ 0, 0, 0, 0 },  /* button-part-left */
+			{ 0, 0, 0, 0 },  /* button-part-right */
+			{ 0, 0, 0, 0 },  /* button-instrument-left */
+			{ 0, 0, 0, 0 },  /* button-instrument-right */
+			{ 0, 0, 0, 0 },  /* button-level-left */
+			{ 0, 0, 0, 0 },  /* button-level-right */
+			{ 0, 0, 0, 0 },  /* button-pan-left */
+			{ 0, 0, 0, 0 },  /* button-pan-right */
+			{ 0, 0, 0, 0 },  /* button-reverb-left */
+			{ 0, 0, 0, 0 },  /* button-reverb-right */
+			{ 0, 0, 0, 0 },  /* button-chorus-left */
+			{ 0, 0, 0, 0 },  /* button-chorus-right */
+			{ 0, 0, 0, 0 },  /* button-key-shift-left */
+			{ 0, 0, 0, 0 },  /* button-key-shift-right */
+			{ 0, 0, 0, 0 },  /* button-midi-ch-left */
+			{ 0, 0, 0, 0 },  /* button-midi-ch-right */
+			{ 0, 0, 0, 0 },  /* button-user-inst */
+			{ 0, 0, 0, 0 },  /* button-select */
+			{ 0, 0, 0, 0 },  /* button-edit1-left */
+			{ 0, 0, 0, 0 },  /* button-edit1-right */
+			{ 0, 0, 0, 0 },  /* button-edit2-left */
+			{ 0, 0, 0, 0 },  /* button-edit2-right */
+			{ 0, 0, 0, 0 },  /* button-edit3-left */
+			{ 0, 0, 0, 0 },  /* button-edit3-right */
+			{ 0, 0, 0, 0 },  /* button-preview */
+			{ 0, 0, 0, 0 },  /* dial-value */
+			{ 0, 0, 0, 0 },  /* button-f1 */
+			{ 0, 0, 0, 0 },  /* button-f2 */
+			{ 0, 0, 0, 0 },  /* button-f3 */
+			{ 0, 0, 0, 0 },  /* button-f4 */
+			{ 0, 0, 0, 0 },  /* button-map */
+			{ 0, 0, 0, 0 },  /* button-edit */
+			{ 0, 0, 0, 0 },  /* button-drum */
+			{ 0, 0, 0, 0 },  /* button-down */
+			{ 0, 0, 0, 0 },  /* button-up */
+			{ 0, 0, 0, 0 },  /* button-effects */
+			{ 0, 0, 0, 0 },  /* button-exit */
+			{ 0, 0, 0, 0 },  /* button-enter */
+			{ 0, 0, 0, 0 },  /* button-shift */
+			{ 0, 0, 0, 0 },  /* button-solo */
+			{ 0, 0, 0, 0 },  /* button-dec */
+			{ 0, 0, 0, 0 },  /* button-inc */
+			{ 0, 0, 0, 0 },  /* button-value */
+			{ 248, 110, 816, 162 },  /* disk-slot */
+			{ 866, 229, 144, 35 },  /* button-eject */
+			{ 1311, 44, 82, 36 },  /* button-song-left */
+			{ 1398, 44, 83, 36 },  /* button-song-right */
+			{ 1514, 44, 83, 36 },  /* button-prog */
+			{ 1602, 44, 82, 36 },  /* button-set */
+			{ 1311, 123, 82, 36 },  /* button-tempo-left */
+			{ 1398, 123, 83, 36 },  /* button-tempo-right */
+			{ 1514, 123, 83, 36 },  /* button-rnd */
+			{ 1602, 123, 82, 36 },  /* button-clear */
+			{ 1332, 200, 40, 40 },  /* button-pause */
+			{ 1419, 200, 41, 40 },  /* button-rec */
+			{ 1514, 202, 83, 36 },  /* button-single */
+			{ 1602, 202, 82, 36 },  /* button-rept */
+			{ 1311, 281, 82, 36 },  /* button-stop */
+			{ 1398, 281, 83, 36 },  /* button-play */
+			{ 1514, 281, 83, 36 },  /* button-rew */
+			{ 1602, 281, 82, 36 },  /* button-ff */
+		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-all */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-mute */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-sc55-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-sc88-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-user-inst */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-user-inst-red */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-user-inst-efx */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* lcd-mark-l */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* lcd-mark-r */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* lcd-glass-off */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-all */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-mute */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-sc55-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-sc88-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-part-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-part-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-instrument-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-instrument-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-level-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-level-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pan-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pan-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-reverb-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-reverb-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-chorus-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-chorus-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-key-shift-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-key-shift-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-midi-ch-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-midi-ch-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-user-inst */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-select */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit1-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit1-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit2-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit2-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit3-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit3-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-preview */
+			{ { 445, 0, 48, 46 }, 176, 50 },  /* led-standby */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-down */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-up */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-exit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-enter */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-shift */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-dec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-inc */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-value */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-power */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-usb */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-a1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-a2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-a3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-a4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b4 */
+			{ { 1652, 52, 16, 18 }, 1344, 211 },  /* led-pause */
+			{ { 1669, 52, 19, 18 }, 1430, 211 },  /* led-rec */
+			{ { 1123, 52, 40, 38 }, 1419, 280 },  /* led-play */
+			{ { 105, 0, 84, 48 }, 1514, 38 },  /* led-prog */
+			{ { 190, 0, 84, 48 }, 1514, 117 },  /* led-rnd */
+			{ { 275, 0, 84, 48 }, 1514, 196 },  /* led-single */
+			{ { 360, 0, 84, 48 }, 1601, 196 },  /* led-rept */
+			{ { 494, 0, 47, 46 }, 1103, 225 },  /* led-disk */
+			{ { 542, 0, 744, 46 }, 284, 142 },  /* slot-disk */
+			{ { 1164, 52, 43, 28 }, 1098, 60 },  /* digit2-a */
+			{ { 759, 52, 29, 41 }, 1120, 66 },  /* digit2-b */
+			{ { 789, 52, 29, 41 }, 1116, 93 },  /* digit2-c */
+			{ { 1208, 52, 43, 28 }, 1091, 112 },  /* digit2-d */
+			{ { 819, 52, 29, 41 }, 1083, 93 },  /* digit2-e */
+			{ { 849, 52, 29, 41 }, 1087, 66 },  /* digit2-f */
+			{ { 1252, 52, 44, 28 }, 1094, 86 },  /* digit2-g */
+			{ { 1297, 52, 44, 28 }, 1147, 60 },  /* digit1-a */
+			{ { 879, 52, 30, 41 }, 1169, 66 },  /* digit1-b */
+			{ { 910, 52, 29, 41 }, 1166, 93 },  /* digit1-c */
+			{ { 1342, 52, 44, 28 }, 1140, 112 },  /* digit1-d */
+			{ { 940, 52, 30, 41 }, 1132, 93 },  /* digit1-e */
+			{ { 971, 52, 30, 41 }, 1136, 66 },  /* digit1-f */
+			{ { 1387, 52, 44, 28 }, 1144, 86 },  /* digit1-g */
+			{ { 1432, 52, 44, 28 }, 1197, 60 },  /* digit0-a */
+			{ { 1002, 52, 29, 41 }, 1219, 66 },  /* digit0-b */
+			{ { 1032, 52, 30, 41 }, 1215, 93 },  /* digit0-c */
+			{ { 1477, 52, 44, 28 }, 1190, 112 },  /* digit0-d */
+			{ { 1063, 52, 29, 41 }, 1182, 93 },  /* digit0-e */
+			{ { 1093, 52, 29, 41 }, 1186, 66 },  /* digit0-f */
+			{ { 1522, 52, 44, 28 }, 1193, 86 },  /* digit0-g */
+			{ { 1567, 52, 27, 28 }, 1086, 60 },  /* digit2-dp */
+			{ { 1595, 52, 28, 28 }, 1135, 60 },  /* digit1-dp */
+			{ { 1624, 52, 27, 28 }, 1185, 60 },  /* digit0-dp */
+			{ { 1287, 0, 155, 46 }, 861, 226 },  /* button-eject */
+			{ { 1443, 0, 94, 46 }, 1305, 42 },  /* button-song-left */
+			{ { 1538, 0, 93, 46 }, 1393, 42 },  /* button-song-right */
+			{ { 1632, 0, 94, 46 }, 1509, 42 },  /* button-prog */
+			{ { 1727, 0, 94, 46 }, 1596, 42 },  /* button-set */
+			{ { 1822, 0, 94, 46 }, 1305, 121 },  /* button-tempo-left */
+			{ { 1917, 0, 93, 46 }, 1393, 121 },  /* button-tempo-right */
+			{ { 0, 52, 94, 46 }, 1509, 121 },  /* button-rnd */
+			{ { 95, 52, 94, 46 }, 1596, 121 },  /* button-clear */
+			{ { 0, 0, 52, 51 }, 1326, 197 },  /* button-pause */
+			{ { 53, 0, 51, 51 }, 1414, 197 },  /* button-rec */
+			{ { 190, 52, 94, 46 }, 1509, 200 },  /* button-single */
+			{ { 285, 52, 94, 46 }, 1596, 200 },  /* button-rept */
+			{ { 380, 52, 94, 46 }, 1305, 279 },  /* button-stop */
+			{ { 475, 52, 93, 46 }, 1393, 279 },  /* button-play */
+			{ { 569, 52, 94, 46 }, 1509, 279 },  /* button-rew */
+			{ { 664, 52, 94, 46 }, 1596, 279 },  /* button-ff */
+		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 },
+		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+		},
+	},
+	{
+		16, 3488, 704,
+		"panel_sb55_base_p16.png", "panel_sb55_atlas_p16.png",
+		{ { 0, 0 }, { 0, 0, 0, 0 }, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+		{
+			{ 21, 94, 411, 103 },  /* switch-power */
+			{ 0, 0, 0, 0 },  /* knob-volume */
+			{ 166, 311, 260, 261 },  /* jack-midi-in-b */
+			{ 0, 0, 0, 0 },  /* jack-phones */
+			{ 2166, 0, 330, 704 },  /* lcd-glass */
+			{ 0, 0, 0, 0 },  /* lens-user-inst */
+			{ 0, 0, 0, 0 },  /* logo */
+			{ 0, 0, 0, 0 },  /* logo-model */
+			{ 0, 0, 0, 0 },  /* button-all */
+			{ 0, 0, 0, 0 },  /* button-mute */
+			{ 0, 0, 0, 0 },  /* button-sc55-map */
+			{ 0, 0, 0, 0 },  /* button-sc88-map */
+			{ 0, 0, 0, 0 },  /* button-part-left */
+			{ 0, 0, 0, 0 },  /* button-part-right */
+			{ 0, 0, 0, 0 },  /* button-instrument-left */
+			{ 0, 0, 0, 0 },  /* button-instrument-right */
+			{ 0, 0, 0, 0 },  /* button-level-left */
+			{ 0, 0, 0, 0 },  /* button-level-right */
+			{ 0, 0, 0, 0 },  /* button-pan-left */
+			{ 0, 0, 0, 0 },  /* button-pan-right */
+			{ 0, 0, 0, 0 },  /* button-reverb-left */
+			{ 0, 0, 0, 0 },  /* button-reverb-right */
+			{ 0, 0, 0, 0 },  /* button-chorus-left */
+			{ 0, 0, 0, 0 },  /* button-chorus-right */
+			{ 0, 0, 0, 0 },  /* button-key-shift-left */
+			{ 0, 0, 0, 0 },  /* button-key-shift-right */
+			{ 0, 0, 0, 0 },  /* button-midi-ch-left */
+			{ 0, 0, 0, 0 },  /* button-midi-ch-right */
+			{ 0, 0, 0, 0 },  /* button-user-inst */
+			{ 0, 0, 0, 0 },  /* button-select */
+			{ 0, 0, 0, 0 },  /* button-edit1-left */
+			{ 0, 0, 0, 0 },  /* button-edit1-right */
+			{ 0, 0, 0, 0 },  /* button-edit2-left */
+			{ 0, 0, 0, 0 },  /* button-edit2-right */
+			{ 0, 0, 0, 0 },  /* button-edit3-left */
+			{ 0, 0, 0, 0 },  /* button-edit3-right */
+			{ 0, 0, 0, 0 },  /* button-preview */
+			{ 0, 0, 0, 0 },  /* dial-value */
+			{ 0, 0, 0, 0 },  /* button-f1 */
+			{ 0, 0, 0, 0 },  /* button-f2 */
+			{ 0, 0, 0, 0 },  /* button-f3 */
+			{ 0, 0, 0, 0 },  /* button-f4 */
+			{ 0, 0, 0, 0 },  /* button-map */
+			{ 0, 0, 0, 0 },  /* button-edit */
+			{ 0, 0, 0, 0 },  /* button-drum */
+			{ 0, 0, 0, 0 },  /* button-down */
+			{ 0, 0, 0, 0 },  /* button-up */
+			{ 0, 0, 0, 0 },  /* button-effects */
+			{ 0, 0, 0, 0 },  /* button-exit */
+			{ 0, 0, 0, 0 },  /* button-enter */
+			{ 0, 0, 0, 0 },  /* button-shift */
+			{ 0, 0, 0, 0 },  /* button-solo */
+			{ 0, 0, 0, 0 },  /* button-dec */
+			{ 0, 0, 0, 0 },  /* button-inc */
+			{ 0, 0, 0, 0 },  /* button-value */
+			{ 496, 219, 1632, 325 },  /* disk-slot */
+			{ 1733, 458, 288, 70 },  /* button-eject */
+			{ 2621, 88, 166, 72 },  /* button-song-left */
+			{ 2796, 88, 165, 72 },  /* button-song-right */
+			{ 3029, 88, 165, 72 },  /* button-prog */
+			{ 3203, 88, 166, 72 },  /* button-set */
+			{ 2621, 246, 166, 72 },  /* button-tempo-left */
+			{ 2796, 246, 165, 72 },  /* button-tempo-right */
+			{ 3029, 246, 165, 72 },  /* button-rnd */
+			{ 3203, 246, 166, 72 },  /* button-clear */
+			{ 2663, 399, 82, 82 },  /* button-pause */
+			{ 2838, 399, 81, 82 },  /* button-rec */
+			{ 3029, 404, 165, 71 },  /* button-single */
+			{ 3203, 404, 166, 71 },  /* button-rept */
+			{ 2621, 562, 166, 71 },  /* button-stop */
+			{ 2796, 562, 165, 71 },  /* button-play */
+			{ 3029, 562, 165, 71 },  /* button-rew */
+			{ 3203, 562, 166, 71 },  /* button-ff */
+		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-all */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-mute */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-sc55-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-sc88-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-user-inst */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-user-inst-red */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-user-inst-efx */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* lcd-mark-l */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* lcd-mark-r */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* lcd-glass-off */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-all */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-mute */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-sc55-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-sc88-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-part-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-part-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-instrument-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-instrument-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-level-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-level-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pan-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-pan-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-reverb-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-reverb-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-chorus-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-chorus-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-key-shift-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-key-shift-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-midi-ch-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-midi-ch-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-user-inst */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-select */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit1-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit1-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit2-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit2-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit3-left */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit3-right */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-preview */
+			{ { 969, 0, 92, 91 }, 354, 100 },  /* led-standby */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-f4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-edit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-drum */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-down */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-up */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-effects */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-exit */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-enter */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-shift */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-solo */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-dec */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-inc */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* button-value */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-power */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-usb */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-map */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-a1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-a2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-a3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-a4 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b1 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b2 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b3 */
+			{ { 0, 0, 0, 0 }, 0, 0 },  /* led-part-b4 */
+			{ { 3270, 102, 31, 36 }, 2688, 422 },  /* led-pause */
+			{ { 3302, 102, 37, 36 }, 2860, 422 },  /* led-rec */
+			{ { 2225, 102, 77, 76 }, 2839, 560 },  /* led-play */
+			{ { 207, 0, 166, 94 }, 3029, 77 },  /* led-prog */
+			{ { 374, 0, 166, 94 }, 3029, 235 },  /* led-rnd */
+			{ { 541, 0, 166, 94 }, 3029, 393 },  /* led-single */
+			{ { 708, 0, 166, 94 }, 3203, 393 },  /* led-rept */
+			{ { 875, 0, 93, 92 }, 2206, 450 },  /* led-disk */
+			{ { 1062, 0, 1488, 91 }, 568, 284 },  /* slot-disk */
+			{ { 2569, 102, 88, 55 }, 2195, 120 },  /* digit2-a */
+			{ { 1500, 102, 60, 80 }, 2239, 134 },  /* digit2-b */
+			{ { 1561, 102, 59, 80 }, 2232, 186 },  /* digit2-c */
+			{ { 2658, 102, 88, 55 }, 2181, 225 },  /* digit2-d */
+			{ { 1621, 102, 60, 80 }, 2165, 186 },  /* digit2-e */
+			{ { 1682, 102, 59, 80 }, 2173, 134 },  /* digit2-f */
+			{ { 2303, 102, 88, 56 }, 2188, 172 },  /* digit2-g */
+			{ { 2747, 102, 88, 55 }, 2295, 120 },  /* digit1-a */
+			{ { 1742, 102, 60, 80 }, 2338, 134 },  /* digit1-b */
+			{ { 1803, 102, 59, 80 }, 2331, 186 },  /* digit1-c */
+			{ { 2836, 102, 88, 55 }, 2280, 225 },  /* digit1-d */
+			{ { 1863, 102, 59, 80 }, 2265, 186 },  /* digit1-e */
+			{ { 1923, 102, 59, 80 }, 2272, 134 },  /* digit1-f */
+			{ { 2392, 102, 88, 56 }, 2287, 172 },  /* digit1-g */
+			{ { 2925, 102, 88, 55 }, 2394, 120 },  /* digit0-a */
+			{ { 1983, 102, 59, 80 }, 2438, 134 },  /* digit0-b */
+			{ { 2043, 102, 60, 80 }, 2430, 186 },  /* digit0-c */
+			{ { 3014, 102, 88, 55 }, 2379, 225 },  /* digit0-d */
+			{ { 2104, 102, 59, 80 }, 2364, 186 },  /* digit0-e */
+			{ { 2164, 102, 60, 80 }, 2371, 134 },  /* digit0-f */
+			{ { 2481, 102, 87, 56 }, 2387, 172 },  /* digit0-g */
+			{ { 3103, 102, 55, 54 }, 2171, 121 },  /* digit2-dp */
+			{ { 3159, 102, 54, 54 }, 2271, 121 },  /* digit1-dp */
+			{ { 3214, 102, 55, 54 }, 2370, 121 },  /* digit0-dp */
+			{ { 2551, 0, 309, 91 }, 1722, 453 },  /* button-eject */
+			{ { 2861, 0, 186, 91 }, 2611, 84 },  /* button-song-left */
+			{ { 3048, 0, 187, 91 }, 2785, 84 },  /* button-song-right */
+			{ { 3236, 0, 187, 91 }, 3018, 84 },  /* button-prog */
+			{ { 3424, 0, 186, 91 }, 3193, 84 },  /* button-set */
+			{ { 3611, 0, 186, 91 }, 2611, 242 },  /* button-tempo-left */
+			{ { 3798, 0, 187, 91 }, 2785, 242 },  /* button-tempo-right */
+			{ { 0, 102, 187, 91 }, 3018, 242 },  /* button-rnd */
+			{ { 188, 102, 186, 91 }, 3193, 242 },  /* button-clear */
+			{ { 0, 0, 102, 101 }, 2653, 395 },  /* button-pause */
+			{ { 103, 0, 103, 101 }, 2827, 395 },  /* button-rec */
+			{ { 375, 102, 187, 91 }, 3018, 400 },  /* button-single */
+			{ { 563, 102, 186, 91 }, 3193, 400 },  /* button-rept */
+			{ { 750, 102, 186, 91 }, 2611, 558 },  /* button-stop */
+			{ { 937, 102, 187, 91 }, 2785, 558 },  /* button-play */
+			{ { 1125, 102, 187, 91 }, 3018, 558 },  /* button-rew */
+			{ { 1313, 102, 186, 91 }, 3193, 558 },  /* button-ff */
+		},
+		{
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },
+			{ { 0, 0, 0, 0 }, 0, 0 },
 		},
 		{
 			{ { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 }, { { 0, 0, 0, 0 }, 0, 0 },

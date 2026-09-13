@@ -52,6 +52,8 @@ static const char group_audio[] = "audio: the output device, the rate asked of i
                                   " and the knob";
 static const char group_midi[] = "MIDI: the host ports (C and D only on an SC-8850 on USB), and the speed of the inputs";
 static const char group_song[] = "each song: the reset that precedes it and the tail that follows it";
+static const char group_sb55[] = "the Sound Brush: whether its window is open, and what its own SET functions hold --"
+                                 " the seconds between songs, auto play, auto rewind";
 
 #define FIELD(f) (unsigned short)offsetof(scgui_config_t, f), (unsigned short)sizeof(((scgui_config_t *)0)->f)
 
@@ -85,6 +87,10 @@ static const config_key_t keys[] = {
 	{ "midi_rate",        SLOT_INT,  FIELD(midi_rate),     0, 0,     NULL,           rate_numbers, group_midi },
 	{ "reset",            SLOT_TEXT, FIELD(reset),         0, 0,     reset_words,    NULL,         group_song },
 	{ "tail",             SLOT_REAL, FIELD(tail),          0, 300,   NULL,           NULL,         group_song },
+	{ "sb55_window",      SLOT_BOOL, FIELD(sb55_window),   0, 0,     NULL,           NULL,         group_sb55 },
+	{ "sb55_interval",    SLOT_INT,  FIELD(sb55_interval), 0, 99,    NULL,           NULL,         group_sb55 },
+	{ "sb55_auto_play",   SLOT_BOOL, FIELD(sb55_auto_play), 0, 0,    NULL,           NULL,         group_sb55 },
+	{ "sb55_auto_rewind", SLOT_BOOL, FIELD(sb55_auto_rewind), 0, 0,  NULL,           NULL,         group_sb55 },
 };
 
 #undef FIELD
@@ -105,6 +111,9 @@ void config_defaults(scgui_config_t *c)
 	c->swap_buttons = false;
 	c->boot_animation = false;
 	c->tail = 4;
+	c->sb55_window = false;
+	c->sb55_interval = 4;
+	c->sb55_auto_play = c->sb55_auto_rewind = true;
 }
 
 static const config_key_t *find_key(const char *name)

@@ -53,10 +53,10 @@ typedef struct controls
 	                              the other half of a pair stays on the right button either way */
 	int pressed_element;       /* the element under the held left button, or -1 */
 	int opposite_element;      /* the other half of the pair, pressed with the right button meanwhile */
-	uint64_t queued;           /* elements queued with the right button: they go down with the next key */
-	uint64_t held;             /* elements the right button holds down right now */
+	panel_set_t queued;        /* elements queued with the right button: they go down with the next key */
+	panel_set_t held;          /* elements the right button holds down right now */
 	bool release_after_boot;   /* the held keys come up when the boot they were held through ends */
-	uint64_t macro_pressed;    /* elements shown pressed while a chosen combination plays out */
+	panel_set_t macro_pressed; /* elements shown pressed while a chosen combination plays out */
 	bool macro_after_boot;
 	unsigned macro_ms;         /* how long it plays after the boot */
 	bool dial_drag;            /* the left button is turning the value dial */

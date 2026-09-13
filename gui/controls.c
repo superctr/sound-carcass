@@ -34,7 +34,9 @@ void controls_set_panel(controls_t *c, panel_t *panel)
 	panel_set_knob(panel, c->knob);
 	if (!same_machine)
 	{
-		c->held = c->queued = c->macro_pressed = 0;
+		panel_set_clear(&c->held);
+		panel_set_clear(&c->queued);
+		panel_set_clear(&c->macro_pressed);
 		c->release_after_boot = c->macro_after_boot = false;
 		c->macro_ms = 0;
 		c->pressed_element = c->opposite_element = -1;
@@ -43,7 +45,7 @@ void controls_set_panel(controls_t *c, panel_t *panel)
 		return;
 	}
 	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
-		if (((c->queued | c->held | c->macro_pressed) >> e) & 1)
+		if (panel_set_has(&c->queued, e) || panel_set_has(&c->held, e) || panel_set_has(&c->macro_pressed, e))
 			panel_set_pressed(panel, (panel_element_t)e, true);
 }
 
@@ -99,10 +101,10 @@ static void key(controls_t *c, int e, bool down)
 static void queued_press(controls_t *c)
 {
 	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
-		if ((c->queued >> e) & 1)
+		if (panel_set_has(&c->queued, e))
 			key(c, e, true);
-	c->held |= c->queued;
-	c->queued = 0;
+	panel_set_union(&c->held, &c->queued);
+	panel_set_clear(&c->queued);
 }
 
 /* everything the right button holds or queues comes up */
@@ -110,12 +112,13 @@ static void held_release(controls_t *c)
 {
 	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
 	{
-		if ((c->held >> e) & 1)
+		if (panel_set_has(&c->held, e))
 			key(c, e, false);
-		if (((c->held | c->queued) >> e) & 1)
+		if (panel_set_has(&c->held, e) || panel_set_has(&c->queued, e))
 			panel_set_pressed(c->panel, (panel_element_t)e, false);
 	}
-	c->held = c->queued = 0;
+	panel_set_clear(&c->held);
+	panel_set_clear(&c->queued);
 }
 
 static void set_power(controls_t *c, bool on)
@@ -137,7 +140,7 @@ static void element_action(controls_t *c, int e, double x, double y)
 			return;
 		}
 		bool on = !c->power;
-		if (on && (c->queued | c->held))
+		if (on && (!panel_set_empty(&c->queued) || !panel_set_empty(&c->held)))
 		{
 			queued_press(c);
 			c->release_after_boot = true;
@@ -203,26 +206,25 @@ void controls_press(controls_t *c, int button, unsigned mods, double x, double y
 		{
 			/* the right button queues a key for the next one, or with Shift
 			 * holds it down from now; either again lets it go */
-			uint64_t bit = (uint64_t)1 << e;
-			if ((c->held | c->queued) & bit)
+			if (panel_set_has(&c->held, e) || panel_set_has(&c->queued, e))
 			{
-				if (c->held & bit)
+				if (panel_set_has(&c->held, e))
 					c->act->key(c->user, (scemu_button_t)b, false);
-				c->held &= ~bit;
-				c->queued &= ~bit;
+				panel_set_remove(&c->held, e);
+				panel_set_remove(&c->queued, e);
 			}
 			else if (mods & CONTROLS_SHIFT)
 			{
-				c->held |= bit;
+				panel_set_add(&c->held, e);
 				c->act->key(c->user, (scemu_button_t)b, true);
 			}
 			else
-				c->queued |= bit;
-			panel_set_pressed(c->panel, (panel_element_t)e, ((c->held | c->queued) & bit) != 0);
+				panel_set_add(&c->queued, e);
+			panel_set_pressed(c->panel, (panel_element_t)e, panel_set_has(&c->held, e) || panel_set_has(&c->queued, e));
 		}
 		else if (button == CONTROLS_BUTTON_LEFT)
 		{
-			if (c->queued)
+			if (!panel_set_empty(&c->queued))
 				queued_press(c);
 			c->pressed_element = e;
 			c->act->key(c->user, (scemu_button_t)b, true);
@@ -264,7 +266,7 @@ void controls_release(controls_t *c, int button)
 	c->pressed_element = -1;
 	key(c, e, false);
 	panel_set_pressed(c->panel, (panel_element_t)e, false);
-	if (c->held | c->queued)
+	if (!panel_set_empty(&c->held) || !panel_set_empty(&c->queued))
 		held_release(c);
 }
 
@@ -326,7 +328,7 @@ static void macro_key(controls_t *c, scemu_button_t b, bool down, unsigned ms)
 	int e = element_for_button(b);
 	if (e >= 0 && down)
 	{
-		c->macro_pressed |= (uint64_t)1 << e;
+		panel_set_add(&c->macro_pressed, e);
 		panel_set_pressed(c->panel, (panel_element_t)e, true);
 	}
 }
@@ -334,9 +336,9 @@ static void macro_key(controls_t *c, scemu_button_t b, bool down, unsigned ms)
 void controls_macro_done(controls_t *c)
 {
 	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
-		if ((c->macro_pressed >> e) & 1)
-			panel_set_pressed(c->panel, (panel_element_t)e, ((c->queued | c->held) >> e) & 1);
-	c->macro_pressed = 0;
+		if (panel_set_has(&c->macro_pressed, e))
+			panel_set_pressed(c->panel, (panel_element_t)e, panel_set_has(&c->queued, e) || panel_set_has(&c->held, e));
+	panel_set_clear(&c->macro_pressed);
 }
 
 static void macro_release(controls_t *c, const combo_t *combo, unsigned t)
@@ -378,7 +380,7 @@ static unsigned play_through_standby(controls_t *c, const combo_t *combo)
  * down again as soon as it has come up */
 unsigned controls_play_combo(controls_t *c, const combo_t *combo)
 {
-	if (c->macro_pressed || c->release_after_boot)
+	if (!panel_set_empty(&c->macro_pressed) || c->release_after_boot)
 		return 0;
 	if (combo->power_on && c->soft_power)
 		return play_through_standby(c, combo);
@@ -436,6 +438,6 @@ void controls_highlight_clear(controls_t *c)
 	for (int n = 0; n < combo_count; n++)
 		controls_highlight(c, &combos[n], false);
 	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
-		if (((c->queued | c->held | c->macro_pressed) >> e) & 1)
+		if (panel_set_has(&c->queued, e) || panel_set_has(&c->held, e) || panel_set_has(&c->macro_pressed, e))
 			panel_set_pressed(c->panel, (panel_element_t)e, true);
 }

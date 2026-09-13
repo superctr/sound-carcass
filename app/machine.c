@@ -24,8 +24,8 @@
 
 typedef enum command_kind
 {
-	CMD_PLAY, CMD_PAUSE, CMD_STOP, CMD_BUTTON, CMD_DIAL, CMD_POWER, CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT,
-	CMD_RESET, CMD_MAP, CMD_MODEL, CMD_SEND, CMD_ANIMATE, CMD_QUIT
+	CMD_LOAD, CMD_START, CMD_PAUSE, CMD_STOP, CMD_UNLOAD, CMD_SEEK, CMD_TEMPO, CMD_BUTTON, CMD_DIAL, CMD_POWER,
+	CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT, CMD_RESET, CMD_MAP, CMD_MODEL, CMD_SEND, CMD_ANIMATE, CMD_QUIT
 } command_kind_t;
 
 typedef struct command
@@ -33,6 +33,7 @@ typedef struct command
 	command_kind_t kind;
 	int a, b, c;
 	float f;
+	uint64_t u;
 	char *path;
 } command_t;
 
@@ -57,7 +58,11 @@ struct machine
 	/* the thread's own */
 	smf_t smf;
 	bool have_smf, playing, paused;
-	uint64_t pos, end_frame, lead;
+	bool song_started;        /* the loaded song has been started at least once */
+	bool chase_pending;       /* the position moved: what the song set before it is owed to the parts */
+	uint64_t pos, end_frame, lead;   /* the position on the song's clock: its frames, the lead included */
+	double pos_frac;          /* the part of a song frame left over by the tempo factor */
+	double tempo_factor;
 	size_t next_event;
 	float gain;
 	machine_reset_t reset;
@@ -145,11 +150,21 @@ static void publish(machine_t *mc, bool booting)
 	s.leds = panel.leds;
 	s.power = panel.power;
 	s.booting = booting || unit_booting(mc->unit);
+	s.loaded = mc->have_smf;
 	s.playing = mc->playing;
 	s.paused = mc->paused;
 	s.finished = mc->have_smf && !mc->playing && mc->pos >= mc->end_frame;
+	s.ended = mc->have_smf && mc->song_started && mc->pos >= (uint64_t)mc->smf.last_frame + mc->lead;
 	s.position = (double)mc->pos / mc->rate;
 	s.length = mc->have_smf ? (double)mc->end_frame / mc->rate : 0;
+	s.frame = mc->pos;
+	if (mc->have_smf)
+	{
+		uint64_t tick = smf_tick_at_frame(&mc->smf, mc->pos > mc->lead ? mc->pos - mc->lead : 0, mc->rate);
+		s.bar = smf_bar_at_tick(&mc->smf, tick);
+		s.bars = smf_bar_at_tick(&mc->smf, mc->smf.last_tick);
+		s.tempo = 6e7 / smf_tempo_at_tick(&mc->smf, tick);
+	}
 	s.underruns = mc->audio ? audio_underruns(mc->audio) : 0;
 	if (mc->audio)
 	{
@@ -166,6 +181,8 @@ static void publish(machine_t *mc, bool booting)
 	s.generation = mc->state.generation;
 	if (panel_changed || s.booting != mc->state.booting || s.playing != mc->state.playing || s.paused != mc->state.paused
 	    || s.finished != mc->state.finished || s.position != mc->state.position || s.underruns != mc->state.underruns
+	    || s.loaded != mc->state.loaded || s.ended != mc->state.ended || s.bar != mc->state.bar
+	    || s.bars != mc->state.bars || s.tempo != mc->state.tempo
 	    || strcmp(s.audio, mc->state.audio) != 0 || s.latency != mc->state.latency)
 		s.generation++;
 	mc->state = s;
@@ -244,8 +261,9 @@ static void unload_song(machine_t *mc)
 {
 	if (mc->have_smf)
 		smf_free(&mc->smf);
-	mc->have_smf = mc->playing = false;
+	mc->have_smf = mc->playing = mc->paused = mc->song_started = mc->chase_pending = false;
 	mc->pos = mc->end_frame = 0;
+	mc->pos_frac = 0;
 	mc->next_event = 0;
 }
 
@@ -290,48 +308,231 @@ static void load_song(machine_t *mc, const char *path)
 	}
 	mc->have_smf = true;
 	size_t msg_size;
-	const uint8_t *msg = machine_reset_message(mc->reset, &msg_size);
-	mc->lead = 0;
-	if (msg)
-	{
-		send_both(mc, msg, msg_size);
-		mc->lead = mc->rate / 4;
-	}
+	mc->lead = machine_reset_message(mc->reset, &msg_size) ? mc->rate / 4 : 0;
 	mc->end_frame = (uint64_t)mc->smf.last_frame + mc->lead + (uint64_t)(mc->opt.tail * mc->rate);
-	mc->playing = true;
-	mc->paused = false;
 	set_song(mc, session_base_name(path), mc->smf.name);
 }
 
-static void feed_events(machine_t *mc, size_t n)
+/* The song's title on the module's display, as the Sound Brush sends it: the Sound Canvas
+ * display message with the sequence name the file spells at its first tick. */
+static void send_title(machine_t *mc)
 {
-	while (mc->next_event < mc->smf.count && mc->smf.events[mc->next_event].frame + mc->lead < mc->pos + n)
+	if (!mc->smf.raw_name[0])
+		return;
+	uint8_t msg[8 + 32 + 2] = { 0xf0, 0x41, 0x10, 0x45, 0x12, 0x10, 0x00, 0x00 };
+	unsigned sum = 0x10;
+	for (int n = 0; n < 32; n++)
+	{
+		uint8_t c = (uint8_t)mc->smf.raw_name[n] & 0x7f;
+		msg[8 + n] = c < 0x20 ? ' ' : c;
+		sum += msg[8 + n];
+	}
+	msg[40] = (uint8_t)((128 - sum % 128) % 128);
+	msg[41] = 0xf7;
+	send_both(mc, msg, sizeof(msg));
+}
+
+/* the first event at or after a position on the song's clock */
+static size_t event_at(const machine_t *mc, uint64_t pos)
+{
+	size_t lo = 0, hi = mc->smf.count;
+	while (lo < hi)
+	{
+		size_t mid = lo + (hi - lo) / 2;
+		if ((uint64_t)mc->smf.events[mid].frame + mc->lead < pos)
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	return lo;
+}
+
+/* an event to the machine `offset` frames into the block, and to the song outputs */
+static void emit(machine_t *mc, int port, const uint8_t *bytes, size_t len, uint32_t offset)
+{
+	scemu_midi_write(unit_machine(mc->unit), port, bytes, len, offset);
+	midi_io_write(mc->midi, MIDI_IO_SONG_A + port, bytes, len);
+}
+
+static void emit_event(machine_t *mc, const smf_event_t *e, uint32_t offset)
+{
+	if (e->tempo_change || (e->port != SMF_PORT_UNSET && e->port >= midi_ports(mc)))
+		return;
+	int port = e->port == SMF_PORT_UNSET ? SCEMU_MIDI_IN_A : e->port;
+	if (e->status[0] == 0xf0 && e->bytes)
+	{
+		emit(mc, port, e->status, 1, offset);
+		emit(mc, port, e->bytes, e->length - 1u, offset);
+	}
+	else if (e->bytes)
+		emit(mc, port, e->bytes, e->length, offset);
+	else
+		emit(mc, port, e->status, e->length, offset);
+}
+
+/* the events up to `until` on the song's clock; the tempo factor stretches their place in the block */
+static void feed_events(machine_t *mc, uint64_t until)
+{
+	while (mc->next_event < mc->smf.count && mc->smf.events[mc->next_event].frame + mc->lead < until)
 	{
 		const smf_event_t *e = &mc->smf.events[mc->next_event++];
 		uint64_t at = e->frame + mc->lead;
-		uint32_t offset = at > mc->pos ? (uint32_t)(at - mc->pos) : 0;
-		if (e->tempo_change || (e->port != SMF_PORT_UNSET && e->port >= midi_ports(mc)))
+		double ahead = at > mc->pos ? (double)(at - mc->pos) / mc->tempo_factor : 0;
+		emit_event(mc, e, (uint32_t)ahead);
+	}
+}
+
+/* What the song has set before the position, sent at once, so a song joined part way
+ * through sounds as it would from the start: every system exclusive in order, then per
+ * channel the bank and program, each controller's last value, the last registered or
+ * non-registered parameter with its data, the pitch bend and the channel pressure.  Notes
+ * are left out, as the Sound Brush's MIDI Update leaves them out. */
+static void chase(machine_t *mc)
+{
+	int ports = midi_ports(mc);
+	int16_t cc[SMF_PORTS][16][128], prog[SMF_PORTS][16], bend[SMF_PORTS][16], press[SMF_PORTS][16];
+	int16_t param[SMF_PORTS][16][2], data[SMF_PORTS][16][2];
+	int8_t param_kind[SMF_PORTS][16];   /* 0 none, 1 RPN, 2 NRPN, the last selected */
+	memset(cc, 0xff, sizeof(cc));
+	memset(prog, 0xff, sizeof(prog));
+	memset(bend, 0xff, sizeof(bend));
+	memset(press, 0xff, sizeof(press));
+	memset(param, 0xff, sizeof(param));
+	memset(data, 0xff, sizeof(data));
+	memset(param_kind, 0, sizeof(param_kind));
+	for (size_t n = 0; n < mc->next_event; n++)
+	{
+		const smf_event_t *e = &mc->smf.events[n];
+		if (e->tempo_change || (e->port != SMF_PORT_UNSET && e->port >= ports))
 			continue;
 		int port = e->port == SMF_PORT_UNSET ? SCEMU_MIDI_IN_A : e->port;
-		int song = MIDI_IO_SONG_A + port;
-		if (e->status[0] == 0xf0 && e->bytes)
+		if (e->bytes)
 		{
-			scemu_midi_write(unit_machine(mc->unit), port, e->status, 1, offset);
-			scemu_midi_write(unit_machine(mc->unit), port, e->bytes, e->length - 1u, offset);
-			midi_io_write(mc->midi, song, e->status, 1);
-			midi_io_write(mc->midi, song, e->bytes, e->length - 1u);
+			emit_event(mc, e, 0);
+			continue;
 		}
-		else if (e->bytes)
+		int kind = e->status[0] & 0xf0, ch = e->status[0] & 0x0f;
+		if (kind == 0xb0)
 		{
-			scemu_midi_write(unit_machine(mc->unit), port, e->bytes, e->length, offset);
-			midi_io_write(mc->midi, song, e->bytes, e->length);
+			int number = e->status[1], value = e->status[2];
+			if (number == 101 || number == 100 || number == 99 || number == 98)
+			{
+				int rpn = number >= 100 ? 1 : 2;
+				if (param_kind[port][ch] != rpn)
+				{
+					param[port][ch][0] = param[port][ch][1] = -1;
+					data[port][ch][0] = data[port][ch][1] = -1;
+				}
+				param_kind[port][ch] = (int8_t)rpn;
+				param[port][ch][number & 1] = (int16_t)value;   /* 101 and 99 are the MSB */
+				data[port][ch][0] = data[port][ch][1] = -1;
+			}
+			else if (number == 6 || number == 38)
+				data[port][ch][number == 6 ? 0 : 1] = (int16_t)value;
+			else
+				cc[port][ch][number] = (int16_t)value;
 		}
-		else
-		{
-			scemu_midi_write(unit_machine(mc->unit), port, e->status, e->length, offset);
-			midi_io_write(mc->midi, song, e->status, e->length);
-		}
+		else if (kind == 0xc0)
+			prog[port][ch] = e->status[1];
+		else if (kind == 0xe0)
+			bend[port][ch] = (int16_t)(e->status[1] | (e->status[2] << 7));
+		else if (kind == 0xd0)
+			press[port][ch] = e->status[1];
 	}
+	for (int port = 0; port < ports; port++)
+		for (int ch = 0; ch < 16; ch++)
+		{
+			uint8_t msg[3] = { (uint8_t)(0xb0 | ch), 0, 0 };
+			if (cc[port][ch][0] >= 0)
+			{
+				msg[1] = 0; msg[2] = (uint8_t)cc[port][ch][0];
+				emit(mc, port, msg, 3, 0);
+			}
+			if (cc[port][ch][32] >= 0)
+			{
+				msg[1] = 32; msg[2] = (uint8_t)cc[port][ch][32];
+				emit(mc, port, msg, 3, 0);
+			}
+			if (prog[port][ch] >= 0)
+			{
+				uint8_t pc[2] = { (uint8_t)(0xc0 | ch), (uint8_t)prog[port][ch] };
+				emit(mc, port, pc, 2, 0);
+			}
+			for (int number = 1; number < 128; number++)
+				if (number != 32 && cc[port][ch][number] >= 0)
+				{
+					msg[1] = (uint8_t)number; msg[2] = (uint8_t)cc[port][ch][number];
+					emit(mc, port, msg, 3, 0);
+				}
+			if (param_kind[port][ch] && (data[port][ch][0] >= 0 || data[port][ch][1] >= 0))
+			{
+				uint8_t msb = param_kind[port][ch] == 1 ? 101 : 99;
+				for (int half = 0; half < 2; half++)
+					if (param[port][ch][half] >= 0)
+					{
+						msg[1] = (uint8_t)(msb - half); msg[2] = (uint8_t)param[port][ch][half];
+						emit(mc, port, msg, 3, 0);
+					}
+				for (int half = 0; half < 2; half++)
+					if (data[port][ch][half] >= 0)
+					{
+						msg[1] = half ? 38 : 6; msg[2] = (uint8_t)data[port][ch][half];
+						emit(mc, port, msg, 3, 0);
+					}
+			}
+			if (bend[port][ch] >= 0)
+			{
+				uint8_t pb[3] = { (uint8_t)(0xe0 | ch), (uint8_t)(bend[port][ch] & 0x7f), (uint8_t)(bend[port][ch] >> 7) };
+				emit(mc, port, pb, 3, 0);
+			}
+			if (press[port][ch] >= 0)
+			{
+				uint8_t cp[2] = { (uint8_t)(0xd0 | ch), (uint8_t)press[port][ch] };
+				emit(mc, port, cp, 2, 0);
+			}
+		}
+	mc->chase_pending = false;
+}
+
+static void quiet(machine_t *mc);
+
+/* the loaded song from a frame of its clock: the reset and the title first, and the
+ * chase owed when it is not the start */
+static void start_song(machine_t *mc, uint64_t frame)
+{
+	if (!mc->have_smf)
+		return;
+	if (mc->playing && !mc->paused)
+		quiet(mc);
+	size_t msg_size;
+	const uint8_t *msg = machine_reset_message(mc->reset, &msg_size);
+	if (msg)
+		send_both(mc, msg, msg_size);
+	send_title(mc);
+	uint64_t end = (uint64_t)mc->smf.last_frame + mc->lead;
+	mc->pos = frame < end ? frame : end;
+	mc->pos_frac = 0;
+	mc->next_event = event_at(mc, mc->pos);
+	mc->chase_pending = mc->pos > mc->lead;
+	mc->playing = mc->song_started = true;
+	mc->paused = false;
+}
+
+/* to the start of a bar, the song playing or not: what sounds is silenced, and the parts
+ * are brought up to the new place when the song plays on */
+static void seek_bar(machine_t *mc, uint32_t bar)
+{
+	if (!mc->have_smf)
+		return;
+	uint64_t last = smf_bar_at_tick(&mc->smf, mc->smf.last_tick);
+	uint64_t tick = bar > last ? mc->smf.last_tick : smf_tick_of_bar(&mc->smf, bar);
+	uint64_t frame = smf_frame_at_tick(&mc->smf, tick, mc->rate) + mc->lead;
+	if (mc->playing && !mc->paused)
+		quiet(mc);
+	mc->pos = frame;
+	mc->pos_frac = 0;
+	mc->next_event = event_at(mc, mc->pos);
+	mc->chase_pending = true;
 }
 
 static void render_block(machine_t *mc, size_t n);
@@ -416,23 +617,42 @@ static void handle(machine_t *mc, const command_t *c)
 {
 	switch (c->kind)
 	{
-	case CMD_PLAY:
+	case CMD_LOAD:
 		if (unit_power_on(mc->unit))
 		{
 			finish_boot(mc);
 			load_song(mc, c->path);
 		}
 		break;
+	case CMD_START:
+		if (unit_power_on(mc->unit) && mc->have_smf)
+		{
+			finish_boot(mc);
+			start_song(mc, c->u);
+		}
+		break;
 	case CMD_PAUSE:
-		if (unit_power_on(mc->unit) && c->a && !mc->paused)
+		if (unit_power_on(mc->unit) && c->a && mc->playing && !mc->paused)
 			quiet(mc);
 		mc->paused = c->a != 0;
 		break;
 	case CMD_STOP:
-		if (unit_power_on(mc->unit) && mc->have_smf)
+		if (unit_power_on(mc->unit) && mc->playing && !mc->paused)
+			quiet(mc);
+		mc->playing = mc->paused = false;
+		break;
+	case CMD_UNLOAD:
+		if (unit_power_on(mc->unit) && mc->playing && !mc->paused)
 			quiet(mc);
 		unload_song(mc);
 		set_song(mc, "", "");
+		break;
+	case CMD_SEEK:
+		if (unit_power_on(mc->unit))
+			seek_bar(mc, (uint32_t)c->a);
+		break;
+	case CMD_TEMPO:
+		mc->tempo_factor = c->f < 0.01f ? 0.01 : c->f > 20 ? 20 : c->f;
 		break;
 	case CMD_BUTTON:
 		if (c->c > 0)
@@ -647,8 +867,13 @@ static void *run(void *user)
 		deliver_midi(mc);
 		if (mc->playing)
 		{
-			feed_events(mc, n);
-			mc->pos += n;
+			if (mc->chase_pending)
+				chase(mc);
+			double advance = n * mc->tempo_factor + mc->pos_frac;
+			uint64_t whole = (uint64_t)advance;
+			mc->pos_frac = advance - (double)whole;
+			feed_events(mc, mc->pos + whole);
+			mc->pos += whole;
 			if (mc->pos >= mc->end_frame)
 				mc->playing = false;
 		}
@@ -687,6 +912,7 @@ machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size)
 	open_audio(mc);
 	mc->gain = 0.75f * 0.75f;
 	mc->reset = MACHINE_RESET_GS;
+	mc->tempo_factor = 1;
 	mc->midi = midi_io_open("scgui", midi_ports(mc));
 	unit_set_midi_out(mc->unit, midi_out, mc);
 	pthread_mutex_init(&mc->lock, NULL);
@@ -706,7 +932,7 @@ void machine_stop(machine_t *mc)
 		return;
 	if (mc->thread)
 	{
-		command_t c = { CMD_QUIT, 0, 0, 0, 0, NULL };
+		command_t c = { CMD_QUIT, 0, 0, 0, 0, 0, NULL };
 		post(mc, c);
 		pthread_join(mc->thread, NULL);
 	}
@@ -749,63 +975,93 @@ unsigned machine_models_available(machine_t *mc)
 	return models;
 }
 
+void machine_load(machine_t *mc, const char *path)
+{
+	command_t c = { CMD_LOAD, 0, 0, 0, 0, 0, strdup(path) };
+	post(mc, c);
+}
+
+void machine_start_song(machine_t *mc, uint64_t frame)
+{
+	command_t c = { CMD_START, 0, 0, 0, 0, frame, NULL };
+	post(mc, c);
+}
+
 void machine_play(machine_t *mc, const char *path)
 {
-	command_t c = { CMD_PLAY, 0, 0, 0, 0, strdup(path) };
-	post(mc, c);
+	machine_load(mc, path);
+	machine_start_song(mc, 0);
 }
 
 void machine_pause(machine_t *mc, bool paused)
 {
-	command_t c = { CMD_PAUSE, paused, 0, 0, 0, NULL };
+	command_t c = { CMD_PAUSE, paused, 0, 0, 0, 0, NULL };
 	post(mc, c);
 }
 
 void machine_stop_song(machine_t *mc)
 {
-	command_t c = { CMD_STOP, 0, 0, 0, 0, NULL };
+	command_t c = { CMD_STOP, 0, 0, 0, 0, 0, NULL };
+	post(mc, c);
+}
+
+void machine_unload(machine_t *mc)
+{
+	command_t c = { CMD_UNLOAD, 0, 0, 0, 0, 0, NULL };
+	post(mc, c);
+}
+
+void machine_seek_bar(machine_t *mc, uint32_t bar)
+{
+	command_t c = { CMD_SEEK, (int)bar, 0, 0, 0, 0, NULL };
+	post(mc, c);
+}
+
+void machine_set_tempo(machine_t *mc, double factor)
+{
+	command_t c = { CMD_TEMPO, 0, 0, 0, (float)factor, 0, NULL };
 	post(mc, c);
 }
 
 void machine_button(machine_t *mc, scemu_button_t b, bool down)
 {
-	command_t c = { CMD_BUTTON, b, down, 0, 0, NULL };
+	command_t c = { CMD_BUTTON, b, down, 0, 0, 0, NULL };
 	post(mc, c);
 }
 
 void machine_dial(machine_t *mc, int steps)
 {
-	command_t c = { CMD_DIAL, steps, 0, 0, 0, NULL };
+	command_t c = { CMD_DIAL, steps, 0, 0, 0, 0, NULL };
 	post(mc, c);
 }
 
 void machine_button_after(machine_t *mc, scemu_button_t b, bool down, unsigned ms)
 {
-	command_t c = { CMD_BUTTON, b, down, (int)(ms ? ms : 1), 0, NULL };
+	command_t c = { CMD_BUTTON, b, down, (int)(ms ? ms : 1), 0, 0, NULL };
 	post(mc, c);
 }
 
 void machine_power(machine_t *mc, bool on)
 {
-	command_t c = { CMD_POWER, on, 0, 0, 0, NULL };
+	command_t c = { CMD_POWER, on, 0, 0, 0, 0, NULL };
 	post(mc, c);
 }
 
 void machine_set_gain(machine_t *mc, float gain)
 {
-	command_t c = { CMD_GAIN, 0, 0, 0, gain, NULL };
+	command_t c = { CMD_GAIN, 0, 0, 0, gain, 0, NULL };
 	post(mc, c);
 }
 
 void machine_set_boot_animation(machine_t *mc, bool on)
 {
-	command_t c = { CMD_ANIMATE, on, 0, 0, 0, NULL };
+	command_t c = { CMD_ANIMATE, on, 0, 0, 0, 0, NULL };
 	post(mc, c);
 }
 
 void machine_set_model(machine_t *mc, scemu_model_t model)
 {
-	command_t c = { CMD_MODEL, (int)model, -1, 0, 0, NULL };
+	command_t c = { CMD_MODEL, (int)model, -1, 0, 0, 0, NULL };
 	post(mc, c);
 }
 
@@ -815,7 +1071,7 @@ void machine_set_computer_switch(machine_t *mc, scemu_computer_switch_t sw)
 	int row = machine_system_index(model);
 	if (row < 0)
 		return;
-	command_t c = { CMD_MODEL, (int)model, row, (int)sw, 0, NULL };
+	command_t c = { CMD_MODEL, (int)model, row, (int)sw, 0, 0, NULL };
 	post(mc, c);
 }
 
@@ -826,7 +1082,7 @@ const char *const machine_reset_names[MACHINE_RESET_COUNT] = {
 
 void machine_set_reset(machine_t *mc, machine_reset_t reset)
 {
-	command_t c = { CMD_RESET, reset, 0, 0, 0, NULL };
+	command_t c = { CMD_RESET, reset, 0, 0, 0, 0, NULL };
 	post(mc, c);
 }
 
@@ -836,31 +1092,31 @@ void machine_send(machine_t *mc, const uint8_t *bytes, size_t count)
 	if (!copy)
 		return;
 	memcpy(copy, bytes, count);
-	command_t c = { CMD_SEND, (int)count, 0, 0, 0, copy };
+	command_t c = { CMD_SEND, (int)count, 0, 0, 0, 0, copy };
 	post(mc, c);
 }
 
 void machine_set_map(machine_t *mc, scemu_map_t map)
 {
-	command_t c = { CMD_MAP, map, 0, 0, 0, NULL };
+	command_t c = { CMD_MAP, map, 0, 0, 0, 0, NULL };
 	post(mc, c);
 }
 
 void machine_set_audio(machine_t *mc, int device, unsigned block, unsigned rate)
 {
-	command_t c = { CMD_AUDIO, device, (int)block, (int)rate, 0, NULL };
+	command_t c = { CMD_AUDIO, device, (int)block, (int)rate, 0, 0, NULL };
 	post(mc, c);
 }
 
 void machine_midi_input(machine_t *mc, int which, int id)
 {
-	command_t c = { CMD_MIDI_IN, which, id, 0, 0, NULL };
+	command_t c = { CMD_MIDI_IN, which, id, 0, 0, 0, NULL };
 	post(mc, c);
 }
 
 void machine_midi_output(machine_t *mc, int which, int id)
 {
-	command_t c = { CMD_MIDI_OUT, which, id, 0, 0, NULL };
+	command_t c = { CMD_MIDI_OUT, which, id, 0, 0, 0, NULL };
 	post(mc, c);
 }
 

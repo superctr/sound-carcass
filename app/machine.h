@@ -48,8 +48,12 @@ typedef struct machine_state
 	scemu_glcd_t glcd;
 	bool has_glcd;            /* the machine's glass is the bitmap, not the character cells */
 	uint32_t leds;
-	bool power, booting, playing, paused, finished;
+	bool power, booting, loaded, playing, paused, finished;
+	bool ended;               /* the song has gone past its last event (the tail may still be running) */
 	double position, length;  /* seconds into the song, and its length with the tail */
+	uint64_t frame;           /* the position on the song's own clock, for starting again from it */
+	uint32_t bar, bars;       /* the bar the position is in, from 1, and the bar the song ends in; 0 with no song */
+	double tempo;             /* the song's own tempo at the position, beats a minute, before the factor */
 	char song[256];           /* the file's name, empty when nothing is loaded */
 	char title[128];          /* the file's title, UTF-8 */
 	uint32_t underruns;
@@ -84,9 +88,22 @@ unsigned machine_models_available(machine_t *mc);
 void machine_snapshot(machine_t *mc, machine_state_t *out);
 
 /* Commands; all return at once. */
-void machine_play(machine_t *mc, const char *path);    /* a fresh machine, then the song */
+void machine_play(machine_t *mc, const char *path);    /* load the song and start it from its beginning */
+/* The two halves of that: a song loaded and read (its bars and tempo are in the snapshot) but
+ * not started, and the loaded song started from a frame of its own clock -- the reset before
+ * the song and its title for the display go out first, and from anywhere but the start the
+ * controllers, programs and system exclusives before that point are sent, so the parts stand
+ * as the song had them. */
+void machine_load(machine_t *mc, const char *path);
+void machine_start_song(machine_t *mc, uint64_t frame);
 void machine_pause(machine_t *mc, bool paused);
-void machine_stop_song(machine_t *mc);
+void machine_stop_song(machine_t *mc);                 /* silence; the song stays loaded where it stopped */
+void machine_unload(machine_t *mc);
+/* to the start of a bar (from 1; past the last bar is the end), playing or not; the
+ * controllers are chased when the song plays on from there */
+void machine_seek_bar(machine_t *mc, uint32_t bar);
+/* the song's tempo scaled: 1 is the song's own */
+void machine_set_tempo(machine_t *mc, double factor);
 void machine_button(machine_t *mc, scemu_button_t b, bool down);
 void machine_dial(machine_t *mc, int steps);           /* the value dial, positive clockwise */
 /* the same, ms of the machine's own time later (a boot the host does not

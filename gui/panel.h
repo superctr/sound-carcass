@@ -20,6 +20,22 @@
 
 typedef struct panel panel_t;
 
+/* a set of elements: there are more of them than a word holds */
+typedef struct panel_set { uint64_t w[(PANEL_ELEMENT_COUNT + 63) / 64]; } panel_set_t;
+#define PANEL_SET_WORDS ((PANEL_ELEMENT_COUNT + 63) / 64)
+static inline bool panel_set_has(const panel_set_t *s, int e) { return (s->w[e / 64] >> (e % 64)) & 1; }
+static inline void panel_set_add(panel_set_t *s, int e) { s->w[e / 64] |= (uint64_t)1 << (e % 64); }
+static inline void panel_set_remove(panel_set_t *s, int e) { s->w[e / 64] &= ~((uint64_t)1 << (e % 64)); }
+static inline void panel_set_clear(panel_set_t *s) { for (int n = 0; n < PANEL_SET_WORDS; n++) s->w[n] = 0; }
+static inline bool panel_set_empty(const panel_set_t *s)
+{
+	for (int n = 0; n < PANEL_SET_WORDS; n++)
+		if (s->w[n])
+			return false;
+	return true;
+}
+static inline void panel_set_union(panel_set_t *s, const panel_set_t *t) { for (int n = 0; n < PANEL_SET_WORDS; n++) s->w[n] |= t->w[n]; }
+
 /* One panel per model and size; `pitch` is the glass's dot pitch in pixels,
  * one of the baked sizes (4, or 8 for twice the size; pixels per millimetre
  * on the SC-8820, which has no glass).  NULL if there is no such bake or the
@@ -42,6 +58,12 @@ void panel_set_knob(panel_t *p, float turn);             /* 0 = fully left, 1 = 
 void panel_set_dial(panel_t *p, int steps);              /* the value dial, positive clockwise; it accumulates */
 void panel_set_standby(panel_t *p, bool standby);        /* the STANDBY lamp of the soft-switched models: lit while off */
 void panel_set_pressed(panel_t *p, panel_element_t e, bool down);
+/* A sprite lit on its own account, drawn over the base: the SB-55's lamps, the segments of
+ * its digits and the disk in its slot, which are no machine's LEDs. */
+void panel_set_lit(panel_t *p, panel_sprite_id_t id, bool on);
+/* the SB-55's three digits, leftmost first: bit 0 is segment a (the top) through bit 6 g (the
+ * middle), bit 7 the point */
+void panel_set_digits(panel_t *p, const uint8_t segments[3]);
 bool panel_dirty(const panel_t *p);
 
 /* Draw the whole panel into `pixels`, 0xAARRGGBB, `stride` pixels per row,

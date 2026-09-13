@@ -22,6 +22,7 @@
 #include "config.h"
 #include "combos.h"
 #include "controls.h"
+#include "brush.h"
 #include "git_version.h"
 
 #define MIDI_PORTS_MAX 64
@@ -50,6 +51,15 @@ typedef struct app
 	int current;               /* index in songs, or -1 */
 	bool paused;
 	controls_t ctl;            /* the panel under the pointer; the power switch's state is its */
+	/* the Sound Brush: the SB-55's panel in a window of its own, driving the list and the player */
+	brush_t brush;
+	panel_t *brush_panel;
+	uint32_t *brush_frame;
+	GtkWidget *brush_window, *brush_area;
+	int brush_pressed;         /* the element under the held left button, or -1 */
+	panel_set_t brush_queued, brush_held;   /* elements the right button queues for the next key, or holds down */
+	double brush_x, brush_y;   /* the pointer over the Brush, in its window's pixels */
+	int loaded_song;           /* the row the machine holds, or -1 */
 	uint64_t seen_generation;
 	machine_state_t state;
 	double pointer_x, pointer_y;
@@ -283,6 +293,15 @@ static void set_title(app_t *app);
 static gboolean macro_done(gpointer user);
 static void panel_rebuild(app_t *app, panel_model_t model, int size);
 static void menu_append(GMenu *menu, const char *label, const char *action, int parameter);
+static void brush_show(app_t *app);
+static void brush_resize(app_t *app);
+static void brush_press(app_t *app, brush_key_t key);
+
+/* the Brush's clock: milliseconds, monotonic */
+static uint64_t now_ms(void)
+{
+	return (uint64_t)(g_get_monotonic_time() / 1000);
+}
 
 static const char *song_label(const char *path, char *buf, size_t size)
 {
@@ -310,12 +329,14 @@ static void songs_move(app_t *app, int from, int to)
 	if (from == to || from < 0 || to < 0 || from >= (int)app->songs->len || to >= (int)app->songs->len)
 		return;
 	g_ptr_array_insert(app->songs, to, g_ptr_array_steal_index(app->songs, from));
-	if (app->current == from)
-		app->current = to;
-	else if (from < app->current && app->current <= to)
-		app->current--;
-	else if (to <= app->current && app->current < from)
-		app->current++;
+	brush_move(&app->brush, from, to);
+	if (app->loaded_song == from)
+		app->loaded_song = to;
+	else if (from < app->loaded_song && app->loaded_song <= to)
+		app->loaded_song--;
+	else if (to <= app->loaded_song && app->loaded_song < from)
+		app->loaded_song++;
+	app->current = brush_song(&app->brush);
 }
 
 static void songs_remove(app_t *app, int index)
@@ -329,13 +350,15 @@ static void songs_remove(app_t *app, int index)
 			gtk_list_box_remove(GTK_LIST_BOX(app->list), GTK_WIDGET(row));
 	}
 	g_ptr_array_remove_index(app->songs, index);
-	if (index == app->current)
+	if (index == app->loaded_song)
 	{
-		machine_stop_song(app->mc);
-		app->current = -1;
+		machine_unload(app->mc);
+		app->loaded_song = -1;
 	}
-	else if (index < app->current)
-		app->current--;
+	else if (index < app->loaded_song)
+		app->loaded_song--;
+	brush_remove(&app->brush, index, now_ms());
+	app->current = brush_song(&app->brush);
 	list_select(app, app->current);
 }
 
@@ -427,8 +450,10 @@ static void songs_insert(app_t *app, int index, const char *path)
 	g_ptr_array_insert(app->songs, index, g_strdup(path));
 	if (app->list)
 		gtk_list_box_insert(GTK_LIST_BOX(app->list), list_row(app, path), index);
-	if (app->current >= index)
-		app->current++;
+	if (app->loaded_song >= index)
+		app->loaded_song++;
+	brush_insert(&app->brush, index);
+	app->current = brush_song(&app->brush);
 }
 
 static void songs_add(app_t *app, const char *path)
@@ -452,8 +477,8 @@ static gboolean on_files_dropped(GtkDropTarget *target, const GValue *value, dou
 	if (!G_VALUE_HOLDS(value, GDK_TYPE_FILE_LIST))
 		return FALSE;
 	GSList *files = gdk_file_list_get_files(g_value_get_boxed(value));
-	bool was_empty = app->songs->len == 0;
-	int at = drop_position(app, gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target)), x, y);
+	GtkWidget *from = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target));
+	int at = app->list && gtk_widget_is_ancestor(app->list, from) ? drop_position(app, from, x, y) : -1;
 	for (GSList *l = files; l; l = l->next)
 	{
 		char *path = g_file_get_path(l->data);
@@ -466,10 +491,7 @@ static gboolean on_files_dropped(GtkDropTarget *target, const GValue *value, dou
 		g_free(path);
 	}
 	g_slist_free(files);
-	if (was_empty && app->songs->len)
-		play_index(app, 0);
-	else
-		list_select(app, app->current);
+	list_select(app, app->current);
 	return TRUE;
 }
 
@@ -546,7 +568,6 @@ static void on_files_chosen(GObject *source, GAsyncResult *result, gpointer user
 	GListModel *files = gtk_file_dialog_open_multiple_finish(GTK_FILE_DIALOG(source), result, NULL);
 	if (!files)
 		return;
-	bool was_empty = app->songs->len == 0;
 	for (guint n = 0; n < g_list_model_get_n_items(files); n++)
 	{
 		GFile *f = g_list_model_get_item(files, n);
@@ -557,8 +578,7 @@ static void on_files_chosen(GObject *source, GAsyncResult *result, gpointer user
 		g_object_unref(f);
 	}
 	g_object_unref(files);
-	if (was_empty && app->songs->len)
-		play_index(app, 0);
+	list_select(app, app->current);
 }
 
 static void on_add_clicked(GtkButton *b, gpointer user)
@@ -574,48 +594,51 @@ static void on_add_clicked(GtkButton *b, gpointer user)
 	GListStore *filters = g_list_store_new(GTK_TYPE_FILE_FILTER);
 	g_list_store_append(filters, filter);
 	gtk_file_dialog_set_filters(dialog, G_LIST_MODEL(filters));
-	gtk_file_dialog_open_multiple(dialog, GTK_WINDOW(app->playlist_window), NULL, on_files_chosen, app);
+	GtkWindow *parent = GTK_WINDOW(app->playlist_window ? app->playlist_window : app->window);
+	gtk_file_dialog_open_multiple(dialog, parent, NULL, on_files_chosen, app);
 	g_object_unref(filters);
 	g_object_unref(filter);
 	g_object_unref(dialog);
 }
 
+/* the toolbar and the keys are the Brush's own keys: the list is its disk */
 static void on_prev_clicked(GtkButton *b, gpointer user)
 {
-	app_t *app = user;
-	if (app->current > 0)
-		play_index(app, app->current - 1);
+	brush_press(user, BRUSH_KEY_SONG_LEFT);
 }
 
 static void on_next_clicked(GtkButton *b, gpointer user)
 {
-	app_t *app = user;
-	if (app->current + 1 < (int)app->songs->len)
-		play_index(app, app->current + 1);
+	brush_press(user, BRUSH_KEY_SONG_RIGHT);
 }
 
+/* PAUSE while a song plays; PLAY when nothing does, since PAUSE means nothing to the SB-55 then */
 static void on_pause_clicked(GtkButton *b, gpointer user)
 {
 	app_t *app = user;
-	app->paused = !app->paused;
-	machine_pause(app->mc, app->paused);
+	brush_press(app, brush_playing(&app->brush) ? BRUSH_KEY_PAUSE : BRUSH_KEY_PLAY);
 }
 
 static void on_stop_clicked(GtkButton *b, gpointer user)
 {
-	app_t *app = user;
-	machine_stop_song(app->mc);
+	brush_press(user, BRUSH_KEY_STOP);
+}
+
+/* the list emptied: the disk taken out of the Brush */
+static void songs_clear(app_t *app)
+{
+	machine_unload(app->mc);
+	app->loaded_song = -1;
 	app->current = -1;
-	list_select(app, -1);
+	g_ptr_array_set_size(app->songs, 0);
+	if (app->list)
+		gtk_list_box_remove_all(GTK_LIST_BOX(app->list));
+	brush_set_disk(&app->brush, 0, now_ms());
 }
 
 static void on_clear_clicked(GtkButton *b, gpointer user)
 {
-	app_t *app = user;
-	on_stop_clicked(b, user);
-	g_ptr_array_set_size(app->songs, 0);
-	if (app->list)
-		gtk_list_box_remove_all(GTK_LIST_BOX(app->list));
+	songs_clear(user);
 }
 
 static gboolean on_playlist_close(GtkWindow *w, gpointer user)
@@ -903,10 +926,9 @@ static void play_index(app_t *app, int index)
 {
 	if (index < 0 || index >= (int)app->songs->len)
 		return;
-	app->current = index;
-	app->paused = false;
-	machine_play(app->mc, g_ptr_array_index(app->songs, index));
-	list_select(app, index);
+	brush_select(&app->brush, index, true, now_ms());
+	app->current = brush_song(&app->brush);
+	list_select(app, app->current);
 }
 
 /* ---------------------------------------------------------------- audio settings */
@@ -1354,6 +1376,8 @@ static void on_menu_open(GSimpleAction *a, GVariant *parameter, gpointer user)
 	const char *what = g_action_get_name(G_ACTION(a));
 	if (!strcmp(what, "playlist"))
 		playlist_show(app);
+	else if (!strcmp(what, "brush"))
+		brush_show(app);
 	else if (!strcmp(what, "audio"))
 		settings_show(app, SETTINGS_TAB_AUDIO);
 	else if (!strcmp(what, "interface"))
@@ -1397,6 +1421,7 @@ static void logo_menu(app_t *app, double x, double y)
 		static const GActionEntry entries[] =
 		{
 			{ "playlist", on_menu_open, NULL, NULL, NULL, { 0 } },
+			{ "brush", on_menu_open, NULL, NULL, NULL, { 0 } },
 			{ "audio", on_menu_open, NULL, NULL, NULL, { 0 } },
 			{ "interface", on_menu_open, NULL, NULL, NULL, { 0 } },
 			{ "system", on_menu_open, NULL, NULL, NULL, { 0 } },
@@ -1426,6 +1451,7 @@ static void logo_menu(app_t *app, double x, double y)
 		GMenu *menu = g_menu_new();
 		GMenu *windows = g_menu_new();
 		menu_append(windows, "Playlist and MIDI", "logo.playlist", -1);
+		menu_append(windows, "Sound Brush", "logo.brush", -1);
 		menu_append(windows, "Audio", "logo.audio", -1);
 		menu_append(windows, "Interface", "logo.interface", -1);
 		menu_append(windows, "System", "logo.system", -1);
@@ -1563,6 +1589,7 @@ static void panel_rebuild(app_t *app, panel_model_t model, int size)
 	panel_glass(p, &app->state);
 	gtk_widget_set_size_request(app->area, w / app->scale, h / app->scale);
 	gtk_widget_queue_draw(app->area);
+	brush_resize(app);
 }
 
 static void panel_switch(app_t *app, panel_model_t model)
@@ -1584,6 +1611,358 @@ static void set_title(app_t *app)
 	gtk_window_set_title(GTK_WINDOW(app->window), title);
 }
 
+/* ---------------------------------------------------------------- the Sound Brush */
+
+/* the SB-55's keys, by the elements of its panel; -1 for what is not a key */
+static int brush_key_of(int e)
+{
+	switch (e)
+	{
+	case PANEL_SWITCH_POWER: return BRUSH_KEY_POWER;
+	case PANEL_BUTTON_EJECT: return BRUSH_KEY_EJECT;
+	case PANEL_BUTTON_SONG_LEFT: return BRUSH_KEY_SONG_LEFT;
+	case PANEL_BUTTON_SONG_RIGHT: return BRUSH_KEY_SONG_RIGHT;
+	case PANEL_BUTTON_PROG: return BRUSH_KEY_PROG;
+	case PANEL_BUTTON_SET: return BRUSH_KEY_SET;
+	case PANEL_BUTTON_TEMPO_LEFT: return BRUSH_KEY_TEMPO_LEFT;
+	case PANEL_BUTTON_TEMPO_RIGHT: return BRUSH_KEY_TEMPO_RIGHT;
+	case PANEL_BUTTON_RND: return BRUSH_KEY_RND;
+	case PANEL_BUTTON_CLEAR: return BRUSH_KEY_CLEAR;
+	case PANEL_BUTTON_PAUSE: return BRUSH_KEY_PAUSE;
+	case PANEL_BUTTON_REC: return BRUSH_KEY_REC;
+	case PANEL_BUTTON_SINGLE: return BRUSH_KEY_SINGLE;
+	case PANEL_BUTTON_REPT: return BRUSH_KEY_REPT;
+	case PANEL_BUTTON_STOP: return BRUSH_KEY_STOP;
+	case PANEL_BUTTON_PLAY: return BRUSH_KEY_PLAY;
+	case PANEL_BUTTON_REW: return BRUSH_KEY_REW;
+	case PANEL_BUTTON_FF: return BRUSH_KEY_FF;
+	default: return -1;
+	}
+}
+
+static const panel_sprite_id_t brush_lamp_sprite[BRUSH_LAMP_COUNT] = {
+	PANEL_SPRITE_LED_PAUSE, PANEL_SPRITE_LED_REC, PANEL_SPRITE_LED_PLAY, PANEL_SPRITE_LED_PROG, PANEL_SPRITE_LED_RND,
+	PANEL_SPRITE_LED_SINGLE, PANEL_SPRITE_LED_REPT, PANEL_SPRITE_LED_STANDBY, PANEL_SPRITE_LED_DISK,
+};
+
+static const char *song_path(app_t *app, int song)
+{
+	return song >= 0 && song < (int)app->songs->len ? g_ptr_array_index(app->songs, song) : NULL;
+}
+
+static void brush_act_load(void *user, int song)
+{
+	app_t *app = user;
+	const char *path = song_path(app, song);
+	if (!path)
+		return;
+	machine_load(app->mc, path);
+	app->loaded_song = song;
+}
+
+static void brush_act_start(void *user, int song, uint64_t frame)
+{
+	app_t *app = user;
+	const char *path = song_path(app, song);
+	if (!path)
+		return;
+	if (song != app->loaded_song || !app->state.loaded)
+	{
+		machine_load(app->mc, path);
+		app->loaded_song = song;
+	}
+	machine_start_song(app->mc, frame);
+	app->paused = false;
+}
+
+static void brush_act_stop(void *user)
+{
+	app_t *app = user;
+	machine_stop_song(app->mc);
+	app->paused = false;
+}
+
+static void brush_act_pause(void *user, bool paused)
+{
+	app_t *app = user;
+	machine_pause(app->mc, paused);
+	app->paused = paused;
+}
+
+static void brush_act_seek(void *user, uint32_t bar)
+{
+	app_t *app = user;
+	machine_seek_bar(app->mc, bar);
+}
+
+static void brush_act_tempo(void *user, double factor)
+{
+	app_t *app = user;
+	machine_set_tempo(app->mc, factor);
+}
+
+static void brush_act_eject(void *user)
+{
+	songs_clear(user);
+}
+
+static void brush_act_settings(void *user)
+{
+	app_t *app = user;
+	app->cfg.sb55_interval = app->brush.interval;
+	app->cfg.sb55_auto_play = app->brush.auto_play;
+	app->cfg.sb55_auto_rewind = app->brush.auto_rewind;
+	config_touch(app);
+}
+
+static const brush_actions_t brush_actions = {
+	brush_act_load, brush_act_start, brush_act_stop, brush_act_pause, brush_act_seek, brush_act_tempo,
+	brush_act_eject, brush_act_settings
+};
+
+/* the Brush's display and lamps onto its panel, and the disk in its slot */
+static void brush_paint(app_t *app)
+{
+	if (!app->brush_panel)
+		return;
+	panel_set_digits(app->brush_panel, brush_digits(&app->brush));
+	uint32_t lamps = brush_lamps(&app->brush);
+	for (int n = 0; n < BRUSH_LAMP_COUNT; n++)
+		panel_set_lit(app->brush_panel, brush_lamp_sprite[n], (lamps >> n) & 1);
+	panel_set_lit(app->brush_panel, PANEL_SPRITE_SLOT_DISK, app->songs->len > 0);
+	if (panel_dirty(app->brush_panel))
+		gtk_widget_queue_draw(app->brush_area);
+}
+
+/* the Brush's turn: the player's state in, the list's highlight and its panel out */
+static void brush_tick_app(app_t *app)
+{
+	brush_player_t pl;
+	pl.loaded = app->state.loaded && app->loaded_song >= 0;
+	pl.ended = app->state.ended;
+	pl.bar = app->state.bar;
+	pl.bars = app->state.bars;
+	pl.tempo = app->state.tempo;
+	pl.frame = app->state.frame;
+	brush_tick(&app->brush, now_ms(), &pl);
+	int song = brush_song(&app->brush);
+	if (song != app->current)
+	{
+		app->current = song;
+		list_select(app, song);
+	}
+	if (brush_dirty(&app->brush) || app->brush_panel)
+		brush_paint(app);
+}
+
+/* a key of the Brush pressed and let go, from the toolbar or the keyboard */
+static void brush_press(app_t *app, brush_key_t key)
+{
+	uint64_t now = now_ms();
+	brush_key(&app->brush, key, true, now);
+	brush_key(&app->brush, key, false, now);
+	brush_tick_app(app);
+}
+
+/* the bake for the Brush at the window's size setting: 8 pixels a millimetre for the small
+ * panel, 16 for the large one and for a HiDPI screen, then scaled down to the module's width */
+static int brush_pitch_for(const app_t *app)
+{
+	return app->size >= SIZE_LARGE || app->scale > 1 ? 16 : 8;
+}
+
+/* the Brush's window is as wide as the module's, whatever the module: its frame is scaled to fit */
+static double brush_scale(const app_t *app)
+{
+	double logical = (double)panel_width(app->panel) / app->scale;
+	return panel_width(app->brush_panel) / logical;
+}
+
+static void brush_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user)
+{
+	app_t *app = user;
+	panel_t *p = app->brush_panel;
+	int w = panel_width(p), h = panel_height(p);
+	if (panel_dirty(p))
+		panel_render(p, app->brush_frame, (size_t)w);
+	cairo_surface_t *surface = cairo_image_surface_create_for_data((unsigned char *)app->brush_frame, CAIRO_FORMAT_RGB24,
+	                                                               w, h, w * (int)sizeof(uint32_t));
+	double s = brush_scale(app);
+	cairo_surface_set_device_scale(surface, s, s);
+	cairo_set_source_surface(cr, surface, 0, 0);
+	cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
+	cairo_paint(cr);
+	cairo_surface_destroy(surface);
+}
+
+static void brush_resize(app_t *app)
+{
+	if (!app->brush_window)
+		return;
+	int pitch = brush_pitch_for(app);
+	if (!app->brush_panel || panel_pitch(app->brush_panel) != pitch)
+	{
+		panel_t *p = panel_create(PANEL_MODEL_SB55, pitch);
+		if (!p)
+			return;
+		panel_destroy(app->brush_panel);
+		app->brush_panel = p;
+		free(app->brush_frame);
+		app->brush_frame = calloc((size_t)panel_width(p) * panel_height(p), sizeof(uint32_t));
+		app->brush_pressed = -1;
+		panel_set_clear(&app->brush_queued);
+		panel_set_clear(&app->brush_held);
+	}
+	double s = brush_scale(app);
+	int w = (int)(panel_width(app->brush_panel) / s + 0.5), h = (int)(panel_height(app->brush_panel) / s + 0.5);
+	gtk_widget_set_size_request(app->brush_area, w, h);
+	brush_paint(app);
+	gtk_widget_queue_draw(app->brush_area);
+}
+
+static void brush_release_held(app_t *app)
+{
+	uint64_t now = now_ms();
+	for (int e = 0; e < PANEL_ELEMENT_COUNT; e++)
+	{
+		if (panel_set_has(&app->brush_held, e))
+			brush_key(&app->brush, (brush_key_t)brush_key_of(e), false, now);
+		if (panel_set_has(&app->brush_held, e) || panel_set_has(&app->brush_queued, e))
+			panel_set_pressed(app->brush_panel, (panel_element_t)e, false);
+	}
+	panel_set_clear(&app->brush_held);
+	panel_set_clear(&app->brush_queued);
+}
+
+/* The Brush's keys under the mouse, the way the module's are: the left button presses, a plain
+ * right-click queues a key to go down with the next left-click (the manual's "simultaneously"),
+ * Shift and the right button hold one down from now ("while holding"), and all of them come up
+ * with the left button.  The slot takes files; the MIDI IN 2 jack opens the list. */
+static gboolean on_brush_button(GtkEventControllerLegacy *c, GdkEvent *event, gpointer user)
+{
+	app_t *app = user;
+	GdkEventType type = gdk_event_get_event_type(event);
+	if (type != GDK_BUTTON_PRESS && type != GDK_BUTTON_RELEASE)
+		return FALSE;
+	guint button = gdk_button_event_get_button(event);
+	uint64_t now = now_ms();
+	panel_t *p = app->brush_panel;
+	if (type == GDK_BUTTON_PRESS)
+	{
+		double s = brush_scale(app);
+		int e = panel_hit(p, (int)(app->brush_x * s), (int)(app->brush_y * s));
+		int key = e >= 0 ? brush_key_of(e) : -1;
+		if (e < 0)
+			return TRUE;
+		if (button == GDK_BUTTON_PRIMARY)
+		{
+			if (key >= 0)
+			{
+				for (int q = 0; q < PANEL_ELEMENT_COUNT; q++)
+					if (panel_set_has(&app->brush_queued, q))
+						brush_key(&app->brush, (brush_key_t)brush_key_of(q), true, now);
+				panel_set_union(&app->brush_held, &app->brush_queued);
+				panel_set_clear(&app->brush_queued);
+				app->brush_pressed = e;
+				panel_set_pressed(p, (panel_element_t)e, true);
+				brush_key(&app->brush, (brush_key_t)key, true, now);
+			}
+			else if (e == PANEL_DISK_SLOT)
+				on_add_clicked(NULL, app);
+			else if (e == PANEL_JACK_MIDI_IN_B)
+				playlist_show(app);
+		}
+		else if (button == GDK_BUTTON_SECONDARY && key >= 0)
+		{
+			GdkModifierType mods = gdk_event_get_modifier_state(event);
+			if (panel_set_has(&app->brush_held, e) || panel_set_has(&app->brush_queued, e))
+			{
+				if (panel_set_has(&app->brush_held, e))
+					brush_key(&app->brush, (brush_key_t)key, false, now);
+				panel_set_remove(&app->brush_held, e);
+				panel_set_remove(&app->brush_queued, e);
+			}
+			else if (mods & GDK_SHIFT_MASK)
+			{
+				panel_set_add(&app->brush_held, e);
+				brush_key(&app->brush, (brush_key_t)key, true, now);
+			}
+			else
+				panel_set_add(&app->brush_queued, e);
+			panel_set_pressed(p, (panel_element_t)e, panel_set_has(&app->brush_held, e) || panel_set_has(&app->brush_queued, e));
+		}
+	}
+	else if (button == GDK_BUTTON_PRIMARY && app->brush_pressed >= 0)
+	{
+		int e = app->brush_pressed;
+		app->brush_pressed = -1;
+		panel_set_pressed(p, (panel_element_t)e, false);
+		brush_key(&app->brush, (brush_key_t)brush_key_of(e), false, now);
+		if (!panel_set_empty(&app->brush_held) || !panel_set_empty(&app->brush_queued))
+			brush_release_held(app);
+	}
+	brush_tick_app(app);
+	if (panel_dirty(p))
+		gtk_widget_queue_draw(app->brush_area);
+	return TRUE;
+}
+
+static void on_brush_motion(GtkEventControllerMotion *c, double x, double y, gpointer user)
+{
+	app_t *app = user;
+	app->brush_x = x;
+	app->brush_y = y;
+}
+
+static gboolean on_key(GtkEventControllerKey *c, guint keyval, guint keycode, GdkModifierType mods, gpointer user);
+
+static gboolean on_brush_close(GtkWindow *w, gpointer user)
+{
+	app_t *app = user;
+	gtk_widget_set_visible(GTK_WIDGET(w), FALSE);
+	app->cfg.sb55_window = false;
+	config_touch(app);
+	return TRUE;
+}
+
+static void brush_show(app_t *app)
+{
+	if (!app->brush_window)
+	{
+		GtkWidget *w = gtk_window_new();
+		gtk_window_set_title(GTK_WINDOW(w), "Sound Brush");
+		gtk_window_set_transient_for(GTK_WINDOW(w), GTK_WINDOW(app->window));
+		gtk_window_set_hide_on_close(GTK_WINDOW(w), TRUE);
+		gtk_window_set_resizable(GTK_WINDOW(w), FALSE);
+		g_signal_connect(w, "close-request", G_CALLBACK(on_brush_close), app);
+		app->brush_area = gtk_drawing_area_new();
+		gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(app->brush_area), brush_draw, app, NULL);
+		gtk_window_set_child(GTK_WINDOW(w), app->brush_area);
+		GtkEventController *buttons = gtk_event_controller_legacy_new();
+		g_signal_connect(buttons, "event", G_CALLBACK(on_brush_button), app);
+		gtk_widget_add_controller(app->brush_area, buttons);
+		GtkEventController *motion = gtk_event_controller_motion_new();
+		g_signal_connect(motion, "motion", G_CALLBACK(on_brush_motion), app);
+		gtk_widget_add_controller(app->brush_area, motion);
+		GtkEventController *key = gtk_event_controller_key_new();
+		g_signal_connect(key, "key-pressed", G_CALLBACK(on_key), app);
+		gtk_widget_add_controller(w, key);
+		GtkDropTarget *drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST, GDK_ACTION_COPY);
+		g_signal_connect(drop, "drop", G_CALLBACK(on_files_dropped), app);
+		gtk_widget_add_controller(app->brush_area, GTK_EVENT_CONTROLLER(drop));
+		app->brush_window = w;
+		brush_resize(app);
+		if (!app->brush_panel)
+		{
+			fprintf(stderr, "scgui: no panel artwork for the Sound Brush\n");
+			return;
+		}
+	}
+	app->cfg.sb55_window = true;
+	config_touch(app);
+	gtk_window_present(GTK_WINDOW(app->brush_window));
+}
+
 static gboolean on_tick(gpointer user)
 {
 	app_t *app = user;
@@ -1591,7 +1970,6 @@ static gboolean on_tick(gpointer user)
 	machine_snapshot(app->mc, &st);
 	if (st.generation != app->seen_generation)
 	{
-		bool finished_now = st.finished && !app->state.finished;
 		app->seen_generation = st.generation;
 		bool song_changed = strcmp(st.song, app->state.song) != 0 || strcmp(st.title, app->state.title) != 0
 		                    || st.paused != app->state.paused;
@@ -1604,8 +1982,6 @@ static gboolean on_tick(gpointer user)
 		}
 		if (song_changed)
 			set_title(app);
-		if (finished_now && app->current >= 0 && app->current + 1 < (int)app->songs->len)
-			play_index(app, app->current + 1);
 		if (!st.booting && st.power)
 		{
 			unsigned ms = controls_boot_done(&app->ctl);
@@ -1632,6 +2008,7 @@ static gboolean on_tick(gpointer user)
 	}
 	if (panel_dirty(app->panel))
 		gtk_widget_queue_draw(app->area);
+	brush_tick_app(app);
 	return G_SOURCE_CONTINUE;
 }
 
@@ -1661,8 +2038,8 @@ static void act_power(void *user, bool on)
 	machine_power(app->mc, on);
 	if (!on)
 	{
-		app->current = -1;
-		list_select(app, -1);
+		brush_stop(&app->brush, now_ms());
+		app->loaded_song = -1;
 	}
 	set_title(app);
 }
@@ -1850,8 +2227,7 @@ static gboolean on_key(GtkEventControllerKey *c, guint keyval, guint keycode, Gd
 	switch (keyval)
 	{
 	case GDK_KEY_space:
-		app->paused = !app->paused;
-		machine_pause(app->mc, app->paused);
+		on_pause_clicked(NULL, app);
 		return TRUE;
 	case GDK_KEY_n:
 		on_next_clicked(NULL, app);
@@ -1859,8 +2235,14 @@ static gboolean on_key(GtkEventControllerKey *c, guint keyval, guint keycode, Gd
 	case GDK_KEY_p:
 		on_prev_clicked(NULL, app);
 		return TRUE;
+	case GDK_KEY_s:
+		on_stop_clicked(NULL, app);
+		return TRUE;
 	case GDK_KEY_l:
 		playlist_show(app);
+		return TRUE;
+	case GDK_KEY_b:
+		brush_show(app);
 		return TRUE;
 	case GDK_KEY_q:
 	case GDK_KEY_Escape:
@@ -2004,7 +2386,18 @@ int main(int argc, char **argv)
 	machine_set_gain(app.mc, app.ctl.knob * app.ctl.knob);
 	set_title(&app);   /* the title carries the power, which controls_init has only just set */
 	gtk_window_present(GTK_WINDOW(app.window));
-	if (app.songs->len)
+	/* the Brush: the files on the command line are its disk, and they play whatever auto play says */
+	brush_init(&app.brush, &brush_actions, &app);
+	app.brush.interval = app.cfg.sb55_interval;
+	app.brush.auto_play = app.cfg.sb55_auto_play;
+	app.brush.auto_rewind = app.cfg.sb55_auto_rewind;
+	app.brush.seed = (uint32_t)g_get_monotonic_time();
+	app.brush_pressed = -1;
+	app.loaded_song = -1;
+	if (app.cfg.sb55_window)
+		brush_show(&app);
+	brush_set_disk(&app.brush, (int)app.songs->len, now_ms());
+	if (app.songs->len && !brush_playing(&app.brush))
 		play_index(&app, 0);
 
 	app.loop = g_main_loop_new(NULL, FALSE);
@@ -2026,9 +2419,13 @@ int main(int argc, char **argv)
 		gtk_widget_unparent(app.system_popover);
 		g_object_unref(app.system_model_action);
 	}
+	if (app.brush_window)
+		gtk_window_destroy(GTK_WINDOW(app.brush_window));
 	gtk_window_destroy(GTK_WINDOW(app.window));
 	free(app.frame);
+	free(app.brush_frame);
 	panel_destroy(app.panel);
+	panel_destroy(app.brush_panel);
 	g_ptr_array_free(app.songs, TRUE);
 	g_main_loop_unref(app.loop);
 	return 0;
