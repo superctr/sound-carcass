@@ -857,6 +857,11 @@ static void compose(brush_t *b)
 		default:
 			if (b->recording)   /* the bar the take is in, four beats at its tempo */
 				digits_number(d, (unsigned)(1 + (b->now - b->record_at) * (uint64_t)b->record_tempo / 240000), 3);
+			else if (b->transient == SHOW_TEMPO)   /* the recorder's, with or without a disk */
+			{
+				digits_number(d, (unsigned)shown_tempo(b), 1);
+				d[0] |= 0x80;
+			}
 			else if (!b->songs)
 				digits_text(d, "---");
 			else if (b->prog_entry && !b->prog_shown)
@@ -868,7 +873,7 @@ static void compose(brush_t *b)
 			}
 			else if (b->scan || b->transient == SHOW_BAR)
 				digits_number(d, b->scan_bar, 3);
-			else if (b->transient == SHOW_TEMPO || (b->show == BRUSH_SHOW_TEMPO && !b->prog_entry))
+			else if (b->show == BRUSH_SHOW_TEMPO && !b->prog_entry)
 			{
 				digits_number(d, (unsigned)shown_tempo(b), 1);
 				d[0] |= 0x80;

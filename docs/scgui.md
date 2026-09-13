@@ -142,8 +142,8 @@ message).
 - **SONG ◀ ▶** step the song, without wrapping; while a song plays the new one starts at once.
   **TEMPO ◀ ▶** change the tempo a beat a minute at a time, 5 to 260: while a song plays, its own
   tempo map scaled, which CLEAR + TEMPO puts back and every song starts at its own; while none plays,
-  the recorder's tempo, 120 to begin with, which the tempo display shows then and CLEAR + TEMPO puts
-  back to 120.
+  the recorder's tempo, 120 to begin with, which the tempo display shows then, disk or no disk, and
+  CLEAR + TEMPO puts back to 120.
 - **PLAY**, **STOP**, **PAUSE**: PLAY lights while a song plays, PAUSE beside it while it is paused
   and PLAY or PAUSE goes on -- and a pause here holds the song alone, the module running on (its
   reverb rings out, the display keeps moving, MIDI IN still plays), where the playlist's pause with the
