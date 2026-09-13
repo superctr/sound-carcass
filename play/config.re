@@ -88,6 +88,7 @@ static const config_key_t keys[] = {
 	{ "reset",            SLOT_TEXT, FIELD(reset),         0, 0,     reset_words,    NULL,         group_song },
 	{ "tail",             SLOT_REAL, FIELD(tail),          0, 300,   NULL,           NULL,         group_song },
 	{ "sb55_window",      SLOT_BOOL, FIELD(sb55_window),   0, 0,     NULL,           NULL,         group_sb55 },
+	{ "sb55_dock",        SLOT_BOOL, FIELD(sb55_dock),     0, 0,     NULL,           NULL,         group_sb55 },
 	{ "sb55_interval",    SLOT_INT,  FIELD(sb55_interval), 0, 99,    NULL,           NULL,         group_sb55 },
 	{ "sb55_auto_play",   SLOT_BOOL, FIELD(sb55_auto_play), 0, 0,    NULL,           NULL,         group_sb55 },
 	{ "sb55_auto_rewind", SLOT_BOOL, FIELD(sb55_auto_rewind), 0, 0,  NULL,           NULL,         group_sb55 },
@@ -112,6 +113,7 @@ void config_defaults(scgui_config_t *c)
 	c->boot_animation = false;
 	c->tail = 4;
 	c->sb55_window = false;
+	c->sb55_dock = true;
 	c->sb55_interval = 4;
 	c->sb55_auto_play = c->sb55_auto_rewind = true;
 }

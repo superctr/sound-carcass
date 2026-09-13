@@ -39,7 +39,7 @@ typedef struct app
 	GtkWidget *window, *area, *playlist_window, *list, *list_scroll;
 	GtkWidget *settings_window, *notebook, *audio_label, *audio_drop, *rate_drop, *block_drop, *volume_scale;
 	GtkWidget *system_label, *model_check[MACHINE_SYSTEMS], *computer_check[COMPUTER_POSITIONS], *cache_label;
-	GtkWidget *size_drop, *swap_check, *skip_boot_check;
+	GtkWidget *size_drop, *swap_check, *dock_check, *skip_boot_check;
 	GtkWidget *logo_popover, *system_popover, *list_popover;
 	int menu_index;            /* the song the right-click menu is on, or -1 */
 	GSimpleAction *system_model_action;   /* the system menu's radio state */
@@ -55,8 +55,9 @@ typedef struct app
 	brush_t brush;
 	panel_t *brush_panel;
 	uint32_t *brush_frame;
-	GtkWidget *column;         /* the window's child: the Brush's panel over the module's */
+	GtkWidget *column;         /* the window's child: the Brush's panel over the module's when docked */
 	GtkWidget *brush_area;
+	GtkWidget *brush_window;   /* the Brush's own window, when not docked; NULL until wanted */
 	bool brush_engaged;        /* its panel is shown: it runs the list; hidden, the list runs as it always did */
 	int brush_pressed;         /* the element under the held left button, or -1 */
 	panel_set_t brush_queued, brush_held;   /* elements the right button queues for the next key, or holds down */
@@ -297,6 +298,7 @@ static void panel_rebuild(app_t *app, panel_model_t model, int size);
 static void menu_append(GMenu *menu, const char *label, const char *action, int parameter);
 static void brush_show(app_t *app);
 static void brush_toggle(app_t *app);
+static void brush_place(app_t *app);
 static void brush_resize(app_t *app);
 static void brush_press(app_t *app, brush_key_t key);
 
@@ -1198,6 +1200,18 @@ static void on_swap_toggled(GtkCheckButton *b, gpointer user)
 	config_touch(app);
 }
 
+static void on_dock_toggled(GtkCheckButton *b, gpointer user)
+{
+	app_t *app = user;
+	bool dock = gtk_check_button_get_active(b);
+	if (dock == app->cfg.sb55_dock)
+		return;
+	app->cfg.sb55_dock = dock;
+	if (app->brush_engaged)
+		brush_place(app);
+	config_touch(app);
+}
+
 static GtkWidget *interface_page(app_t *app)
 {
 	GtkWidget *grid = settings_grid();
@@ -1223,6 +1237,18 @@ static GtkWidget *interface_page(app_t *app)
 	gtk_check_button_set_active(GTK_CHECK_BUTTON(app->swap_check), app->cfg.swap_buttons);
 	g_signal_connect(app->swap_check, "toggled", G_CALLBACK(on_swap_toggled), app);
 	gtk_grid_attach(GTK_GRID(grid), app->swap_check, 0, 1, 3, 1);
+
+	GtkWidget *dock_label = gtk_label_new("Dock the Sound Brush above the module's panel, in this window,"
+	                                      " so the two stack and move together.  Off, it gets a window of"
+	                                      " its own.");
+	gtk_label_set_xalign(GTK_LABEL(dock_label), 0);
+	gtk_label_set_wrap(GTK_LABEL(dock_label), TRUE);
+	gtk_label_set_max_width_chars(GTK_LABEL(dock_label), 52);
+	app->dock_check = gtk_check_button_new();
+	gtk_check_button_set_child(GTK_CHECK_BUTTON(app->dock_check), dock_label);
+	gtk_check_button_set_active(GTK_CHECK_BUTTON(app->dock_check), app->cfg.sb55_dock);
+	g_signal_connect(app->dock_check, "toggled", G_CALLBACK(on_dock_toggled), app);
+	gtk_grid_attach(GTK_GRID(grid), app->dock_check, 0, 2, 3, 1);
 	return grid;
 }
 
@@ -1847,6 +1873,63 @@ static double brush_scale(const app_t *app)
 	return panel_width(app->brush_panel) / logical;
 }
 
+/* Docked, the Brush stands on the module: under its panel is the gap its rubber feet make, so the
+ * two faces do not meet edge to edge.  Sizes in millimetres of the SB-55's 218 mm face. */
+#define BRUSH_MM 218.0
+#define FEET_MM 5.0             /* the gap: the feet's height */
+#define FOOT_W_MM 18.0
+#define FOOT_IN_MM 16.0         /* from the case's end to a foot */
+
+static bool brush_docked(const app_t *app) { return app->cfg.sb55_dock; }
+
+/* a millimetre of the Brush's face in the window's logical pixels */
+static double brush_mm(const app_t *app)
+{
+	return panel_width(app->brush_panel) / brush_scale(app) / BRUSH_MM;
+}
+
+static void draw_feet(cairo_t *cr, double y, double width, double mm)
+{
+	double h = FEET_MM * mm;
+	/* the gap: the case's underside in shadow, lighter towards the module's top it stands on */
+	cairo_pattern_t *g = cairo_pattern_create_linear(0, y, 0, y + h);
+	cairo_pattern_add_color_stop_rgb(g, 0, 0.02, 0.02, 0.025);
+	cairo_pattern_add_color_stop_rgb(g, 0.55, 0.05, 0.05, 0.06);
+	cairo_pattern_add_color_stop_rgb(g, 1, 0.11, 0.11, 0.125);
+	cairo_rectangle(cr, 0, y, width, h);
+	cairo_set_source(cr, g);
+	cairo_fill(cr);
+	cairo_pattern_destroy(g);
+	/* the feet: black rubber under the front corners, round-cornered at the bottom, lit from the top left */
+	double w = FOOT_W_MM * mm, r = 0.8 * mm;
+	for (int n = 0; n < 2; n++)
+	{
+		double x = n ? width - FOOT_IN_MM * mm - w : FOOT_IN_MM * mm;
+		cairo_new_path(cr);
+		cairo_move_to(cr, x, y);
+		cairo_line_to(cr, x + w, y);
+		cairo_line_to(cr, x + w, y + h - r);
+		cairo_arc(cr, x + w - r, y + h - r, r, 0, G_PI / 2);
+		cairo_line_to(cr, x + r, y + h);
+		cairo_arc(cr, x + r, y + h - r, r, G_PI / 2, G_PI);
+		cairo_close_path(cr);
+		cairo_pattern_t *f = cairo_pattern_create_linear(x, 0, x + w, 0);
+		cairo_pattern_add_color_stop_rgb(f, 0, 0.13, 0.13, 0.14);
+		cairo_pattern_add_color_stop_rgb(f, 0.3, 0.25, 0.25, 0.27);
+		cairo_pattern_add_color_stop_rgb(f, 1, 0.08, 0.08, 0.09);
+		cairo_set_source(cr, f);
+		cairo_fill_preserve(cr);
+		cairo_pattern_destroy(f);
+		cairo_pattern_t *v = cairo_pattern_create_linear(0, y, 0, y + h);
+		cairo_pattern_add_color_stop_rgba(v, 0, 0, 0, 0, 0.6);
+		cairo_pattern_add_color_stop_rgba(v, 0.35, 0, 0, 0, 0);
+		cairo_pattern_add_color_stop_rgba(v, 1, 0, 0, 0, 0.35);
+		cairo_set_source(cr, v);
+		cairo_fill(cr);
+		cairo_pattern_destroy(v);
+	}
+}
+
 static void brush_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer user)
 {
 	app_t *app = user;
@@ -1860,8 +1943,11 @@ static void brush_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
 	cairo_surface_set_device_scale(surface, s, s);
 	cairo_set_source_surface(cr, surface, 0, 0);
 	cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_GOOD);
-	cairo_paint(cr);
+	cairo_rectangle(cr, 0, 0, w / s, h / s);
+	cairo_fill(cr);
 	cairo_surface_destroy(surface);
+	if (brush_docked(app))
+		draw_feet(cr, h / s, w / s, brush_mm(app));
 }
 
 static void brush_resize(app_t *app)
@@ -1884,6 +1970,8 @@ static void brush_resize(app_t *app)
 	}
 	double s = brush_scale(app);
 	int w = (int)(panel_width(app->brush_panel) / s + 0.5), h = (int)(panel_height(app->brush_panel) / s + 0.5);
+	if (brush_docked(app))
+		h += (int)(FEET_MM * brush_mm(app) + 0.5);
 	gtk_widget_set_size_request(app->brush_area, w, h);
 	brush_paint(app);
 	gtk_widget_queue_draw(app->brush_area);
@@ -1991,6 +2079,8 @@ static void brush_hide(app_t *app)
 	if (!app->brush_engaged)
 		return;
 	gtk_widget_set_visible(app->brush_area, FALSE);
+	if (app->brush_window)
+		gtk_widget_set_visible(app->brush_window, FALSE);
 	app->brush_engaged = false;
 	machine_set_brush(app->mc, false);
 	app->paused = app->brush.paused;
@@ -2013,9 +2103,69 @@ static void brush_engage(app_t *app)
 	brush_tick_app(app);
 }
 
-/* The Brush's panel above the module's, in the module's window: a toolkit window cannot be placed
- * beside another or made to follow it (nor on Wayland at all), so the two stack in one, and the
- * window grows and shrinks with the panel shown or hidden. */
+static gboolean on_key(GtkEventControllerKey *c, guint keyval, guint keycode, GdkModifierType mods, gpointer user);
+
+static gboolean on_brush_close(GtkWindow *w, gpointer user)
+{
+	brush_hide(user);
+	return TRUE;
+}
+
+/* The Brush's panel where the setting puts it: docked above the module's in the module's window
+ * (a toolkit window cannot be placed beside another or made to follow it, nor on Wayland at all,
+ * so the two stack in one, which grows and shrinks with the panel shown or hidden), or in a window
+ * of its own.  Moved between the two as the setting changes, shown or not. */
+static void brush_place(app_t *app)
+{
+	GtkWidget *area = app->brush_area;
+	if (!area)
+		return;
+	GtkWidget *parent = gtk_widget_get_parent(area);
+	bool dock = brush_docked(app);
+	if (!dock && !app->brush_window)
+	{
+		GtkWidget *w = gtk_window_new();
+		gtk_window_set_title(GTK_WINDOW(w), "Sound Brush");
+		gtk_window_set_transient_for(GTK_WINDOW(w), GTK_WINDOW(app->window));
+		gtk_window_set_hide_on_close(GTK_WINDOW(w), TRUE);
+		gtk_window_set_resizable(GTK_WINDOW(w), FALSE);
+		g_signal_connect(w, "close-request", G_CALLBACK(on_brush_close), app);
+		GtkEventController *key = gtk_event_controller_key_new();
+		g_signal_connect(key, "key-pressed", G_CALLBACK(on_key), app);
+		gtk_widget_add_controller(w, key);
+		app->brush_window = w;
+	}
+	GtkWidget *wanted = dock ? app->column : app->brush_window;
+	if (parent != wanted)
+	{
+		g_object_ref(area);
+		if (parent == app->column)
+			gtk_box_remove(GTK_BOX(app->column), area);
+		else if (parent)
+			gtk_window_set_child(GTK_WINDOW(app->brush_window), NULL);
+		if (dock)
+			gtk_box_prepend(GTK_BOX(app->column), area);
+		else
+			gtk_window_set_child(GTK_WINDOW(app->brush_window), area);
+		g_object_unref(area);
+	}
+	brush_resize(app);
+	if (app->brush_engaged)
+	{
+		if (dock)
+		{
+			if (app->brush_window)
+				gtk_widget_set_visible(app->brush_window, FALSE);
+			gtk_widget_set_visible(area, TRUE);
+		}
+		else
+		{
+			gtk_widget_set_visible(area, TRUE);
+			gtk_window_present(GTK_WINDOW(app->brush_window));
+		}
+	}
+}
+
 static void brush_show(app_t *app)
 {
 	if (!app->brush_area)
@@ -2031,17 +2181,16 @@ static void brush_show(app_t *app)
 		GtkDropTarget *drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST, GDK_ACTION_COPY);
 		g_signal_connect(drop, "drop", G_CALLBACK(on_files_dropped), app);
 		gtk_widget_add_controller(app->brush_area, GTK_EVENT_CONTROLLER(drop));
-		gtk_box_prepend(GTK_BOX(app->column), app->brush_area);
-		brush_resize(app);
+		gtk_widget_set_visible(app->brush_area, FALSE);
+		brush_place(app);
 		if (!app->brush_panel)
 		{
 			fprintf(stderr, "scgui: no panel artwork for the Sound Brush\n");
-			gtk_widget_set_visible(app->brush_area, FALSE);
 			return;
 		}
 	}
-	gtk_widget_set_visible(app->brush_area, TRUE);
 	brush_engage(app);
+	brush_place(app);
 	app->cfg.sb55_window = true;
 	config_touch(app);
 }
@@ -2529,6 +2678,8 @@ int main(int argc, char **argv)
 		gtk_widget_unparent(app.system_popover);
 		g_object_unref(app.system_model_action);
 	}
+	if (app.brush_window)
+		gtk_window_destroy(GTK_WINDOW(app.brush_window));
 	gtk_window_destroy(GTK_WINDOW(app.window));
 	free(app.frame);
 	free(app.brush_frame);

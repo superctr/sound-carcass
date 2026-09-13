@@ -113,9 +113,10 @@ file from playlist**; removing the song that is playing stops it, the way the st
 The SB-55 Sound Brush was Roland's floppy-disk MIDI file player, the SC-55's case with a drive in it,
 made to sit under a Sound Canvas and drive it: a three-digit display, a song number, PLAY, STOP, PAUSE,
 REW and FF, and modes for the disk.  Here it is the front of the playlist: **Sound Brush** on the logo
-menu, or `b`, shows its panel above the module's in the same window, as wide as the module's panel
-whatever the model, so the two stack as the units did and move together (a window cannot be placed
-beside another or made to follow it on Wayland, so they share one), and while that panel is shown the
+menu, or `b`, shows its panel above the module's in the same window, standing on its rubber feet, as
+wide as the module's panel whatever the model, so the two stack as the units did and move together (a
+window cannot be placed beside another or made to follow it on Wayland, so they share one; the
+Interface tab can give the Brush a window of its own instead), and while that panel is shown the
 playlist is the disk in its slot -- a disk is in while the list holds a song, the song number is the
 row, and the Brush's keys work the list and the player.  It behaves as the real unit's firmware does,
 measured on the MAME driver of the machine (`docs/panel/README.md`, "The SB-55's behaviour, measured",
@@ -225,6 +226,9 @@ mouse buttons** puts the combination menu on a plain right-click and moves the q
 to the middle button, for a mouse whose middle button is a wheel to press or none at all.  Pressing the
 other half of a ◀ ▶ pair stays on the right button, since it happens while the left button holds the
 first half and no menu is wanted there, and Ctrl with the right button opens the menu either way round.
+**Docking the Sound Brush** (on by default) puts its panel above the module's in the same window, the
+Brush's rubber feet drawn between the two, so they stack and move together; off, the Brush gets a
+window of its own, which the toolkit can neither place beside the module's nor make follow it.
 
 **System**: which machine this is -- SC-55, SC-55mkII, SC-88, SC-88VL, SC-88Pro, SC-8820 or SC-8850.  A model whose
 ROM images were not found is greyed out.  Choosing another one switches at once: the song is
@@ -268,7 +272,8 @@ the nine MIDI ties by the device's name, the message before each song, the instr
 map, the MIDI speed, the computer switch of each system (`computer_sc88`, `computer_sc88vl`,
 `computer_sc88pro`, `computer_sc8820`, `computer_sc8850` and `computer_sc55mk2`, each `midi`, `pc1`,
 `pc2` or `mac`, with `usb` taken as the SC-8850's and the SC-8820's word for the last), whether the
-settings memory is kept, the tail, and the Sound Brush's: whether its panel is shown (`sb55_window`)
+settings memory is kept, the tail, and the Sound Brush's: whether its panel is shown (`sb55_window`),
+whether it is docked above the module's (`sb55_dock`)
 and its three system functions (`sb55_interval`, `sb55_auto_play`, `sb55_auto_rewind`).
 It is read at start, written a moment after a setting changes, and written again on exit.  An option
 on the command line overrides the file for that run and does not change it.  The file is `key = value` text with `#` comments; a

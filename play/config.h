@@ -81,7 +81,8 @@ typedef struct scgui_config
 	bool swap_buttons;       /* the pointer's right and middle buttons change places on the panel */
 	float volume;            /* the knob, 0..1 */
 	float tail;              /* seconds after a song's last event */
-	bool sb55_window;        /* the Sound Brush's window is open */
+	bool sb55_window;        /* the Sound Brush is shown */
+	bool sb55_dock;          /* its panel docked above the module's, else in a window of its own */
 	int sb55_interval;       /* its seconds between songs, 0..99 (SET + PAUSE) */
 	bool sb55_auto_play;     /* it plays when a disk goes in (SET + PLAY) */
 	bool sb55_auto_rewind;   /* STOP returns to the start of the song (SET + STOP) */
