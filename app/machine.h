@@ -104,6 +104,8 @@ void machine_unload(machine_t *mc);
 void machine_seek_bar(machine_t *mc, uint32_t bar);
 /* the song's tempo scaled: 1 is the song's own */
 void machine_set_tempo(machine_t *mc, double factor);
+/* the song's title on the module's display before each song, as the Sound Brush sends it; off by default */
+void machine_set_title_display(machine_t *mc, bool on);
 void machine_button(machine_t *mc, scemu_button_t b, bool down);
 void machine_dial(machine_t *mc, int steps);           /* the value dial, positive clockwise */
 /* the same, ms of the machine's own time later (a boot the host does not

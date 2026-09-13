@@ -213,6 +213,8 @@ static void song_over(brush_t *b)
 		begin(b, next, 0);
 }
 
+static void compose(brush_t *b);
+
 static void show_transient(brush_t *b, int what, unsigned ms)
 {
 	b->transient = what;
@@ -736,6 +738,29 @@ void brush_stop(brush_t *b, uint64_t now)
 	b->now = now;
 	stop(b);
 	brush_tick(b, now, &b->player);
+}
+
+void brush_attach(brush_t *b, int songs, int song, bool playing, bool paused, uint64_t now)
+{
+	b->now = now;
+	b->songs = songs < 0 ? 0 : songs > BRUSH_SONGS_MAX ? BRUSH_SONGS_MAX : songs;
+	b->song = b->songs && song >= 0 && song < b->songs ? song : 0;
+	b->playing = b->songs && playing;
+	b->paused = b->playing && paused;
+	b->started_seen = b->playing;
+	b->standby = false;
+	b->countdown = 0;
+	b->scan = 0;
+	b->scan_resume = false;
+	b->pending = 0;
+	b->function = BRUSH_FUNCTION_NONE;
+	b->prog_entry = false;
+	b->transient = SHOW_NONE;
+	clear_played(b);
+	if (b->playing)
+		mark_played(b, b->prog ? program_position(b, b->song) : b->song);
+	/* what the player last said is from before the hand-over: the host's next tick says afresh */
+	compose(b);
 }
 
 /* ---------------------------------------------------------------- time */

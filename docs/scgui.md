@@ -80,23 +80,23 @@ machine.  Files on the command line become the playlist and the first one plays.
   SC-55mkII's firmware flashes the instrument name over a scrolling display message, which the hardware's
   response time would swallow (`docs/lcd.md`).
 
-Keys, in every window: `space` pause, or play when nothing plays; `s` stop; `n` / `p` next and previous
-song; `l` the playlist; `b` the Sound Brush; `q` quit.  They are the Brush's own keys (PAUSE or PLAY,
-STOP, SONG ▶ and ◀), so they follow its modes.
+Keys, in every window: `space` pause, `s` stop, `n` / `p` next and previous song, `l` the playlist, `b`
+the Sound Brush, `q` quit.  While the Brush's window is open they are its keys (PAUSE, or PLAY when
+nothing plays; STOP; SONG ▶ and ◀), so they follow its modes.
 
 ## The playlist
 
 A separate window: add files (the file chooser takes several at once), previous / pause / stop /
-next, clear.  Double-click a row to play it.  The list is the Sound Brush's disk (below): what plays
-after a song ends, and after how long, is the Brush's business -- the next song after its interval, four
-seconds by default, and a stop at the end of the list unless REPT is on -- and the toolbar's buttons are
-its keys, previous and next SONG ◀ ▶ (which switch at once, playing or not), pause PAUSE (or PLAY when
-nothing plays), stop STOP, clear the disk out.  Every song is preceded by the
+next, clear.  Double-click a row to play it; when a song ends the next one starts, and a list that was
+empty starts playing when its first file arrives.  While the Sound Brush's window is open (below) the
+list is the Brush's disk instead: what plays after a song ends, and after how long, is the Brush's
+business -- the next song after its interval, four seconds by default, and a stop at the end of the list
+unless REPT is on -- and the toolbar's buttons are its keys, previous and next SONG ◀ ▶ (which switch at
+once, playing or not), pause PAUSE (or PLAY when nothing plays), stop STOP, clear the disk out.  Every song
+is preceded by the
 message chosen under "Before each song" (a GS Reset by default; GM or GM2 System On, an SC-88 mode
 set, or nothing), a quarter second before its first event, so a song without a reset of its own does
-not inherit the last one's settings, and then by the song's title on the module's display, as the Sound
-Brush sends it (the sequence name at the head of the file's first track, in the Sound Canvas display
-message); pausing or stopping sends all notes off and all sound off on
+not inherit the last one's settings; pausing or stopping sends all notes off and all sound off on
 every part first, so nothing hangs.  The title bar of the main window shows the song's title (UTF-8
 or Shift-JIS, as in scplay).
 
@@ -114,10 +114,15 @@ The SB-55 Sound Brush was Roland's floppy-disk MIDI file player, the SC-55's cas
 made to sit under a Sound Canvas and drive it: a three-digit display, a song number, PLAY, STOP, PAUSE,
 REW and FF, and modes for the disk.  Here it is the front of the playlist: **Sound Brush** on the logo
 menu, or `b`, opens its panel in a window of its own, as wide as the module's window so the two stack
-as the units did, and the playlist is the disk in its slot -- a disk is in while the list holds a song,
-the song number is the row, and the Brush's keys work the list and the player.  It behaves as the real
-unit's firmware does, measured on the MAME driver of the machine
+as the units did, and while that window is open the playlist is the disk in its slot -- a disk is in while
+the list holds a song, the song number is the row, and the Brush's keys work the list and the player.
+It behaves as the real unit's firmware does, measured on the MAME driver of the machine
 (`docs/panel/README.md`, "The SB-55's behaviour, measured", in the project), without the recorder.
+Close the window and the list runs as it always did, from the song and the pause the Brush left it
+at; open it again and the Brush takes the list as it stands, its modes and settings as they were.
+While it is open each song is also preceded by its title on the module's display, as the SB-55
+sends it (the sequence name at the head of the file's first track, in the Sound Canvas display
+message).
 
 - **The slot** takes files: drop Standard MIDI Files on the window, or click the slot for the file
   chooser.  **EJECT** takes the disk out, which clears the list.  **MIDI IN 2** opens the playlist

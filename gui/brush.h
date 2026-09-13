@@ -132,6 +132,10 @@ void brush_key(brush_t *b, brush_key_t key, bool down, uint64_t now);
 void brush_select(brush_t *b, int song, bool play, uint64_t now);
 /* the host stopped the player itself (the module switched off): the transport follows */
 void brush_stop(brush_t *b, uint64_t now);
+/* The host has been running the list itself and now hands it to the Brush: the disk, the song
+ * selected and whether it plays or is paused, taken as they stand without a key pressed; the modes
+ * and the settings stay as they were. */
+void brush_attach(brush_t *b, int songs, int song, bool playing, bool paused, uint64_t now);
 /* the time passing and the player's state; every so often, and after every key */
 void brush_tick(brush_t *b, uint64_t now, const brush_player_t *player);
 

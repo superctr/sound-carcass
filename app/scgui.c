@@ -56,6 +56,7 @@ typedef struct app
 	panel_t *brush_panel;
 	uint32_t *brush_frame;
 	GtkWidget *brush_window, *brush_area;
+	bool brush_engaged;        /* its window is open: it runs the list; closed, the list runs as it always did */
 	int brush_pressed;         /* the element under the held left button, or -1 */
 	panel_set_t brush_queued, brush_held;   /* elements the right button queues for the next key, or holds down */
 	double brush_x, brush_y;   /* the pointer over the Brush, in its window's pixels */
@@ -329,14 +330,23 @@ static void songs_move(app_t *app, int from, int to)
 	if (from == to || from < 0 || to < 0 || from >= (int)app->songs->len || to >= (int)app->songs->len)
 		return;
 	g_ptr_array_insert(app->songs, to, g_ptr_array_steal_index(app->songs, from));
-	brush_move(&app->brush, from, to);
 	if (app->loaded_song == from)
 		app->loaded_song = to;
 	else if (from < app->loaded_song && app->loaded_song <= to)
 		app->loaded_song--;
 	else if (to <= app->loaded_song && app->loaded_song < from)
 		app->loaded_song++;
-	app->current = brush_song(&app->brush);
+	if (app->brush_engaged)
+	{
+		brush_move(&app->brush, from, to);
+		app->current = brush_song(&app->brush);
+	}
+	else if (app->current == from)
+		app->current = to;
+	else if (from < app->current && app->current <= to)
+		app->current--;
+	else if (to <= app->current && app->current < from)
+		app->current++;
 }
 
 static void songs_remove(app_t *app, int index)
@@ -357,8 +367,15 @@ static void songs_remove(app_t *app, int index)
 	}
 	else if (index < app->loaded_song)
 		app->loaded_song--;
-	brush_remove(&app->brush, index, now_ms());
-	app->current = brush_song(&app->brush);
+	if (app->brush_engaged)
+	{
+		brush_remove(&app->brush, index, now_ms());
+		app->current = brush_song(&app->brush);
+	}
+	else if (index == app->current)
+		app->current = -1;
+	else if (index < app->current)
+		app->current--;
 	list_select(app, app->current);
 }
 
@@ -452,8 +469,13 @@ static void songs_insert(app_t *app, int index, const char *path)
 		gtk_list_box_insert(GTK_LIST_BOX(app->list), list_row(app, path), index);
 	if (app->loaded_song >= index)
 		app->loaded_song++;
-	brush_insert(&app->brush, index);
-	app->current = brush_song(&app->brush);
+	if (app->brush_engaged)
+	{
+		brush_insert(&app->brush, index);
+		app->current = brush_song(&app->brush);
+	}
+	else if (app->current >= index)
+		app->current++;
 }
 
 static void songs_add(app_t *app, const char *path)
@@ -477,6 +499,7 @@ static gboolean on_files_dropped(GtkDropTarget *target, const GValue *value, dou
 	if (!G_VALUE_HOLDS(value, GDK_TYPE_FILE_LIST))
 		return FALSE;
 	GSList *files = gdk_file_list_get_files(g_value_get_boxed(value));
+	bool was_empty = app->songs->len == 0;
 	GtkWidget *from = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target));
 	int at = app->list && gtk_widget_is_ancestor(app->list, from) ? drop_position(app, from, x, y) : -1;
 	for (GSList *l = files; l; l = l->next)
@@ -491,7 +514,10 @@ static gboolean on_files_dropped(GtkDropTarget *target, const GValue *value, dou
 		g_free(path);
 	}
 	g_slist_free(files);
-	list_select(app, app->current);
+	if (!app->brush_engaged && was_empty && app->songs->len)
+		play_index(app, 0);
+	else
+		list_select(app, app->current);
 	return TRUE;
 }
 
@@ -568,6 +594,7 @@ static void on_files_chosen(GObject *source, GAsyncResult *result, gpointer user
 	GListModel *files = gtk_file_dialog_open_multiple_finish(GTK_FILE_DIALOG(source), result, NULL);
 	if (!files)
 		return;
+	bool was_empty = app->songs->len == 0;
 	for (guint n = 0; n < g_list_model_get_n_items(files); n++)
 	{
 		GFile *f = g_list_model_get_item(files, n);
@@ -578,7 +605,10 @@ static void on_files_chosen(GObject *source, GAsyncResult *result, gpointer user
 		g_object_unref(f);
 	}
 	g_object_unref(files);
-	list_select(app, app->current);
+	if (!app->brush_engaged && was_empty && app->songs->len)
+		play_index(app, 0);
+	else
+		list_select(app, app->current);
 }
 
 static void on_add_clicked(GtkButton *b, gpointer user)
@@ -601,27 +631,52 @@ static void on_add_clicked(GtkButton *b, gpointer user)
 	g_object_unref(dialog);
 }
 
-/* the toolbar and the keys are the Brush's own keys: the list is its disk */
+/* The toolbar and the keys: while the Brush's window is open they are its keys (the list is its
+ * disk); otherwise the list runs as it always did, straight to the machine. */
 static void on_prev_clicked(GtkButton *b, gpointer user)
 {
-	brush_press(user, BRUSH_KEY_SONG_LEFT);
+	app_t *app = user;
+	if (app->brush_engaged)
+		brush_press(app, BRUSH_KEY_SONG_LEFT);
+	else if (app->current > 0)
+		play_index(app, app->current - 1);
 }
 
 static void on_next_clicked(GtkButton *b, gpointer user)
 {
-	brush_press(user, BRUSH_KEY_SONG_RIGHT);
+	app_t *app = user;
+	if (app->brush_engaged)
+		brush_press(app, BRUSH_KEY_SONG_RIGHT);
+	else if (app->current + 1 < (int)app->songs->len)
+		play_index(app, app->current + 1);
 }
 
-/* PAUSE while a song plays; PLAY when nothing does, since PAUSE means nothing to the SB-55 then */
+/* on the Brush, PAUSE while a song plays and PLAY when nothing does, since PAUSE means nothing to
+ * the SB-55 then */
 static void on_pause_clicked(GtkButton *b, gpointer user)
 {
 	app_t *app = user;
-	brush_press(app, brush_playing(&app->brush) ? BRUSH_KEY_PAUSE : BRUSH_KEY_PLAY);
+	if (app->brush_engaged)
+		brush_press(app, brush_playing(&app->brush) ? BRUSH_KEY_PAUSE : BRUSH_KEY_PLAY);
+	else
+	{
+		app->paused = !app->paused;
+		machine_pause(app->mc, app->paused);
+	}
 }
 
 static void on_stop_clicked(GtkButton *b, gpointer user)
 {
-	brush_press(user, BRUSH_KEY_STOP);
+	app_t *app = user;
+	if (app->brush_engaged)
+		brush_press(app, BRUSH_KEY_STOP);
+	else
+	{
+		machine_unload(app->mc);
+		app->loaded_song = -1;
+		app->current = -1;
+		list_select(app, -1);
+	}
 }
 
 /* the list emptied: the disk taken out of the Brush */
@@ -633,7 +688,8 @@ static void songs_clear(app_t *app)
 	g_ptr_array_set_size(app->songs, 0);
 	if (app->list)
 		gtk_list_box_remove_all(GTK_LIST_BOX(app->list));
-	brush_set_disk(&app->brush, 0, now_ms());
+	if (app->brush_engaged)
+		brush_set_disk(&app->brush, 0, now_ms());
 }
 
 static void on_clear_clicked(GtkButton *b, gpointer user)
@@ -926,8 +982,18 @@ static void play_index(app_t *app, int index)
 {
 	if (index < 0 || index >= (int)app->songs->len)
 		return;
-	brush_select(&app->brush, index, true, now_ms());
-	app->current = brush_song(&app->brush);
+	if (app->brush_engaged)
+	{
+		brush_select(&app->brush, index, true, now_ms());
+		app->current = brush_song(&app->brush);
+	}
+	else
+	{
+		app->current = index;
+		app->loaded_song = index;
+		app->paused = false;
+		machine_play(app->mc, g_ptr_array_index(app->songs, index));
+	}
 	list_select(app, app->current);
 }
 
@@ -1916,13 +1982,34 @@ static void on_brush_motion(GtkEventControllerMotion *c, double x, double y, gpo
 
 static gboolean on_key(GtkEventControllerKey *c, guint keyval, guint keycode, GdkModifierType mods, gpointer user);
 
+/* The window closed: the list runs as it always did from here, with the song and the pause as the
+ * Brush left them; a song it was about to start after its interval starts now, and the title
+ * message stops. */
 static gboolean on_brush_close(GtkWindow *w, gpointer user)
 {
 	app_t *app = user;
 	gtk_widget_set_visible(GTK_WIDGET(w), FALSE);
+	app->brush_engaged = false;
+	machine_set_title_display(app->mc, false);
+	app->paused = app->brush.paused;
+	app->current = brush_song(&app->brush);
+	if (app->brush.countdown)
+		play_index(app, app->brush.next);
 	app->cfg.sb55_window = false;
 	config_touch(app);
 	return TRUE;
+}
+
+/* the Brush takes the list as it stands */
+static void brush_engage(app_t *app)
+{
+	if (app->brush_engaged)
+		return;
+	app->brush_engaged = true;
+	bool playing = app->current >= 0 && app->loaded_song == app->current && (app->state.playing || app->paused);
+	brush_attach(&app->brush, (int)app->songs->len, app->current, playing, app->paused, now_ms());
+	machine_set_title_display(app->mc, true);
+	brush_tick_app(app);
 }
 
 static void brush_show(app_t *app)
@@ -1958,6 +2045,7 @@ static void brush_show(app_t *app)
 			return;
 		}
 	}
+	brush_engage(app);
 	app->cfg.sb55_window = true;
 	config_touch(app);
 	gtk_window_present(GTK_WINDOW(app->brush_window));
@@ -1970,6 +2058,7 @@ static gboolean on_tick(gpointer user)
 	machine_snapshot(app->mc, &st);
 	if (st.generation != app->seen_generation)
 	{
+		bool finished_now = st.finished && !app->state.finished;
 		app->seen_generation = st.generation;
 		bool song_changed = strcmp(st.song, app->state.song) != 0 || strcmp(st.title, app->state.title) != 0
 		                    || st.paused != app->state.paused;
@@ -1982,6 +2071,8 @@ static gboolean on_tick(gpointer user)
 		}
 		if (song_changed)
 			set_title(app);
+		if (!app->brush_engaged && finished_now && app->current >= 0 && app->current + 1 < (int)app->songs->len)
+			play_index(app, app->current + 1);
 		if (!st.booting && st.power)
 		{
 			unsigned ms = controls_boot_done(&app->ctl);
@@ -2008,7 +2099,8 @@ static gboolean on_tick(gpointer user)
 	}
 	if (panel_dirty(app->panel))
 		gtk_widget_queue_draw(app->area);
-	brush_tick_app(app);
+	if (app->brush_engaged)
+		brush_tick_app(app);
 	return G_SOURCE_CONTINUE;
 }
 
@@ -2038,7 +2130,13 @@ static void act_power(void *user, bool on)
 	machine_power(app->mc, on);
 	if (!on)
 	{
-		brush_stop(&app->brush, now_ms());
+		if (app->brush_engaged)
+			brush_stop(&app->brush, now_ms());
+		else
+		{
+			app->current = -1;
+			list_select(app, -1);
+		}
 		app->loaded_song = -1;
 	}
 	set_title(app);
@@ -2386,7 +2484,8 @@ int main(int argc, char **argv)
 	machine_set_gain(app.mc, app.ctl.knob * app.ctl.knob);
 	set_title(&app);   /* the title carries the power, which controls_init has only just set */
 	gtk_window_present(GTK_WINDOW(app.window));
-	/* the Brush: the files on the command line are its disk, and they play whatever auto play says */
+	/* the Brush; with its window open from the last time, the files on the command line are its
+	 * disk and play whatever auto play says, otherwise the first one plays as it always did */
 	brush_init(&app.brush, &brush_actions, &app);
 	app.brush.interval = app.cfg.sb55_interval;
 	app.brush.auto_play = app.cfg.sb55_auto_play;
@@ -2396,9 +2495,15 @@ int main(int argc, char **argv)
 	app.loaded_song = -1;
 	if (app.cfg.sb55_window)
 		brush_show(&app);
-	brush_set_disk(&app.brush, (int)app.songs->len, now_ms());
-	if (app.songs->len && !brush_playing(&app.brush))
-		play_index(&app, 0);
+	if (app.songs->len)
+	{
+		if (!app.brush_engaged)
+			play_index(&app, 0);
+		else if (app.brush.auto_play)
+			brush_select(&app.brush, 0, true, now_ms());
+		else
+			brush_select(&app.brush, 0, false, now_ms());
+	}
 
 	app.loop = g_main_loop_new(NULL, FALSE);
 	guint tick = g_timeout_add(33, on_tick, &app);

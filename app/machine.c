@@ -25,7 +25,8 @@
 typedef enum command_kind
 {
 	CMD_LOAD, CMD_START, CMD_PAUSE, CMD_STOP, CMD_UNLOAD, CMD_SEEK, CMD_TEMPO, CMD_BUTTON, CMD_DIAL, CMD_POWER,
-	CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT, CMD_RESET, CMD_MAP, CMD_MODEL, CMD_SEND, CMD_ANIMATE, CMD_QUIT
+	CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT, CMD_RESET, CMD_MAP, CMD_MODEL, CMD_SEND, CMD_ANIMATE, CMD_TITLE,
+	CMD_QUIT
 } command_kind_t;
 
 typedef struct command
@@ -63,6 +64,7 @@ struct machine
 	uint64_t pos, end_frame, lead;   /* the position on the song's clock: its frames, the lead included */
 	double pos_frac;          /* the part of a song frame left over by the tempo factor */
 	double tempo_factor;
+	bool title_display;       /* the title goes to the module before each song */
 	size_t next_event;
 	float gain;
 	machine_reset_t reset;
@@ -508,7 +510,8 @@ static void start_song(machine_t *mc, uint64_t frame)
 	const uint8_t *msg = machine_reset_message(mc->reset, &msg_size);
 	if (msg)
 		send_both(mc, msg, msg_size);
-	send_title(mc);
+	if (mc->title_display)
+		send_title(mc);
 	uint64_t end = (uint64_t)mc->smf.last_frame + mc->lead;
 	mc->pos = frame < end ? frame : end;
 	mc->pos_frac = 0;
@@ -653,6 +656,9 @@ static void handle(machine_t *mc, const command_t *c)
 		break;
 	case CMD_TEMPO:
 		mc->tempo_factor = c->f < 0.01f ? 0.01 : c->f > 20 ? 20 : c->f;
+		break;
+	case CMD_TITLE:
+		mc->title_display = c->a != 0;
 		break;
 	case CMD_BUTTON:
 		if (c->c > 0)
@@ -1020,6 +1026,12 @@ void machine_seek_bar(machine_t *mc, uint32_t bar)
 void machine_set_tempo(machine_t *mc, double factor)
 {
 	command_t c = { CMD_TEMPO, 0, 0, 0, (float)factor, 0, NULL };
+	post(mc, c);
+}
+
+void machine_set_title_display(machine_t *mc, bool on)
+{
+	command_t c = { CMD_TITLE, on, 0, 0, 0, 0, NULL };
 	post(mc, c);
 }
 
