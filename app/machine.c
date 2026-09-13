@@ -80,6 +80,13 @@ struct machine
 	uint8_t pending_bytes[PENDING_BYTES];
 	int pending_count;
 	uint32_t pending_used;
+	/* the recorder, under the lock: the front switches it, the thread fills it */
+	bool recording;
+	smf_take_t *takes;
+	size_t take_count, take_cap;
+	uint8_t *take_bytes;
+	size_t take_used, take_bytes_cap;
+	uint64_t take_frames;     /* rendered since the recording started */
 };
 
 const scemu_model_t machine_systems[MACHINE_SYSTEMS] = {
@@ -785,6 +792,42 @@ static void render_block(machine_t *mc, size_t n)
 			audio_pause(mc->audio, false);
 	}
 	mc->clock_frames += n;
+	pthread_mutex_lock(&mc->lock);
+	if (mc->recording)
+		mc->take_frames += n;
+	pthread_mutex_unlock(&mc->lock);
+}
+
+/* a message onto the recording, at a frame of it; a take that will not fit is dropped */
+static void take_down(machine_t *mc, uint8_t port, const uint8_t *bytes, size_t len, uint64_t frame)
+{
+	if (mc->take_count == mc->take_cap)
+	{
+		size_t want = mc->take_cap ? mc->take_cap * 2 : 1024;
+		smf_take_t *grown = realloc(mc->takes, want * sizeof(smf_take_t));
+		if (!grown)
+			return;
+		mc->takes = grown;
+		mc->take_cap = want;
+	}
+	if (mc->take_used + len > mc->take_bytes_cap)
+	{
+		size_t want = mc->take_bytes_cap ? mc->take_bytes_cap * 2 : 16384;
+		while (want < mc->take_used + len)
+			want *= 2;
+		uint8_t *grown = realloc(mc->take_bytes, want);
+		if (!grown)
+			return;
+		mc->take_bytes = grown;
+		mc->take_bytes_cap = want;
+	}
+	smf_take_t *k = &mc->takes[mc->take_count++];
+	k->frame = frame;
+	k->port = port;
+	k->length = (uint16_t)len;
+	k->at = (uint32_t)mc->take_used;
+	memcpy(mc->take_bytes + mc->take_used, bytes, len);
+	mc->take_used += len;
 }
 
 /* Whatever the host's ports hold, stamped with the time it was seen; the
@@ -822,13 +865,18 @@ static void deliver_midi(machine_t *mc)
 		return;
 	double now = now_seconds();
 	double delay = (double)mc->block / mc->rate + 0.002;
+	pthread_mutex_lock(&mc->lock);
 	for (int n = 0; n < mc->pending_count; n++)
 	{
 		double at = (delay - (now - mc->pending[n].t)) * mc->rate;
 		uint32_t offset = at > 0 ? (uint32_t)(at + 0.5) : 0;
 		scemu_midi_write(unit_machine(mc->unit), mc->pending[n].which, mc->pending_bytes + mc->pending[n].at,
 		                 mc->pending[n].len, offset);
+		if (mc->recording)
+			take_down(mc, mc->pending[n].which, mc->pending_bytes + mc->pending[n].at, mc->pending[n].len,
+			     mc->take_frames + offset);
 	}
+	pthread_mutex_unlock(&mc->lock);
 	mc->pending_count = 0;
 	mc->pending_used = 0;
 }
@@ -975,6 +1023,8 @@ void machine_stop(machine_t *mc)
 	midi_io_close(mc->midi);
 	unit_close(mc->unit);
 	pthread_mutex_destroy(&mc->lock);
+	free(mc->takes);
+	free(mc->take_bytes);
 	free(mc);
 }
 
@@ -1061,6 +1111,27 @@ void machine_set_brush(machine_t *mc, bool on)
 {
 	command_t c = { CMD_BRUSH, on, 0, 0, 0, 0, NULL };
 	post(mc, c);
+}
+
+void machine_record(machine_t *mc, bool on)
+{
+	pthread_mutex_lock(&mc->lock);
+	if (on && !mc->recording)
+	{
+		mc->take_count = 0;
+		mc->take_used = 0;
+		mc->take_frames = 0;
+	}
+	mc->recording = on;
+	pthread_mutex_unlock(&mc->lock);
+}
+
+uint8_t *machine_recording(machine_t *mc, size_t *size)
+{
+	pthread_mutex_lock(&mc->lock);
+	uint8_t *file = smf_write_takes(mc->takes, mc->take_count, mc->take_bytes, mc->take_frames, mc->rate, size);
+	pthread_mutex_unlock(&mc->lock);
+	return file;
 }
 
 void machine_button(machine_t *mc, scemu_button_t b, bool down)

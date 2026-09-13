@@ -180,7 +180,14 @@ static void stop(brush_t *b)
 	}
 }
 
-/* the song has run out: the next one after the interval, or a stop with the next in line selected */
+static void record_end(brush_t *b)
+{
+	b->recording = false;
+	b->act->record(b->user, false);
+}
+
+/* the song has run out: the next one after the interval, selected from the start of the count so
+ * that a STOP and a PLAY during it go on to it, or a stop with the next in line selected */
 static void song_over(brush_t *b)
 {
 	b->playing = b->paused = false;
@@ -220,7 +227,7 @@ static void song_over(brush_t *b)
 	{
 		b->countdown = b->interval;
 		b->countdown_at = b->now;
-		b->next = next;
+		b->song = next;
 	}
 	else
 		begin(b, next, 0);
@@ -337,7 +344,7 @@ static void play(brush_t *b)
 		return;
 	if (b->countdown)
 	{
-		begin(b, b->next, 0);
+		begin(b, b->song, 0);
 		return;
 	}
 	if (b->rnd)
@@ -453,6 +460,8 @@ static void press(brush_t *b, brush_key_t key)
 	if (key == BRUSH_KEY_POWER)
 	{
 		stop(b);
+		if (b->recording)
+			record_end(b);
 		b->function = BRUSH_FUNCTION_NONE;
 		b->prog_entry = false;
 		b->standby = true;
@@ -463,10 +472,19 @@ static void press(brush_t *b, brush_key_t key)
 		if (!b->songs)
 			return;
 		stop(b);
+		if (b->recording)
+			record_end(b);
 		program_cancel(b);
 		b->songs = 0;
 		b->song = 0;
 		b->act->eject(b->user);
+		return;
+	}
+	/* taking down: REC again or STOP ends it, and nothing else acts meanwhile */
+	if (b->recording)
+	{
+		if (key == BRUSH_KEY_REC || key == BRUSH_KEY_STOP)
+			record_end(b);
 		return;
 	}
 	if (b->function != BRUSH_FUNCTION_NONE)
@@ -575,6 +593,13 @@ static void press(brush_t *b, brush_key_t key)
 		break;
 	case BRUSH_KEY_PLAY:
 		play(b);
+		break;
+	case BRUSH_KEY_REC:
+		/* not the unit's REC, which waits for PLAY: the take starts now, in place of any song */
+		stop(b);
+		b->recording = true;
+		b->record_at = b->now;
+		b->act->record(b->user, true);
 		break;
 	case BRUSH_KEY_REW:
 	case BRUSH_KEY_FF:
@@ -763,6 +788,7 @@ void brush_attach(brush_t *b, int songs, int song, bool playing, bool paused, ui
 	b->started_seen = b->playing;
 	b->standby = false;
 	b->countdown = 0;
+	b->recording = false;
 	b->scan = 0;
 	b->scan_resume = false;
 	b->pending = 0;
@@ -815,7 +841,9 @@ static void compose(brush_t *b)
 		case BRUSH_FUNCTION_AUTO_PLAY: digits_text(d, b->auto_play ? " on" : "oFF"); break;
 		case BRUSH_FUNCTION_AUTO_REWIND: digits_text(d, b->auto_rewind ? " on" : "oFF"); break;
 		default:
-			if (!b->songs)
+			if (b->recording)   /* the bar the take is in, at the 120 beats a minute it is written at */
+				digits_number(d, (unsigned)(1 + (b->now - b->record_at) / 2000), 3);
+			else if (!b->songs)
 				digits_text(d, "---");
 			else if (b->prog_entry && !b->prog_shown)
 				digits_text(d, " --");
@@ -845,6 +873,8 @@ static void compose(brush_t *b)
 			lamps |= 1u << BRUSH_LAMP_PLAY;
 		if (b->paused)
 			lamps |= 1u << BRUSH_LAMP_PAUSE;
+		if (b->recording)
+			lamps |= 1u << BRUSH_LAMP_REC;
 		if (b->prog || (b->prog_entry && ((b->now - b->prog_entry_at) / PROG_BLINK_MS) % 2 == 0))
 			lamps |= 1u << BRUSH_LAMP_PROG;
 		if (b->rnd)
@@ -890,7 +920,7 @@ void brush_tick(brush_t *b, uint64_t now, const brush_player_t *player)
 		b->countdown--;
 		b->countdown_at += 1000;
 		if (!b->countdown)
-			begin(b, b->next, 0);
+			begin(b, b->song, 0);
 	}
 	if (b->playing)
 	{

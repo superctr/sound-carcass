@@ -1823,9 +1823,87 @@ static void brush_act_settings(void *user)
 	config_touch(app);
 }
 
+/* the take, once the recording ends: kept where the file dialog says and put on the list */
+typedef struct take
+{
+	app_t *app;
+	uint8_t *bytes;
+	size_t size;
+} take_t;
+
+static void on_take_saved(GObject *source, GAsyncResult *result, gpointer user)
+{
+	take_t *take = user;
+	app_t *app = take->app;
+	GFile *file = gtk_file_dialog_save_finish(GTK_FILE_DIALOG(source), result, NULL);
+	if (file)
+	{
+		char *path = g_file_get_path(file);
+		GError *err = NULL;
+		if (path && g_file_set_contents(path, (const char *)take->bytes, (gssize)take->size, &err))
+		{
+			songs_add(app, path);
+			list_select(app, app->current);
+		}
+		else
+		{
+			GtkAlertDialog *alert = gtk_alert_dialog_new("The recording could not be saved: %s",
+			                                             err ? err->message : "no path");
+			gtk_alert_dialog_show(alert, GTK_WINDOW(app->window));
+			g_object_unref(alert);
+		}
+		g_clear_error(&err);
+		g_free(path);
+		g_object_unref(file);
+	}
+	free(take->bytes);
+	free(take);
+}
+
+static void brush_act_record(void *user, bool on)
+{
+	app_t *app = user;
+	machine_record(app->mc, on);
+	if (on)
+		return;
+	size_t size;
+	uint8_t *bytes = machine_recording(app->mc, &size);
+	if (!bytes)
+		return;
+	take_t *take = malloc(sizeof(*take));
+	if (!take)
+	{
+		free(bytes);
+		return;
+	}
+	take->app = app;
+	take->bytes = bytes;
+	take->size = size;
+	GtkFileDialog *dialog = gtk_file_dialog_new();
+	gtk_file_dialog_set_title(dialog, "Save the Recording");
+	GDateTime *now = g_date_time_new_now_local();
+	char *name = g_date_time_format(now, "Recording %Y-%m-%d %H.%M.mid");
+	gtk_file_dialog_set_initial_name(dialog, name);
+	g_free(name);
+	g_date_time_unref(now);
+	if (app->songs->len)
+	{
+		/* beside the last song on the list */
+		char *dir = g_path_get_dirname(g_ptr_array_index(app->songs, app->songs->len - 1));
+		GFile *folder = g_file_new_for_path(dir);
+		gtk_file_dialog_set_initial_folder(dialog, folder);
+		g_object_unref(folder);
+		g_free(dir);
+	}
+	GtkWindow *parent = GTK_WINDOW(app->brush_window && gtk_widget_get_visible(app->brush_window) ? app->brush_window
+	                                                                                              : app->window);
+	gtk_file_dialog_save(dialog, parent, NULL, on_take_saved, take);
+	g_object_unref(dialog);
+}
+
 static const brush_actions_t brush_actions = {
 	brush_act_load, brush_act_start, brush_act_stop, brush_act_pause, brush_act_seek, brush_act_tempo,
-	brush_act_eject, brush_act_settings
+	brush_act_eject, brush_act_settings, brush_act_record
 };
 
 /* the Brush's display and lamps onto its panel, and the disk in its slot */
@@ -2092,6 +2170,8 @@ static void brush_hide(app_t *app)
 {
 	if (!app->brush_engaged)
 		return;
+	if (app->brush.recording)
+		brush_press(app, BRUSH_KEY_REC);
 	gtk_widget_set_visible(app->brush_area, FALSE);
 	if (app->brush_window)
 		gtk_widget_set_visible(app->brush_window, FALSE);
@@ -2100,7 +2180,7 @@ static void brush_hide(app_t *app)
 	app->paused = app->brush.paused;
 	app->current = brush_song(&app->brush);
 	if (app->brush.countdown)
-		play_index(app, app->brush.next);
+		play_index(app, app->current);
 	app->cfg.sb55_window = false;
 	config_touch(app);
 }

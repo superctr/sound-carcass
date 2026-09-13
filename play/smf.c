@@ -1,9 +1,11 @@
 /* scplay: Standard MIDI File reader, type 0 and 1, with the tempo map resolved
- * to frames of the machine's own sample clock.
+ * to frames of the machine's own sample clock; and a writer for what the
+ * machine's inputs took.
  *
  * Copyright (c) 2026 ian karlsson
  * SPDX-License-Identifier: BSD-3-Clause
  */
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -400,4 +402,222 @@ uint64_t smf_tick_at_frame(const smf_t *s, uint64_t frame, uint32_t rate)
 	}
 	const smf_tempo_t *t = &s->tempos[lo];
 	return t->tick + (uint64_t)((seconds - t->seconds) * 1e6 / t->tempo * s->division);
+}
+
+/* ---------------------------------------------------------------- the writer */
+
+#define TAKE_DIVISION 480
+#define TAKE_TEMPO 500000
+
+typedef struct bytes
+{
+	uint8_t *p;
+	size_t used, cap;
+	uint64_t tick;            /* of the last event written, for the deltas */
+	bool failed;
+} bytes_t;
+
+static void put(bytes_t *b, const uint8_t *p, size_t n)
+{
+	if (b->failed)
+		return;
+	if (b->used + n > b->cap)
+	{
+		size_t want = b->cap ? b->cap * 2 : 1024;
+		while (want < b->used + n)
+			want *= 2;
+		uint8_t *grown = realloc(b->p, want);
+		if (!grown)
+		{
+			b->failed = true;
+			return;
+		}
+		b->p = grown;
+		b->cap = want;
+	}
+	memcpy(b->p + b->used, p, n);
+	b->used += n;
+}
+
+static void put_byte(bytes_t *b, uint8_t v) { put(b, &v, 1); }
+
+static void put_be32(bytes_t *b, uint32_t v)
+{
+	uint8_t p[4] = { (uint8_t)(v >> 24), (uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v };
+	put(b, p, 4);
+}
+
+static void put_vlq(bytes_t *b, uint64_t v)
+{
+	uint8_t p[10];
+	int n = 0;
+	p[n++] = v & 0x7f;
+	for (v >>= 7; v; v >>= 7)
+		p[n++] = 0x80 | (v & 0x7f);
+	while (n)
+		put_byte(b, p[--n]);
+}
+
+/* a delta time up to a tick, which never goes backwards */
+static void put_delta(bytes_t *b, uint64_t tick)
+{
+	put_vlq(b, tick > b->tick ? tick - b->tick : 0);
+	if (tick > b->tick)
+		b->tick = tick;
+}
+
+static uint64_t tick_of_frame(uint64_t frame, uint32_t rate)
+{
+	/* 120 beats a minute: a quarter is half a second */
+	return rate ? (frame * (TAKE_DIVISION * 2) + rate / 2) / rate : 0;
+}
+
+/* the data bytes a status byte takes; -1 for one the file cannot hold */
+static int data_bytes(uint8_t status)
+{
+	switch (status & 0xf0)
+	{
+	case 0xc0: case 0xd0: return 1;
+	case 0xf0:
+		switch (status)
+		{
+		case 0xf1: case 0xf3: return 1;
+		case 0xf2: return 2;
+		default: return -1;
+		}
+	default: return 2;
+	}
+}
+
+/* a chunk's messages onto a track at a tick, whole ones only: running status is written out,
+ * real-time bytes and system common messages are left out */
+static void put_chunk(bytes_t *t, uint64_t tick, const uint8_t *p, size_t n)
+{
+	uint8_t running = 0;
+	size_t i = 0;
+	while (i < n)
+	{
+		uint8_t c = p[i];
+		if (c >= 0xf8)
+		{
+			i++;
+			continue;
+		}
+		if (c == 0xf0)
+		{
+			size_t end = i + 1;
+			while (end < n && p[end] != 0xf7)
+				end++;
+			put_delta(t, tick);
+			put_byte(t, 0xf0);
+			put_vlq(t, end - i);   /* the bytes after F0, the F7 included */
+			put(t, p + i + 1, end - i - 1);
+			put_byte(t, 0xf7);
+			i = end < n ? end + 1 : n;
+			running = 0;
+			continue;
+		}
+		uint8_t status;
+		if (c & 0x80)
+		{
+			status = c;
+			i++;
+			if (status < 0xf0)
+				running = status;
+		}
+		else if (running)
+			status = running;
+		else
+		{
+			i++;
+			continue;
+		}
+		int want = data_bytes(status);
+		if (want < 0 || i + (size_t)want > n)
+		{
+			if (want < 0)
+				continue;
+			break;
+		}
+		put_delta(t, tick);
+		put_byte(t, status);
+		put(t, p + i, (size_t)want);
+		i += (size_t)want;
+	}
+}
+
+static void put_track(bytes_t *file, const bytes_t *track)
+{
+	static const uint8_t head[4] = { 'M', 'T', 'r', 'k' };
+	put(file, head, 4);
+	put_be32(file, (uint32_t)track->used);
+	put(file, track->p, track->used);
+}
+
+uint8_t *smf_write_takes(const smf_take_t *takes, size_t count, const uint8_t *bytes, uint64_t frames, uint32_t rate,
+                         size_t *size)
+{
+	bytes_t track[SMF_PORTS];
+	memset(track, 0, sizeof(track));
+	for (size_t n = 0; n < count; n++)
+	{
+		const smf_take_t *k = &takes[n];
+		if (k->port >= SMF_PORTS)
+			continue;
+		bytes_t *t = &track[k->port];
+		if (!t->used)
+		{
+			static const uint8_t port[4] = { 0x00, 0xff, 0x21, 0x01 };
+			put(t, port, 4);
+			put_byte(t, k->port);
+		}
+		put_chunk(t, tick_of_frame(k->frame, rate), bytes + k->at, k->length);
+	}
+	uint64_t end = tick_of_frame(frames, rate);
+	int tracks = 0;
+	for (int n = 0; n < SMF_PORTS; n++)
+		if (track[n].used > 5)   /* more than its port event */
+			tracks++;
+	bytes_t file;
+	memset(&file, 0, sizeof(file));
+	if (tracks)
+	{
+		static const uint8_t head[8] = { 'M', 'T', 'h', 'd', 0, 0, 0, 6 };
+		static const uint8_t conductor[15] = {
+			0x00, 0xff, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08,   /* 4/4 */
+			0x00, 0xff, 0x51, 0x03, TAKE_TEMPO >> 16, (TAKE_TEMPO >> 8) & 0xff, TAKE_TEMPO & 0xff
+		};
+		static const uint8_t finish[3] = { 0xff, 0x2f, 0x00 };
+		put(&file, head, 8);
+		put_byte(&file, 0);
+		put_byte(&file, 1);
+		put_byte(&file, 0);
+		put_byte(&file, (uint8_t)(tracks + 1));
+		put_byte(&file, TAKE_DIVISION >> 8);
+		put_byte(&file, TAKE_DIVISION & 0xff);
+		bytes_t lead;
+		memset(&lead, 0, sizeof(lead));
+		put(&lead, conductor, sizeof(conductor));
+		put_delta(&lead, end);
+		put(&lead, finish, 3);
+		put_track(&file, &lead);
+		free(lead.p);
+		for (int n = 0; n < SMF_PORTS; n++)
+			if (track[n].used > 5)
+			{
+				put_delta(&track[n], end);
+				put(&track[n], finish, 3);
+				put_track(&file, &track[n]);
+			}
+	}
+	for (int n = 0; n < SMF_PORTS; n++)
+		free(track[n].p);
+	if (!tracks || file.failed)
+	{
+		free(file.p);
+		*size = 0;
+		return NULL;
+	}
+	*size = file.used;
+	return file.p;
 }

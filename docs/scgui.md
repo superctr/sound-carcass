@@ -120,8 +120,8 @@ window cannot be placed beside another or made to follow it on Wayland, so they 
 Interface tab can give the Brush a window of its own instead), and while that panel is shown the
 playlist is the disk in its slot -- a disk is in while the list holds a song, the song number is the
 row, and the Brush's keys work the list and the player.  It behaves as the real unit's firmware does,
-measured on the MAME driver of the machine (`docs/panel/README.md`, "The SB-55's behaviour, measured",
-in the project), without the recorder.  **SB-55** or `b` again hides the panel, and the list runs
+measured on the MAME driver of the machine, but for the recorder, which is simpler here.  **SB-55** or
+`b` again hides the panel, and the list runs
 as it always did from there, from the song and the pause the Brush left it at; show it again and the
 Brush takes the list as it stands, its modes and settings as they were.
 While it is shown each song is also preceded by its title on the module's display, as the SB-55
@@ -155,7 +155,8 @@ message).
   again on its own; **SINGLE** stops after each song with the next selected; **REPT** goes round the
   list, and with SINGLE repeats the song; **RND** plays each song once in a random order and stops,
   or with REPT starts another round.  Between songs the Brush waits the interval -- four seconds by
-  default -- counting it down on the display.
+  default -- counting it down on the display, with the next song already selected, so STOP during the
+  count and PLAY go on to it.
 - **A program**: hold SET and press PROG, and PROG blinks over `--`; SONG ◀ ▶ then show and step a
   song, SET stores it, up to ninety-nine, and STOP or PLAY ends the entry with PROG lit and the
   program's first song selected.  PLAY plays the program in order and stops at its end; with REPT it
@@ -165,7 +166,12 @@ message).
   to 99 seconds), auto play (whether a disk going in plays at once) and auto rewind; REW and FF change
   the value shown, SET stores it.  The three are kept in the settings file.
 - **POWER** puts the Brush into standby, its display dark and STANDBY lit, playing stopped and its
-  keys dead until POWER again; it is the Brush's own, not the module's.  **REC** does nothing yet.
+  keys dead until POWER again; it is the Brush's own, not the module's.
+- **REC** records: whatever the machine's MIDI INs take from then on is taken down, stamped on the
+  machine's clock, with any song stopped, REC lit and the display counting bars; REC again or STOP
+  ends it and asks where to save the take, a Standard MIDI File at 120 beats a minute in 4/4 with a
+  track per port, which then goes on the end of the list.  (The unit's REC waits for PLAY and records
+  onto the disk; this one does not.)  Hiding the panel ends a take too.
 
 The keys work under the mouse as the module's do: the left button presses, a plain right-click
 queues a key to go down with the next left-click (the manual's "press both"), Shift and the right

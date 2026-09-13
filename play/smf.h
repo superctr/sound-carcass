@@ -77,4 +77,22 @@ uint64_t smf_tick_at_frame(const smf_t *s, uint64_t frame, uint32_t rate);
 /* microseconds a quarter note in force at a tick (500000 before any tempo event) */
 uint32_t smf_tempo_at_tick(const smf_t *s, uint64_t tick);
 
+/* A take: what a MIDI input delivered, stamped on the sample clock from the start of the
+ * recording.  A chunk holds whole messages, possibly several, with running status and real-time
+ * bytes as the wire had them. */
+typedef struct smf_take
+{
+	uint64_t frame;
+	uint8_t port;
+	uint16_t length;
+	uint32_t at;              /* into the bytes the takes share */
+} smf_take_t;
+
+/* The takes, in time order, as a type 1 file at 120 beats a minute in 4/4 and 480 ticks a
+ * quarter: a conductor track, then a track per port that took anything, each opened with its
+ * port event; `frames` is the recording's length, where every track ends.  Returns the file's
+ * bytes, the caller's to free, with their count in *size; NULL with no message in the takes. */
+uint8_t *smf_write_takes(const smf_take_t *takes, size_t count, const uint8_t *bytes, uint64_t frames, uint32_t rate,
+                         size_t *size);
+
 #endif

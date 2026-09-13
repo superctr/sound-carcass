@@ -4,10 +4,11 @@
  * three digits and its lamps show, and what it asks of the player behind it.
  * Here the disk in its slot is the playlist, a song number a row of it, and
  * the player is the emulated module's own.  The behaviour is the SB-55
- * firmware's as measured in MAME (docs/panel/README.md in the project),
- * without the recorder.  No toolkit and no clock of its own: the host feeds
- * it keys, the time in milliseconds and what the player reports, and reads
- * the display back.
+ * firmware's as measured in MAME, but for the recorder, which is simpler
+ * than the unit's: REC takes MIDI IN down until REC or STOP, and the host
+ * keeps the take.  No toolkit and no clock of its own: the host feeds it
+ * keys, the time in milliseconds and what the player reports, and reads the
+ * display back.
  *
  * Copyright (c) 2026 ian karlsson
  * SPDX-License-Identifier: BSD-3-Clause
@@ -68,6 +69,7 @@ typedef struct brush_actions
 	void (*tempo)(void *user, double factor);             /* the song's tempo scaled */
 	void (*eject)(void *user);                            /* the disk is out: the list goes */
 	void (*settings)(void *user);                         /* a system function was stored */
+	void (*record)(void *user, bool on);                  /* MIDI IN taken down from now; off: the take is to be kept */
 } brush_actions_t;
 
 typedef struct brush
@@ -106,9 +108,10 @@ typedef struct brush
 	int transient;             /* 0 none, 1 the tempo, 2 the bar */
 	uint64_t transient_until;
 	brush_function_t function;
-	int countdown;             /* seconds left before the next song; 0 when not waiting */
+	int countdown;             /* seconds left before the song selected starts; 0 when not waiting */
 	uint64_t countdown_at;
-	int next;                  /* the song the countdown leads to */
+	bool recording;            /* REC: MIDI IN is being taken down, the display counting its bars */
+	uint64_t record_at;
 	int tempo;                 /* the tempo set by hand, or 0 for the song's own */
 	double tempo_factor;
 	uint64_t disk_until;       /* the DISK lamp is lit while the disk is being read */

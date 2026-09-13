@@ -111,6 +111,12 @@ void machine_set_tempo(machine_t *mc, double factor);
 /* the Sound Brush in front of the player (off by default): each song's title goes to the module's
  * display before it, as the Brush sends it, and a pause holds the song alone */
 void machine_set_brush(machine_t *mc, bool on);
+/* The recorder: on, what the machine's MIDI INs take is kept, stamped on the sample clock (a
+ * new recording each time it goes on); machine_recording is the recording so far as a Standard
+ * MIDI File (play/smf.h's smf_write_takes: 120 beats a minute, a track per port), the caller's
+ * to free, or NULL with nothing taken. */
+void machine_record(machine_t *mc, bool on);
+uint8_t *machine_recording(machine_t *mc, size_t *size);
 void machine_button(machine_t *mc, scemu_button_t b, bool down);
 void machine_dial(machine_t *mc, int steps);           /* the value dial, positive clockwise */
 /* the same, ms of the machine's own time later (a boot the host does not
