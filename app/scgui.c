@@ -51,12 +51,13 @@ typedef struct app
 	int current;               /* index in songs, or -1 */
 	bool paused;
 	controls_t ctl;            /* the panel under the pointer; the power switch's state is its */
-	/* the Sound Brush: the SB-55's panel in a window of its own, driving the list and the player */
+	/* the Sound Brush: the SB-55's panel docked above the module's, driving the list and the player */
 	brush_t brush;
 	panel_t *brush_panel;
 	uint32_t *brush_frame;
-	GtkWidget *brush_window, *brush_area;
-	bool brush_engaged;        /* its window is open: it runs the list; closed, the list runs as it always did */
+	GtkWidget *column;         /* the window's child: the Brush's panel over the module's */
+	GtkWidget *brush_area;
+	bool brush_engaged;        /* its panel is shown: it runs the list; hidden, the list runs as it always did */
 	int brush_pressed;         /* the element under the held left button, or -1 */
 	panel_set_t brush_queued, brush_held;   /* elements the right button queues for the next key, or holds down */
 	double brush_x, brush_y;   /* the pointer over the Brush, in its window's pixels */
@@ -295,6 +296,7 @@ static gboolean macro_done(gpointer user);
 static void panel_rebuild(app_t *app, panel_model_t model, int size);
 static void menu_append(GMenu *menu, const char *label, const char *action, int parameter);
 static void brush_show(app_t *app);
+static void brush_toggle(app_t *app);
 static void brush_resize(app_t *app);
 static void brush_press(app_t *app, brush_key_t key);
 
@@ -1443,7 +1445,7 @@ static void on_menu_open(GSimpleAction *a, GVariant *parameter, gpointer user)
 	if (!strcmp(what, "playlist"))
 		playlist_show(app);
 	else if (!strcmp(what, "brush"))
-		brush_show(app);
+		brush_toggle(app);
 	else if (!strcmp(what, "audio"))
 		settings_show(app, SETTINGS_TAB_AUDIO);
 	else if (!strcmp(what, "interface"))
@@ -1838,7 +1840,7 @@ static int brush_pitch_for(const app_t *app)
 	return app->size >= SIZE_LARGE || app->scale > 1 ? 16 : 8;
 }
 
-/* the Brush's window is as wide as the module's, whatever the module: its frame is scaled to fit */
+/* the Brush's panel is as wide as the module's, whatever the module: its frame is scaled to fit */
 static double brush_scale(const app_t *app)
 {
 	double logical = (double)panel_width(app->panel) / app->scale;
@@ -1864,7 +1866,7 @@ static void brush_draw(GtkDrawingArea *area, cairo_t *cr, int width, int height,
 
 static void brush_resize(app_t *app)
 {
-	if (!app->brush_window)
+	if (!app->brush_area)
 		return;
 	int pitch = brush_pitch_for(app);
 	if (!app->brush_panel || panel_pitch(app->brush_panel) != pitch)
@@ -1981,15 +1983,14 @@ static void on_brush_motion(GtkEventControllerMotion *c, double x, double y, gpo
 	app->brush_y = y;
 }
 
-static gboolean on_key(GtkEventControllerKey *c, guint keyval, guint keycode, GdkModifierType mods, gpointer user);
-
-/* The window closed: the list runs as it always did from here, with the song and the pause as the
+/* The panel hidden: the list runs as it always did from here, with the song and the pause as the
  * Brush left them; a song it was about to start after its interval starts now, and the title
  * message stops. */
-static gboolean on_brush_close(GtkWindow *w, gpointer user)
+static void brush_hide(app_t *app)
 {
-	app_t *app = user;
-	gtk_widget_set_visible(GTK_WIDGET(w), FALSE);
+	if (!app->brush_engaged)
+		return;
+	gtk_widget_set_visible(app->brush_area, FALSE);
 	app->brush_engaged = false;
 	machine_set_brush(app->mc, false);
 	app->paused = app->brush.paused;
@@ -1998,7 +1999,6 @@ static gboolean on_brush_close(GtkWindow *w, gpointer user)
 		play_index(app, app->brush.next);
 	app->cfg.sb55_window = false;
 	config_touch(app);
-	return TRUE;
 }
 
 /* the Brush takes the list as it stands */
@@ -2013,43 +2013,45 @@ static void brush_engage(app_t *app)
 	brush_tick_app(app);
 }
 
+/* The Brush's panel above the module's, in the module's window: a toolkit window cannot be placed
+ * beside another or made to follow it (nor on Wayland at all), so the two stack in one, and the
+ * window grows and shrinks with the panel shown or hidden. */
 static void brush_show(app_t *app)
 {
-	if (!app->brush_window)
+	if (!app->brush_area)
 	{
-		GtkWidget *w = gtk_window_new();
-		gtk_window_set_title(GTK_WINDOW(w), "Sound Brush");
-		gtk_window_set_transient_for(GTK_WINDOW(w), GTK_WINDOW(app->window));
-		gtk_window_set_hide_on_close(GTK_WINDOW(w), TRUE);
-		gtk_window_set_resizable(GTK_WINDOW(w), FALSE);
-		g_signal_connect(w, "close-request", G_CALLBACK(on_brush_close), app);
 		app->brush_area = gtk_drawing_area_new();
 		gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(app->brush_area), brush_draw, app, NULL);
-		gtk_window_set_child(GTK_WINDOW(w), app->brush_area);
 		GtkEventController *buttons = gtk_event_controller_legacy_new();
 		g_signal_connect(buttons, "event", G_CALLBACK(on_brush_button), app);
 		gtk_widget_add_controller(app->brush_area, buttons);
 		GtkEventController *motion = gtk_event_controller_motion_new();
 		g_signal_connect(motion, "motion", G_CALLBACK(on_brush_motion), app);
 		gtk_widget_add_controller(app->brush_area, motion);
-		GtkEventController *key = gtk_event_controller_key_new();
-		g_signal_connect(key, "key-pressed", G_CALLBACK(on_key), app);
-		gtk_widget_add_controller(w, key);
 		GtkDropTarget *drop = gtk_drop_target_new(GDK_TYPE_FILE_LIST, GDK_ACTION_COPY);
 		g_signal_connect(drop, "drop", G_CALLBACK(on_files_dropped), app);
 		gtk_widget_add_controller(app->brush_area, GTK_EVENT_CONTROLLER(drop));
-		app->brush_window = w;
+		gtk_box_prepend(GTK_BOX(app->column), app->brush_area);
 		brush_resize(app);
 		if (!app->brush_panel)
 		{
 			fprintf(stderr, "scgui: no panel artwork for the Sound Brush\n");
+			gtk_widget_set_visible(app->brush_area, FALSE);
 			return;
 		}
 	}
+	gtk_widget_set_visible(app->brush_area, TRUE);
 	brush_engage(app);
 	app->cfg.sb55_window = true;
 	config_touch(app);
-	gtk_window_present(GTK_WINDOW(app->brush_window));
+}
+
+static void brush_toggle(app_t *app)
+{
+	if (app->brush_engaged)
+		brush_hide(app);
+	else
+		brush_show(app);
 }
 
 static gboolean on_tick(gpointer user)
@@ -2341,7 +2343,7 @@ static gboolean on_key(GtkEventControllerKey *c, guint keyval, guint keycode, Gd
 		playlist_show(app);
 		return TRUE;
 	case GDK_KEY_b:
-		brush_show(app);
+		brush_toggle(app);
 		return TRUE;
 	case GDK_KEY_q:
 	case GDK_KEY_Escape:
@@ -2460,7 +2462,9 @@ int main(int argc, char **argv)
 	app.area = gtk_drawing_area_new();
 	gtk_widget_set_size_request(app.area, w / app.scale, h / app.scale);
 	gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(app.area), draw, &app, NULL);
-	gtk_window_set_child(GTK_WINDOW(app.window), app.area);
+	app.column = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_append(GTK_BOX(app.column), app.area);
+	gtk_window_set_child(GTK_WINDOW(app.window), app.column);
 	gtk_window_set_resizable(GTK_WINDOW(app.window), FALSE);
 
 	GtkEventController *buttons = gtk_event_controller_legacy_new();
@@ -2485,7 +2489,7 @@ int main(int argc, char **argv)
 	machine_set_gain(app.mc, app.ctl.knob * app.ctl.knob);
 	set_title(&app);   /* the title carries the power, which controls_init has only just set */
 	gtk_window_present(GTK_WINDOW(app.window));
-	/* the Brush; with its window open from the last time, the files on the command line are its
+	/* the Brush; with its panel shown from the last time, the files on the command line are its
 	 * disk and play whatever auto play says, otherwise the first one plays as it always did */
 	brush_init(&app.brush, &brush_actions, &app);
 	app.brush.interval = app.cfg.sb55_interval;
@@ -2525,8 +2529,6 @@ int main(int argc, char **argv)
 		gtk_widget_unparent(app.system_popover);
 		g_object_unref(app.system_model_action);
 	}
-	if (app.brush_window)
-		gtk_window_destroy(GTK_WINDOW(app.brush_window));
 	gtk_window_destroy(GTK_WINDOW(app.window));
 	free(app.frame);
 	free(app.brush_frame);

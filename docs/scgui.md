@@ -3,7 +3,7 @@
 The Sound Canvas on the desktop: the machine's front panel in a window (the SC-88's, the SC-88VL's, the
 SC-88Pro's, the SC-8850's, the SC-55mkII's or the SC-55's, following the System choice; the VE-GS Pro, which has no
 panel, wears the Pro's), playing Standard MIDI Files from a playlist, with the panel's buttons under
-the mouse -- and, in a second window, the Sound Brush, Roland's floppy player of the SC-55's day, whose
+the mouse -- and, docked above it, the Sound Brush, Roland's floppy player of the SC-55's day, whose
 keys and display drive that playlist ("The Sound Brush" below).
 
     scgui [options] [file.mid ...]
@@ -81,14 +81,14 @@ machine.  Files on the command line become the playlist and the first one plays.
   response time would swallow (`docs/lcd.md`).
 
 Keys, in every window: `space` pause, `s` stop, `n` / `p` next and previous song, `l` the playlist, `b`
-the Sound Brush, `q` quit.  While the Brush's window is open they are its keys (PAUSE, or PLAY when
+the Sound Brush, `q` quit.  While the Brush's panel is shown they are its keys (PAUSE, or PLAY when
 nothing plays; STOP; SONG ▶ and ◀), so they follow its modes.
 
 ## The playlist
 
 A separate window: add files (the file chooser takes several at once), previous / pause / stop /
 next, clear.  Double-click a row to play it; when a song ends the next one starts, and a list that was
-empty starts playing when its first file arrives.  While the Sound Brush's window is open (below) the
+empty starts playing when its first file arrives.  While the Sound Brush's panel is shown (below) the
 list is the Brush's disk instead: what plays after a song ends, and after how long, is the Brush's
 business -- the next song after its interval, four seconds by default, and a stop at the end of the list
 unless REPT is on -- and the toolbar's buttons are its keys, previous and next SONG ◀ ▶ (which switch at
@@ -113,14 +113,16 @@ file from playlist**; removing the song that is playing stops it, the way the st
 The SB-55 Sound Brush was Roland's floppy-disk MIDI file player, the SC-55's case with a drive in it,
 made to sit under a Sound Canvas and drive it: a three-digit display, a song number, PLAY, STOP, PAUSE,
 REW and FF, and modes for the disk.  Here it is the front of the playlist: **Sound Brush** on the logo
-menu, or `b`, opens its panel in a window of its own, as wide as the module's window so the two stack
-as the units did, and while that window is open the playlist is the disk in its slot -- a disk is in while
-the list holds a song, the song number is the row, and the Brush's keys work the list and the player.
-It behaves as the real unit's firmware does, measured on the MAME driver of the machine
-(`docs/panel/README.md`, "The SB-55's behaviour, measured", in the project), without the recorder.
-Close the window and the list runs as it always did, from the song and the pause the Brush left it
-at; open it again and the Brush takes the list as it stands, its modes and settings as they were.
-While it is open each song is also preceded by its title on the module's display, as the SB-55
+menu, or `b`, shows its panel above the module's in the same window, as wide as the module's panel
+whatever the model, so the two stack as the units did and move together (a window cannot be placed
+beside another or made to follow it on Wayland, so they share one), and while that panel is shown the
+playlist is the disk in its slot -- a disk is in while the list holds a song, the song number is the
+row, and the Brush's keys work the list and the player.  It behaves as the real unit's firmware does,
+measured on the MAME driver of the machine (`docs/panel/README.md`, "The SB-55's behaviour, measured",
+in the project), without the recorder.  **Sound Brush** or `b` again hides the panel, and the list runs
+as it always did from there, from the song and the pause the Brush left it at; show it again and the
+Brush takes the list as it stands, its modes and settings as they were.
+While it is shown each song is also preceded by its title on the module's display, as the SB-55
 sends it (the sequence name at the head of the file's first track, in the Sound Canvas display
 message).
 
@@ -140,7 +142,7 @@ message).
 - **PLAY**, **STOP**, **PAUSE**: PLAY lights while a song plays, PAUSE beside it while it is paused
   and PLAY or PAUSE goes on -- and a pause here holds the song alone, the module running on (its
   reverb rings out, the display keeps moving, MIDI IN still plays), where the playlist's pause with the
-  Brush's window closed stands the whole machine still; STOP silences and, with auto rewind on, goes back to the start, otherwise
+  Brush hidden stands the whole machine still; STOP silences and, with auto rewind on, goes back to the start, otherwise
   PLAY goes on from where it stopped.  **REW** and **FF** held step through the bars, one at once, the
   next after half a second and then eight a second, silent meanwhile, and the song goes on from the
   new bar when the key comes up, with the controllers, programs and system exclusives it had set before
@@ -266,7 +268,7 @@ the nine MIDI ties by the device's name, the message before each song, the instr
 map, the MIDI speed, the computer switch of each system (`computer_sc88`, `computer_sc88vl`,
 `computer_sc88pro`, `computer_sc8820`, `computer_sc8850` and `computer_sc55mk2`, each `midi`, `pc1`,
 `pc2` or `mac`, with `usb` taken as the SC-8850's and the SC-8820's word for the last), whether the
-settings memory is kept, the tail, and the Sound Brush's: whether its window is open (`sb55_window`)
+settings memory is kept, the tail, and the Sound Brush's: whether its panel is shown (`sb55_window`)
 and its three system functions (`sb55_interval`, `sb55_auto_play`, `sb55_auto_rewind`).
 It is read at start, written a moment after a setting changes, and written again on exit.  An option
 on the command line overrides the file for that run and does not change it.  The file is `key = value` text with `#` comments; a
