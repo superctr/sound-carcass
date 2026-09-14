@@ -2294,6 +2294,9 @@ static void brush_place(app_t *app)
 			gtk_widget_set_visible(area, TRUE);
 			gtk_window_present(GTK_WINDOW(app->brush_window));
 		}
+		/* the toolkit keeps a hidden widget's last measurement through a size request set while it was
+		 * hidden (the module's panel changed with the Brush away), and shows it at the old size */
+		gtk_widget_queue_resize(area);
 	}
 }
 
