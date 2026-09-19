@@ -49,8 +49,9 @@ typedef struct smf
 	uint64_t last_tick;       /* the end of the track, or of the last one in a type 1 file */
 	char name[128];
 	/* the sequence name as the file spells it, for a display that takes bytes: the first
-	 * track's name at its first tick, padded with spaces; empty when there is none */
+	 * track's name at its first tick, neither decoded nor padded, cut at 32 bytes */
 	char raw_name[32];
+	uint8_t raw_name_length;  /* 0 when the file names no sequence */
 	uint8_t ports;
 	uint16_t tracks;          /* the tracks the file holds */
 	smf_meter_t *meters;
@@ -65,6 +66,12 @@ typedef struct smf
 
 int smf_load(smf_t *s, const char *path, uint32_t rate);
 void smf_free(smf_t *s);
+
+/* The song's title for a display that takes ASCII, at most `size` characters: the sequence name
+ * the file spells, when it spells one and the display can show every character of it, else the
+ * file's own name without its directory or its extension, a question mark for each character it
+ * cannot show.  Returns the length written. */
+size_t smf_display_title(const smf_t *s, const char *path, char *out, size_t size);
 
 /* Bars are counted from 1 at the start, from the time signatures (4/4 before the first, and
  * when there are none); a tick is in the bar it falls in, so the end of a song of four whole

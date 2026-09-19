@@ -108,8 +108,8 @@ static int parse_track(smf_t *s, unsigned track, const uint8_t *p, const uint8_t
 				take_title(s->name, sizeof(s->name), p, length);
 				if (track == 0 && tick == 0)
 				{
-					memset(s->raw_name, ' ', sizeof(s->raw_name));
-					memcpy(s->raw_name, p, length < sizeof(s->raw_name) ? length : sizeof(s->raw_name));
+					s->raw_name_length = (uint8_t)(length < sizeof(s->raw_name) ? length : sizeof(s->raw_name));
+					memcpy(s->raw_name, p, s->raw_name_length);
 				}
 			}
 			else if (type == 0x01 && track == 0 && !text[0] && length)
@@ -328,6 +328,46 @@ static const smf_meter_t *meter_at(const smf_t *s, uint64_t tick, uint32_t *firs
 	*first_bar = bar;
 	*from = start;
 	return m;
+}
+
+/* a character an ASCII display takes, and a system exclusive message can carry */
+static bool display_char(uint8_t c)
+{
+	return c >= 0x20 && c < 0x7f;
+}
+
+size_t smf_display_title(const smf_t *s, const char *path, char *out, size_t size)
+{
+	size_t length = s->raw_name_length < size ? s->raw_name_length : size;
+	bool spelled = false;
+	for (size_t n = 0; n < length; n++)
+	{
+		if (!display_char((uint8_t)s->raw_name[n]))
+		{
+			spelled = false;
+			break;
+		}
+		if (s->raw_name[n] != ' ')
+			spelled = true;
+	}
+	if (spelled)
+	{
+		memcpy(out, s->raw_name, length);
+		return length;
+	}
+	const char *slash = strrchr(path, '/');
+	const char *name = slash ? slash + 1 : path;
+	const char *dot = strrchr(name, '.');
+	length = dot && dot != name ? (size_t)(dot - name) : strlen(name);
+	size_t at = 0;
+	for (size_t n = 0; n < length && at < size; n++)
+	{
+		uint8_t c = (uint8_t)name[n];
+		if ((c & 0xc0) == 0x80)   /* the rest of a UTF-8 sequence: one mark for the character */
+			continue;
+		out[at++] = display_char(c) ? (char)c : '?';
+	}
+	return at;
 }
 
 uint32_t smf_bar_at_tick(const smf_t *s, uint64_t tick)

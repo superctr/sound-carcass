@@ -124,9 +124,13 @@ measured on the MAME driver of the machine, but for the recorder, which is simpl
 `b` again hides the panel, and the list runs
 as it always did from there, from the song and the pause the Brush left it at; show it again and the
 Brush takes the list as it stands, its modes and settings as they were.
-While it is shown each song is also preceded by its title on the module's display, as the SB-55
-sends it (the sequence name at the head of the file's first track, in the Sound Canvas display
-message).
+While it is shown the song's title goes to the module's display whenever the song number changes --
+a SONG key, a disk going in, the list moving on -- as the SB-55 sends it: the sequence name at the
+head of the file's first track, in the Sound Canvas display message, its own bytes, cut at 32.  A
+song that names no sequence, or that names it in characters the display cannot show (Shift-JIS,
+which the SB-55 sends raw and which breaks the message), sends the file's name instead, without its
+extension and with a question mark for each character that cannot be shown.  A reset message, when
+one is chosen, clears the display, so the title follows it at the start of each song as well.
 
 - **The slot** takes files: drop Standard MIDI Files on the window, or click the slot for the file
   chooser.  **EJECT** takes the disk out, which clears the list.  **MIDI IN 2** opens the playlist

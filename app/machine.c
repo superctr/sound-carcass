@@ -68,7 +68,9 @@ struct machine
 	uint32_t *track_sectors;  /* the sectors of each track read so far, the first with the song */
 	uint64_t reads;           /* the sectors read since the song was loaded, beyond each track's first */
 	double tempo_factor;
-	bool brush;               /* the Sound Brush is in front: the title before each song, a pause holds the song alone */
+	bool brush;               /* the Sound Brush is in front: the title with the song number, a pause holds the song alone */
+	char title[32];           /* what the module's display is to show for the song loaded */
+	uint8_t title_length;
 	size_t next_event;
 	float gain;
 	machine_reset_t reset;
@@ -284,6 +286,7 @@ static void unload_song(machine_t *mc)
 	free(mc->track_sectors);
 	mc->track_sectors = NULL;
 	mc->reads = 0;
+	mc->title_length = 0;
 	mc->have_smf = mc->playing = mc->paused = mc->song_started = mc->chase_pending = false;
 	mc->pos = mc->end_frame = 0;
 	mc->pos_frac = 0;
@@ -334,26 +337,27 @@ static void load_song(machine_t *mc, const char *path)
 	size_t msg_size;
 	mc->lead = machine_reset_message(mc->reset, &msg_size) ? mc->rate / 4 : 0;
 	mc->end_frame = (uint64_t)mc->smf.last_frame + mc->lead + (uint64_t)(mc->opt.tail * mc->rate);
+	mc->title_length = (uint8_t)smf_display_title(&mc->smf, path, mc->title, sizeof(mc->title));
 	set_song(mc, session_base_name(path), mc->smf.name);
 }
 
-/* The song's title on the module's display, as the Sound Brush sends it: the Sound Canvas
- * display message with the sequence name the file spells at its first tick. */
+/* The song's title on the module's display, as the Sound Brush sends it when the song number
+ * changes: the Sound Canvas display message, the name's own bytes, neither padded nor cut
+ * short of 32. */
 static void send_title(machine_t *mc)
 {
-	if (!mc->smf.raw_name[0])
+	if (!mc->title_length)
 		return;
 	uint8_t msg[8 + 32 + 2] = { 0xf0, 0x41, 0x10, 0x45, 0x12, 0x10, 0x00, 0x00 };
 	unsigned sum = 0x10;
-	for (int n = 0; n < 32; n++)
+	for (unsigned n = 0; n < mc->title_length; n++)
 	{
-		uint8_t c = (uint8_t)mc->smf.raw_name[n] & 0x7f;
-		msg[8 + n] = c < 0x20 ? ' ' : c;
+		msg[8 + n] = (uint8_t)mc->title[n];
 		sum += msg[8 + n];
 	}
-	msg[40] = (uint8_t)((128 - sum % 128) % 128);
-	msg[41] = 0xf7;
-	send_both(mc, msg, sizeof(msg));
+	msg[8 + mc->title_length] = (uint8_t)((128 - sum % 128) % 128);
+	msg[9 + mc->title_length] = 0xf7;
+	send_both(mc, msg, 10u + mc->title_length);
 }
 
 /* the first event at or after a position on the song's clock */
@@ -532,8 +536,8 @@ static void chase(machine_t *mc)
 
 static void quiet(machine_t *mc);
 
-/* the loaded song from a frame of its clock: the reset and the title first, and the
- * chase owed when it is not the start */
+/* the loaded song from a frame of its clock: the reset first, with the title after it
+ * where it cleared the display, and the chase owed when it is not the start */
 static void start_song(machine_t *mc, uint64_t frame)
 {
 	if (!mc->have_smf)
@@ -544,7 +548,7 @@ static void start_song(machine_t *mc, uint64_t frame)
 	const uint8_t *msg = machine_reset_message(mc->reset, &msg_size);
 	if (msg)
 		send_both(mc, msg, msg_size);
-	if (mc->brush)
+	if (mc->brush && msg)   /* the reset cleared the display the song number had written */
 		send_title(mc);
 	uint64_t end = (uint64_t)mc->smf.last_frame + mc->lead;
 	mc->pos = frame < end ? frame : end;
@@ -663,6 +667,8 @@ static void handle(machine_t *mc, const command_t *c)
 		{
 			finish_boot(mc);
 			load_song(mc, c->path);
+			if (mc->brush && mc->have_smf)
+				send_title(mc);
 		}
 		break;
 	case CMD_START:
