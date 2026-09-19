@@ -1788,10 +1788,11 @@ static void e_prologue(jit_builder_t *b)
 	sljit_emit_op1(b->c, SLJIT_MOV_P, XP_REG_ERAM, 0, CELL(eram));
 }
 
+/* a target outside the store parks the program counter: -1, the frame's remaining cycles fetch nothing */
 static int branch_target(int pc, uint16_t cram)
 {
 	const int target = bit(cram, 9) ? pc + 1 + (int8_t)cram : (cram & 0xff);
-	return ((target % XP_DSP_SLOTS) + XP_DSP_SLOTS) % XP_DSP_SLOTS;
+	return (target >= 0 && target < XP_DSP_SLOTS) ? target : -1;
 }
 
 static sljit_s32 branch_condition(uint16_t cram)
@@ -1854,7 +1855,7 @@ static bool compile_by_pc(xp_t *xp, int parity)
 				jumps[jump_count++] = (block_jump_t){ sljit_emit_cmp(b.c, condition, XP_REG_ACC, 0, SLJIT_IMM, 0), branch_target(pc, s->cram) };
 		}
 		if (pc == XP_DSP_SLOTS - 1)
-			jumps[jump_count++] = (block_jump_t){ sljit_emit_jump(b.c, SLJIT_JUMP), 0 };
+			jumps[jump_count++] = (block_jump_t){ sljit_emit_jump(b.c, SLJIT_JUMP), -1 };
 	}
 	struct sljit_label *done = sljit_emit_label(b.c);
 	e_store(&b, CELL(dsp.acc), XP_REG_ACC);
