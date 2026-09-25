@@ -232,7 +232,7 @@ static void set_error(machine_t *mc, const char *text)
  * behind it is not shared with another thread's load */
 static void set_rom_info(machine_t *mc)
 {
-	unsigned models = scplay_roms_available(mc->opt.rom, mc->opt.exe_dir);
+	unsigned models = scplay_roms_available(mc->opt.roms);
 	pthread_mutex_lock(&mc->lock);
 	mc->models = models;
 	mc->info.model = unit_model(mc->unit);
@@ -989,7 +989,7 @@ machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size)
 	if (!mc)
 		return NULL;
 	mc->opt = *o;
-	mc->unit = unit_open(o->model, o->rom, o->exe_dir, o->no_cache, o->keep_settings, err, err_size);
+	mc->unit = unit_open(o->model, o->roms, o->no_cache, o->keep_settings, err, err_size);
 	if (!mc->unit)
 	{
 		free(mc);

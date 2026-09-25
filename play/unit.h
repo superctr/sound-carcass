@@ -17,6 +17,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "scemu.h"
+#include "roms.h"
 #include "session.h"
 
 typedef struct unit unit_t;
@@ -31,10 +32,10 @@ typedef struct unit_panel
 	bool power;
 } unit_panel_t;
 
-/* Loads the ROMs (model_name NULL for the best set found, rom_path --rom or
- * NULL, exe_dir where to look beside the program) and creates the machine,
- * off, its rear switch on MIDI.  NULL with a message in err. */
-unit_t *unit_open(const char *model_name, const char *rom_path, const char *exe_dir,
+/* Loads the ROMs (model_name NULL for the best set found, source where from,
+ * NULL for the usual places; the unit keeps a copy for switching models) and
+ * creates the machine, off, its rear switch on MIDI.  NULL with a message in err. */
+unit_t *unit_open(const char *model_name, const scplay_rom_source_t *source,
                   bool no_cache, bool keep_settings, char *err, size_t err_size);
 /* The rear switch, before the first boot: the firmware reads it then and
  * never again, and the boot cache is kept per position.  Ignored once the

@@ -213,6 +213,7 @@ typedef struct options
 	const char *model;
 	const char *wav;
 	const char *rom;
+	const char *control, *internal, *wave;   /* the model's own files, whatever their CRCs */
 	const char *audio_device;
 	unsigned audio_block;
 	uint32_t audio_rate;
@@ -263,6 +264,12 @@ static void usage(FILE *fp)
 	        "  --model sc88|sc88pro|sc88vl|sc8850|sc8820|sc55mk2|sc55\n"
 	        "                                machine to emulate (default sc88pro)\n"
 	        "  --rom PATH                    a zip or a directory holding the ROM images (any names)\n"
+	        "  --control FILE                take FILE as the model's control ROM, whatever its CRC\n"
+	        "                                (needs --model)\n"
+	        "  --internal FILE               take FILE as the model's CPU ROM (SC-55, SC-55mkII,\n"
+	        "                                SC-8820, SC-8850), whatever its CRC (needs --model)\n"
+	        "  --wave FILE                   take FILE as the model's wave ROMs, descrambled and\n"
+	        "                                joined into one file, whatever its CRC (needs --model)\n"
 	        "  --wav FILE                    also write what is played, 16-bit stereo at the\n"
 	        "                                rate --rate chose\n"
 	        "  --no-audio                    render as fast as the host allows, no sound card\n"
@@ -308,6 +315,12 @@ static int parse_options(int argc, char **argv, options_t *o)
 			o->model = argv[++n];
 		else if (!strcmp(a, "--rom") && n + 1 < argc)
 			o->rom = argv[++n];
+		else if (!strcmp(a, "--control") && n + 1 < argc)
+			o->control = argv[++n];
+		else if (!strcmp(a, "--internal") && n + 1 < argc)
+			o->internal = argv[++n];
+		else if (!strcmp(a, "--wave") && n + 1 < argc)
+			o->wave = argv[++n];
 		else if (!strcmp(a, "--wav") && n + 1 < argc)
 			o->wav = argv[++n];
 		else if (!strcmp(a, "--tail") && n + 1 < argc)
@@ -386,6 +399,11 @@ static int parse_options(int argc, char **argv, options_t *o)
 		usage(stderr);
 		return -1;
 	}
+	if ((o->control || o->internal || o->wave) && !o->model)
+	{
+		fprintf(stderr, "scplay: --control, --internal and --wave need --model\n");
+		return -1;
+	}
 	return 1;
 }
 
@@ -453,12 +471,17 @@ int main(int argc, char **argv)
 	char exe_dir[PATH_MAX];
 	session_exe_directory(argv[0], exe_dir, sizeof(exe_dir));
 
+	static scplay_rom_source_t source;
+	scplay_rom_source_init(&source, opt.rom, exe_dir);
+	if (opt.model)
+		scplay_rom_source_override(&source, opt.model, opt.control, opt.internal, opt.wave);
+
 	char err[512];
 	scplay_roms_t roms;
-	if (!scplay_roms_load(&roms, opt.model, opt.rom, exe_dir, err, sizeof(err)))
+	if (!scplay_roms_load(&roms, opt.model, &source, err, sizeof(err)))
 	{
 		fprintf(stderr, "scplay: %s\n", err);
-		if (strncmp(err, "unknown model", 13) != 0)
+		if (strncmp(err, "unknown model", 13) != 0 && !strstr(err, "override"))
 			fprintf(stderr, "scplay: put the dumps, zipped or loose and under any names, beside"
 			                " the program or in ~/.mame/roms, or give --rom\n");
 		return 1;

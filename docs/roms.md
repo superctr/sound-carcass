@@ -46,6 +46,21 @@ Where both a machine's own chips and a descrambled file are there, the chips are
 
 The SC-55 and SC-55mkII files are their chips back to back, without the mirrors the boards make of them.
 
+## Overrides
+
+A file can also be named as a machine's control ROM, as its CPU's internal ROM, or as its wave ROMs,
+and it is then taken whatever its CRC: a modified firmware, a CPU ROM of your own build, or a wave dump
+not in the table above.  Only the size is checked — the control ROM's and internal ROM's sizes are the
+ones in the tables below, and a wave file is descrambled and joined, of a size in the table above.
+The internal ROM is the SC-55's, the SC-55mkII's, the SC-8820's and the SC-8850's; the 88 family's
+CPU has none to name.  A control ROM is taken in the byte order of the newest dump listed.  A named
+file that is missing or of the wrong size stops that machine with the file's name in the message,
+rather than falling back on the images found.
+
+scplay and scgui take them as `--control`, `--internal` and `--wave` with `--model`; scgui and the
+plugin also read them from scgui's settings file, as `control_`, `internal_` and `wave_` followed by
+the system's name (`wave_sc88vl = "/home/me/roms/sc88vl-wave.bin"`).
+
 ## SC-55
 
 Five images: the control program, the main CPU's own internal ROM and the three wave ROMs.  The control

@@ -14,7 +14,8 @@ where the host looks: `~/.clap/` or `/usr/lib/clap/` on Linux.  A host that runs
 
 The ROM images are found the way the players find them (`roms.md`): recognised by content, in any zip
 or directory beside the plugin file or in `~/.mame/roms`, or under the path in the `SCEMU_ROMS`
-environment variable.  An instrument whose set is not there loads all the same and stays silent; the
+environment variable, or else the `rom` of scgui's settings file.  The files that file names as a
+system's own control ROM, internal ROM or wave ROMs are taken too, whatever their CRCs.  An instrument whose set is not there loads all the same and stays silent; the
 host's log says which set is missing.
 
 ## What the host sees

@@ -27,6 +27,9 @@
 #include "unit.h"
 #include "resample.h"
 #include "roms.h"
+#ifdef SCEMU_HAVE_CONFIG
+#include "config.h"
+#endif
 #include "window.h"
 
 #define VENDOR "SoundCarcass"
@@ -67,6 +70,7 @@ static const char *const features[] = { CLAP_PLUGIN_FEATURE_INSTRUMENT, CLAP_PLU
                                         CLAP_PLUGIN_FEATURE_STEREO, NULL };
 static clap_plugin_descriptor_t descriptors[MODEL_COUNT];
 static char plugin_dir[1024];    /* where the host loaded us from: ROMs are looked for beside it */
+static scplay_rom_source_t rom_source;   /* SCEMU_ROMS, the directory above, and scgui's settings file */
 
 /* ---------------------------------------------------------------- parameters */
 
@@ -569,12 +573,12 @@ static bool plugin_init(const clap_plugin_t *plugin)
 	in->host_params = in->host->get_extension(in->host, CLAP_EXT_PARAMS);
 	in->host_gui = in->host->get_extension(in->host, CLAP_EXT_GUI);
 	in->host_timer = in->host->get_extension(in->host, CLAP_EXT_TIMER_SUPPORT);
-	const char *rom_path = getenv("SCEMU_ROMS");
-	in->unit = unit_open(in->info->name, rom_path, plugin_dir[0] ? plugin_dir : NULL, false, false,
+	in->unit = unit_open(in->info->name, &rom_source, false, false,
 	                     in->rom_error, sizeof in->rom_error);
 	if (!in->unit)
 	{
-		logf_(in, CLAP_LOG_WARNING, "%s: %s (put the ROM set beside the plugin, in ~/.mame/roms, or name it in SCEMU_ROMS)",
+		logf_(in, CLAP_LOG_WARNING, "%s: %s (put the ROM set beside the plugin, in ~/.mame/roms, or name it in SCEMU_ROMS"
+		      " or in scgui's settings)",
 		      in->info->label, in->rom_error);
 		return true;   /* the instance stands, silent, and its window will say why */
 	}
@@ -1268,6 +1272,20 @@ static bool entry_init(const char *plugin_path)
 		else
 			plugin_dir[0] = 0;
 	}
+	scplay_rom_source_init(&rom_source, getenv("SCEMU_ROMS"), plugin_dir);
+#ifdef SCEMU_HAVE_CONFIG
+	static scgui_config_t cfg;
+	char path[1024], complaint[256];
+	config_defaults(&cfg);
+	if (config_path(path, sizeof path) && config_load(&cfg, path, complaint, sizeof complaint))
+	{
+		if (!rom_source.path[0])
+			snprintf(rom_source.path, sizeof rom_source.path, "%s", cfg.rom);
+		for (int n = 0; n < CONFIG_SYSTEMS; n++)
+			scplay_rom_source_override(&rom_source, config_system_names[n], cfg.control[n], cfg.internal[n],
+			                           cfg.wave[n]);
+	}
+#endif
 	return true;
 }
 

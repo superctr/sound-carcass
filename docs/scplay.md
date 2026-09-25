@@ -19,6 +19,9 @@ and starts instantly on later runs.
 |---|---|
 | `--model sc88 \| sc88vl \| sc88pro \| sc8850 \| sc8820 \| sc55mk2 \| sc55` | which machine (default `sc88pro`) |
 | `--rom PATH` | a zip or a directory holding the ROM images, whatever they are named, searched before the usual places |
+| `--control FILE` | take `FILE` as the model's control ROM whatever its CRC, only its size checked ([roms.md](roms.md)); needs `--model` |
+| `--internal FILE` | the same for the CPU's internal ROM of the SC-55, the SC-55mkII, the SC-8820 and the SC-8850 |
+| `--wave FILE` | the same for the wave ROMs, as one descrambled, joined file |
 | `--wav FILE` | also write what is played, 16-bit stereo at the rate `--rate` chose: by default the machine's own, 32 kHz, 66206 Hz on the SC-55mkII and 64000 Hz on the SC-55 |
 | `--no-audio` | render as fast as the host allows and open no sound card; for `--wav` |
 | `--audio-device NAME` | play on the output device whose name holds `NAME` (any case) instead of the host's default; `--audio-device list` prints them and exits |

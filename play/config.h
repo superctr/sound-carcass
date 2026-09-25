@@ -8,6 +8,7 @@
  *     # the machine: which module, where its ROMs are, and what it remembers
  *     model = "sc88pro"
  *     rom = "/home/me/roms/sc88pro.zip"
+ *     wave_sc88vl = "/home/me/roms/sc88vl-wave.bin"
  *     map = "native"
  *     keep_settings = no
  *     boot_animation = no
@@ -66,7 +67,10 @@ enum
 typedef struct scgui_config
 {
 	char model[16];          /* "sc88pro", "sc88", "sc88vl", "sc8850", "sc8820", "sc55mk2", "sc55"; "" = the best set found */
-	char rom[1024];          /* --rom: a zip or directory; "" = search the usual places */
+	char rom[512];           /* --rom: a zip or directory; "" = search the usual places */
+	char control[CONFIG_SYSTEMS][512];  /* a system's own control ROM file, taken whatever its CRC; "" = none */
+	char internal[CONFIG_SYSTEMS][512]; /* its CPU's internal ROM (SC-55, SC-55mkII, SC-8820, SC-8850), likewise */
+	char wave[CONFIG_SYSTEMS][512];     /* its wave ROMs as one descrambled, joined file, likewise */
 	int size;                /* the window size: 4 the small panel, 8 twice as large */
 	char audio_device[128];  /* PortAudio device name; "" = the default */
 	int audio_rate;          /* the rate to ask the device for: 0 the machine's own, or 32000, 44100, 48000 */
@@ -91,7 +95,12 @@ typedef struct scgui_config
 /* The keys are the field names, the five MIDI ports being midi_in_a,
  * midi_in_b, midi_out, song_a and song_b and the computer switches
  * computer_sc88, computer_sc88vl, computer_sc88pro, computer_sc8850,
- * computer_sc8820 and computer_sc55mk2. */
+ * computer_sc8820 and computer_sc55mk2.  The ROM files are control_ and wave_
+ * with a system's name, for every system the SC-55 included, and internal_ for
+ * the four with an internal ROM: sc55, sc55mk2, sc8820 and sc8850. */
+
+/* the systems' names, by row: "sc55", "sc55mk2", ... */
+extern const char *const config_system_names[CONFIG_SYSTEMS];
 
 void config_defaults(scgui_config_t *c);
 

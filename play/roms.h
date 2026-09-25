@@ -23,14 +23,39 @@ typedef struct scplay_roms
 	char origin[512];        /* the file the control ROM came from */
 } scplay_roms_t;
 
-/* model_name NULL means "try them all, best first"; rom_path is --rom, or NULL.
- * Returns 1 on success, 0 with a message in err. */
-int scplay_roms_load(scplay_roms_t *out, const char *model_name, const char *rom_path,
-                     const char *exe_dir, char *err, size_t err_size);
+/* Where a machine's ROMs come from.  Every string may be empty.  path is --rom,
+ * a zip or a directory, looked at before the usual places; exe_dir is the
+ * program's own directory, looked at too.  control, internal and wave name, per
+ * model, a file taken as its control ROM (in the byte order of the newest
+ * dump), one taken as its CPU's internal ROM (the SC-55s', the SC-8820's and
+ * the SC-8850's; ignored elsewhere) and one taken as its wave set, descrambled
+ * and joined, whatever their CRCs: only their sizes are checked. */
+#define SCPLAY_PATH_LEN 512
+
+typedef struct scplay_rom_source
+{
+	char path[SCPLAY_PATH_LEN];
+	char exe_dir[SCPLAY_PATH_LEN];
+	char control[SCEMU_MODEL_COUNT][SCPLAY_PATH_LEN];
+	char internal[SCEMU_MODEL_COUNT][SCPLAY_PATH_LEN];
+	char wave[SCEMU_MODEL_COUNT][SCPLAY_PATH_LEN];
+} scplay_rom_source_t;
+
+/* path and exe_dir may be NULL; no overrides */
+void scplay_rom_source_init(scplay_rom_source_t *s, const char *path, const char *exe_dir);
+/* a model's override files: "" for none, NULL leaves one as it is; false when
+ * the name is no model */
+bool scplay_rom_source_override(scplay_rom_source_t *s, const char *model_name, const char *control,
+                                const char *internal, const char *wave);
+
+/* model_name NULL means "try them all, best first"; source NULL means the usual
+ * places alone.  Returns 1 on success, 0 with a message in err. */
+int scplay_roms_load(scplay_roms_t *out, const char *model_name, const scplay_rom_source_t *source,
+                     char *err, size_t err_size);
 void scplay_roms_free(scplay_roms_t *r);
 
 /* Bit per scemu_model_t: the models whose complete set is there, no image read. */
-unsigned scplay_roms_available(const char *rom_path, const char *exe_dir);
+unsigned scplay_roms_available(const scplay_rom_source_t *source);
 
 const char *scplay_model_label(scemu_model_t model);
 const char *scplay_model_name(scemu_model_t model);

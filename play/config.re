@@ -45,6 +45,8 @@ static const char *const computer_words[] = { "midi", "pc1", "pc2", "mac", "usb"
 
 static const char group_machine[] = "the machine: which module, where its ROMs are, what it remembers"
                                    " and whether it boots in its own time";
+static const char group_roms[] = "your own ROM files, per system, taken whatever their CRCs: a control ROM, the"
+                                " CPU's internal ROM, and the wave ROMs descrambled and joined into one file";
 static const char group_window[] = "the window: 4 the small panel, 8 twice as large, and what the"
                                   " pointer's buttons do";
 static const char group_computer[] = "the rear COMPUTER switch of each system: midi, pc1, pc2, mac (usb on the SC-8850 and the SC-8820, whose pc2 is its Mac position)";
@@ -55,6 +57,8 @@ static const char group_song[] = "each song: the reset that precedes it and the 
 static const char group_sb55[] = "the Sound Brush: whether its window is open, and what its own SET functions hold --"
                                  " the seconds between songs, auto play, auto rewind";
 
+const char *const config_system_names[CONFIG_SYSTEMS] = { "sc55", "sc55mk2", "sc88", "sc88vl", "sc88pro", "sc8820", "sc8850" };
+
 #define FIELD(f) (unsigned short)offsetof(scgui_config_t, f), (unsigned short)sizeof(((scgui_config_t *)0)->f)
 
 static const config_key_t keys[] = {
@@ -63,6 +67,24 @@ static const config_key_t keys[] = {
 	{ "map",              SLOT_TEXT, FIELD(map),           0, 0,     map_words,      NULL,         group_machine },
 	{ "keep_settings",    SLOT_BOOL, FIELD(keep_settings), 0, 0,     NULL,           NULL,         group_machine },
 	{ "boot_animation",   SLOT_BOOL, FIELD(boot_animation), 0, 0,    NULL,           NULL,         group_machine },
+	{ "control_sc55",    SLOT_TEXT, FIELD(control[CONFIG_ROW_SC55]), 0, 0, NULL, NULL, group_roms },
+	{ "control_sc55mk2", SLOT_TEXT, FIELD(control[CONFIG_ROW_SC55MK2]), 0, 0, NULL, NULL, group_roms },
+	{ "control_sc88",    SLOT_TEXT, FIELD(control[CONFIG_ROW_SC88]), 0, 0, NULL, NULL, group_roms },
+	{ "control_sc88vl",  SLOT_TEXT, FIELD(control[CONFIG_ROW_SC88VL]), 0, 0, NULL, NULL, group_roms },
+	{ "control_sc88pro", SLOT_TEXT, FIELD(control[CONFIG_ROW_SC88PRO]), 0, 0, NULL, NULL, group_roms },
+	{ "control_sc8820",  SLOT_TEXT, FIELD(control[CONFIG_ROW_SC8820]), 0, 0, NULL, NULL, group_roms },
+	{ "control_sc8850",  SLOT_TEXT, FIELD(control[CONFIG_ROW_SC8850]), 0, 0, NULL, NULL, group_roms },
+	{ "internal_sc55",   SLOT_TEXT, FIELD(internal[CONFIG_ROW_SC55]), 0, 0, NULL, NULL, group_roms },
+	{ "internal_sc55mk2",SLOT_TEXT, FIELD(internal[CONFIG_ROW_SC55MK2]), 0, 0, NULL, NULL, group_roms },
+	{ "internal_sc8820", SLOT_TEXT, FIELD(internal[CONFIG_ROW_SC8820]), 0, 0, NULL, NULL, group_roms },
+	{ "internal_sc8850", SLOT_TEXT, FIELD(internal[CONFIG_ROW_SC8850]), 0, 0, NULL, NULL, group_roms },
+	{ "wave_sc55",       SLOT_TEXT, FIELD(wave[CONFIG_ROW_SC55]), 0, 0, NULL, NULL, group_roms },
+	{ "wave_sc55mk2",    SLOT_TEXT, FIELD(wave[CONFIG_ROW_SC55MK2]), 0, 0, NULL, NULL, group_roms },
+	{ "wave_sc88",       SLOT_TEXT, FIELD(wave[CONFIG_ROW_SC88]), 0, 0, NULL, NULL, group_roms },
+	{ "wave_sc88vl",     SLOT_TEXT, FIELD(wave[CONFIG_ROW_SC88VL]), 0, 0, NULL, NULL, group_roms },
+	{ "wave_sc88pro",    SLOT_TEXT, FIELD(wave[CONFIG_ROW_SC88PRO]), 0, 0, NULL, NULL, group_roms },
+	{ "wave_sc8820",     SLOT_TEXT, FIELD(wave[CONFIG_ROW_SC8820]), 0, 0, NULL, NULL, group_roms },
+	{ "wave_sc8850",     SLOT_TEXT, FIELD(wave[CONFIG_ROW_SC8850]), 0, 0, NULL, NULL, group_roms },
 	{ "computer_sc55mk2", SLOT_TEXT, FIELD(computer[CONFIG_ROW_SC55MK2]), 0, 0, computer_words, NULL, group_computer },
 	{ "computer_sc88",    SLOT_TEXT, FIELD(computer[CONFIG_ROW_SC88]),    0, 0, computer_words, NULL, group_computer },
 	{ "computer_sc88vl",  SLOT_TEXT, FIELD(computer[CONFIG_ROW_SC88VL]),  0, 0, computer_words, NULL, group_computer },

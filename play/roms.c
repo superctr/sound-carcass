@@ -5,6 +5,8 @@
  * CRC: a 64 KB image is taken for it when it carries that build's version
  * routine at the address the flash calls.  A descrambled wave set is known
  * only as one image joined in address order, never as separate chips.
+ * A model's control ROM, internal ROM and wave set can also be named
+ * outright, whatever their CRC; only their sizes are checked.
  *
  * Copyright (c) 2026 ian karlsson
  * SPDX-License-Identifier: BSD-3-Clause
@@ -144,6 +146,64 @@ static const model_def_t MODELS[] =
 };
 
 #define MODEL_COUNT ((int)(sizeof(MODELS) / sizeof(MODELS[0])))
+
+/* ---------------------------------------------------------------- overrides */
+
+static const char *control_override(const scplay_rom_source_t *s, const model_def_t *d)
+{
+	return s && s->control[d->model][0] ? s->control[d->model] : NULL;
+}
+
+static const char *wave_override(const scplay_rom_source_t *s, const model_def_t *d)
+{
+	return s && s->wave[d->model][0] ? s->wave[d->model] : NULL;
+}
+
+/* the CPU's own ROM, on the machines that have one */
+static const char *internal_override(const scplay_rom_source_t *s, const model_def_t *d)
+{
+	return s && d->boot_set != SET_NONE && s->internal[d->model][0] ? s->internal[d->model] : NULL;
+}
+
+static uint32_t set_size(int set)
+{
+	for (int n = 0; n < IMAGE_COUNT; n++)
+		if (IMAGES[n].set == set)
+			return IMAGES[n].size;
+	return 0;
+}
+
+/* a wave override is a descrambled set: any size one of the model's joined files has */
+static int wave_size_fits(const model_def_t *d, uint64_t size)
+{
+	for (int w = 0; w < WAVE_OPTIONS && d->waves[w].count; w++)
+		for (int n = 0; d->waves[w].count == 1 && n < IMAGE_COUNT; n++)
+			if (IMAGES[n].set == d->waves[w].set && IMAGES[n].size == size)
+				return 1;
+	return 0;
+}
+
+static int64_t file_size(const char *path)
+{
+	struct stat st;
+	return stat(path, &st) == 0 && S_ISREG(st.st_mode) ? (int64_t)st.st_size : -1;
+}
+
+static int control_override_fits(const scplay_rom_source_t *s, const model_def_t *d)
+{
+	return file_size(control_override(s, d)) == (int64_t)set_size(d->control_set);
+}
+
+static int internal_override_fits(const scplay_rom_source_t *s, const model_def_t *d)
+{
+	return file_size(internal_override(s, d)) == (int64_t)set_size(d->boot_set);
+}
+
+static int wave_override_fits(const scplay_rom_source_t *s, const model_def_t *d)
+{
+	const int64_t size = file_size(wave_override(s, d));
+	return size >= 0 && wave_size_fits(d, (uint64_t)size);
+}
 
 /* every table row an image with this CRC and size fills: one image can serve two sets, as the
  * SC-8850's first wave ROM is the SC-8820's too */
@@ -621,21 +681,25 @@ static int find_waves(const catalog_t *c, const model_def_t *d)
 	return -1;
 }
 
-static int missing_count(const catalog_t *c, const model_def_t *d)
+static int missing_count(const catalog_t *c, const scplay_rom_source_t *s, const model_def_t *d)
 {
-	int missing = find_control(c, d->control_set) < 0;
-	if (find_waves(c, d) < 0)
+	int missing = control_override(s, d) ? !control_override_fits(s, d) : find_control(c, d->control_set) < 0;
+	if (wave_override(s, d))
+		missing += !wave_override_fits(s, d);
+	else if (find_waves(c, d) < 0)
 		missing += wave_missing(c, &d->waves[0]);
-	if (d->boot_set != SET_NONE && find_control(c, d->boot_set) < 0)
+	if (internal_override(s, d))
+		missing += !internal_override_fits(s, d);
+	else if (d->boot_set != SET_NONE && find_control(c, d->boot_set) < 0)
 		missing++;
 	if (d->tone_set != SET_NONE && find_control(c, d->tone_set) < 0)
 		missing++;
 	return missing;
 }
 
-static int set_complete(const catalog_t *c, const model_def_t *d)
+static int set_complete(const catalog_t *c, const scplay_rom_source_t *s, const model_def_t *d)
 {
-	return missing_count(c, d) == 0;
+	return missing_count(c, s, d) == 0;
 }
 
 static const char *size_text(uint32_t size, char *buf, size_t buf_size)
@@ -659,14 +723,32 @@ static void append(char *buf, size_t size, size_t *at, const char *fmt, ...)
 		*at += (size_t)n < size - *at ? (size_t)n : size - *at - 1;
 }
 
-static void missing_message(const catalog_t *c, const model_def_t *d, char *err, size_t err_size)
+static void missing_message(const catalog_t *c, const scplay_rom_source_t *s, const model_def_t *d, char *err, size_t err_size)
 {
 	char text[16];
 	size_t at = 0;
 	const char *sep = " ";
 
+	if (control_override(s, d) && !control_override_fits(s, d))
+	{
+		append(err, err_size, &at, "%s: the control ROM override %s is not a %s file", d->name,
+		       control_override(s, d), size_text(set_size(d->control_set), text, sizeof(text)));
+		return;
+	}
+	if (internal_override(s, d) && !internal_override_fits(s, d))
+	{
+		append(err, err_size, &at, "%s: the internal ROM override %s is not a %s file", d->name,
+		       internal_override(s, d), size_text(set_size(d->boot_set), text, sizeof(text)));
+		return;
+	}
+	if (wave_override(s, d) && !wave_override_fits(s, d))
+	{
+		append(err, err_size, &at, "%s: the wave ROM override %s is not a descrambled %s wave set",
+		       d->name, wave_override(s, d), d->label);
+		return;
+	}
 	append(err, err_size, &at, "%s: no", d->name);
-	if (find_control(c, d->control_set) < 0)
+	if (!control_override(s, d) && find_control(c, d->control_set) < 0)
 	{
 		int first = 1;
 		for (int n = 0; n < IMAGE_COUNT; n++)
@@ -683,7 +765,7 @@ static void missing_message(const catalog_t *c, const model_def_t *d, char *err,
 		sep = ", no ";
 	}
 	const wave_option_t *own = &d->waves[0];
-	for (int n = 0; find_waves(c, d) < 0 && n < own->count; n++)
+	for (int n = 0; !wave_override(s, d) && find_waves(c, d) < 0 && n < own->count; n++)
 	{
 		if (find_wave(c, own->set, n) >= 0)
 			continue;
@@ -698,7 +780,8 @@ static void missing_message(const catalog_t *c, const model_def_t *d, char *err,
 	const int extra[2] = { d->boot_set, d->tone_set };
 	for (int e = 0; e < 2; e++)
 	{
-		if (extra[e] == SET_NONE || find_control(c, extra[e]) >= 0)
+		if (extra[e] == SET_NONE || find_control(c, extra[e]) >= 0
+		    || (extra[e] == d->boot_set && internal_override(s, d)))
 			continue;
 		for (int i = 0; i < IMAGE_COUNT; i++)
 			if (IMAGES[i].set == extra[e])
@@ -712,43 +795,91 @@ static void missing_message(const catalog_t *c, const model_def_t *d, char *err,
 
 /* ---------------------------------------------------------------- loading */
 
-static uint64_t hash_image(uint64_t h, const rom_image_t *img)
+static uint64_t hash_crc(uint64_t h, uint32_t crc, uint32_t size)
 {
-	h = (h ^ img->crc) * 0x100000001b3ull;
-	h = (h ^ img->size) * 0x100000001b3ull;
+	h = (h ^ crc) * 0x100000001b3ull;
+	h = (h ^ size) * 0x100000001b3ull;
 	return h;
 }
 
-static int load_model(scplay_roms_t *out, const model_def_t *d, const catalog_t *c,
+static uint64_t hash_image(uint64_t h, const rom_image_t *img)
+{
+	return hash_crc(h, img->crc, img->size);
+}
+
+static uint32_t data_crc(const void *data, size_t size)
+{
+	return (uint32_t)crc32(crc32(0, NULL, 0), data, (uInt)size);
+}
+
+static int load_model(scplay_roms_t *out, const model_def_t *d, const catalog_t *c, const scplay_rom_source_t *s,
                       char *err, size_t err_size)
 {
 	memset(out, 0, sizeof(*out));
 	out->model = d->model;
 	out->model_name = d->name;
 
-	if (!set_complete(c, d))
+	if (!set_complete(c, s, d))
 	{
-		missing_message(c, d, err, err_size);
+		missing_message(c, s, d, err, err_size);
 		return 0;
 	}
 
-	int ctl = find_control(c, d->control_set);
-	void *program = image_read(c, ctl);
-	if (!program)
+	uint64_t h = 0xcbf29ce484222325ull;
+	if (control_override(s, d))
 	{
-		snprintf(err, err_size, "%s: cannot read the control ROM from %s", d->name,
-		         c->found[ctl].path);
-		return 0;
+		const size_t size = set_size(d->control_set);
+		void *program = read_whole(control_override(s, d), size);
+		if (!program)
+		{
+			snprintf(err, err_size, "%s: cannot read the control ROM override %s", d->name, control_override(s, d));
+			return 0;
+		}
+		out->owned[out->owned_count++] = program;
+		out->roms.program_rom = program;
+		out->roms.program_rom_size = size;
+		snprintf(out->version, sizeof(out->version), "custom");
+		snprintf(out->origin, sizeof(out->origin), "%s", control_override(s, d));
+		h = hash_crc(h, data_crc(program, size), (uint32_t)size);
 	}
-	out->owned[out->owned_count++] = program;
-	out->roms.program_rom = program;
-	out->roms.program_rom_size = IMAGES[ctl].size;
-	const wave_option_t *waves = &d->waves[find_waves(c, d)];
-	out->roms.wave_rom_count = waves->count;
-	snprintf(out->version, sizeof(out->version), "%s", IMAGES[ctl].version);
-	snprintf(out->origin, sizeof(out->origin), "%s", c->found[ctl].path);
+	else
+	{
+		int ctl = find_control(c, d->control_set);
+		void *program = image_read(c, ctl);
+		if (!program)
+		{
+			snprintf(err, err_size, "%s: cannot read the control ROM from %s", d->name,
+			         c->found[ctl].path);
+			return 0;
+		}
+		out->owned[out->owned_count++] = program;
+		out->roms.program_rom = program;
+		out->roms.program_rom_size = IMAGES[ctl].size;
+		snprintf(out->version, sizeof(out->version), "%s", IMAGES[ctl].version);
+		snprintf(out->origin, sizeof(out->origin), "%s", c->found[ctl].path);
+		h = hash_image(h, &IMAGES[ctl]);
+	}
 
-	uint64_t h = hash_image(0xcbf29ce484222325ull, &IMAGES[ctl]);
+	static const wave_option_t overridden = { SET_NONE, 0 };
+	const wave_option_t *waves = wave_override(s, d) ? &overridden : &d->waves[find_waves(c, d)];
+	if (wave_override(s, d))
+	{
+		const size_t size = (size_t)file_size(wave_override(s, d));
+		void *wave = read_whole(wave_override(s, d), size);
+		if (!wave)
+		{
+			snprintf(err, err_size, "%s: cannot read the wave ROM override %s", d->name, wave_override(s, d));
+			scplay_roms_free(out);
+			return 0;
+		}
+		out->owned[out->owned_count++] = wave;
+		out->roms.wave_rom[0] = wave;
+		out->roms.wave_rom_size[0] = size;
+		out->roms.wave_rom_count = 1;
+		h = hash_crc(h, data_crc(wave, size), (uint32_t)size);
+	}
+	else
+		out->roms.wave_rom_count = waves->count;
 
 	for (int n = 0; n < waves->count; n++)
 	{
@@ -766,7 +897,22 @@ static int load_model(scplay_roms_t *out, const model_def_t *d, const catalog_t 
 		out->roms.wave_rom_size[n] = IMAGES[index].size;
 		h = hash_image(h, &IMAGES[index]);
 	}
-	if (d->boot_set != SET_NONE)
+	if (internal_override(s, d))
+	{
+		const size_t size = set_size(d->boot_set);
+		void *boot_data = read_whole(internal_override(s, d), size);
+		if (!boot_data)
+		{
+			snprintf(err, err_size, "%s: cannot read the internal ROM override %s", d->name, internal_override(s, d));
+			scplay_roms_free(out);
+			return 0;
+		}
+		out->owned[out->owned_count++] = boot_data;
+		out->roms.boot_rom = boot_data;
+		out->roms.boot_rom_size = size;
+		h = hash_crc(h, data_crc(boot_data, size), (uint32_t)size);
+	}
+	else if (d->boot_set != SET_NONE)
 	{
 		const int boot = find_control(c, d->boot_set);
 		void *boot_data = image_read(c, boot);
@@ -802,16 +948,45 @@ static int load_model(scplay_roms_t *out, const model_def_t *d, const catalog_t 
 	return 1;
 }
 
-int scplay_roms_load(scplay_roms_t *out, const char *model_name, const char *rom_path,
-                     const char *exe_dir, char *err, size_t err_size)
+void scplay_rom_source_init(scplay_rom_source_t *s, const char *path, const char *exe_dir)
 {
-	const catalog_t *c = catalog_get(rom_path, exe_dir);
+	memset(s, 0, sizeof(*s));
+	snprintf(s->path, sizeof(s->path), "%s", path ? path : "");
+	snprintf(s->exe_dir, sizeof(s->exe_dir), "%s", exe_dir ? exe_dir : "");
+}
+
+bool scplay_rom_source_override(scplay_rom_source_t *s, const char *model_name, const char *control,
+                                const char *internal, const char *wave)
+{
+	for (int n = 0; model_name && n < MODEL_COUNT; n++)
+		if (!strcmp(MODELS[n].name, model_name))
+		{
+			if (control)
+				snprintf(s->control[MODELS[n].model], SCPLAY_PATH_LEN, "%s", control);
+			if (internal)
+				snprintf(s->internal[MODELS[n].model], SCPLAY_PATH_LEN, "%s", internal);
+			if (wave)
+				snprintf(s->wave[MODELS[n].model], SCPLAY_PATH_LEN, "%s", wave);
+			return true;
+		}
+	return false;
+}
+
+static const catalog_t *catalog_of(const scplay_rom_source_t *s)
+{
+	return catalog_get(s && s->path[0] ? s->path : NULL, s && s->exe_dir[0] ? s->exe_dir : NULL);
+}
+
+int scplay_roms_load(scplay_roms_t *out, const char *model_name, const scplay_rom_source_t *s,
+                     char *err, size_t err_size)
+{
+	const catalog_t *c = catalog_of(s);
 
 	if (model_name)
 	{
 		for (int n = 0; n < MODEL_COUNT; n++)
 			if (!strcmp(MODELS[n].name, model_name))
-				return load_model(out, &MODELS[n], c, err, err_size);
+				return load_model(out, &MODELS[n], c, s, err, err_size);
 		snprintf(err, err_size, "unknown model %s", model_name);
 		return 0;
 	}
@@ -820,9 +995,9 @@ int scplay_roms_load(scplay_roms_t *out, const char *model_name, const char *rom
 	for (int n = 0; n < MODEL_COUNT; n++)
 	{
 		char e[256];
-		if (load_model(out, &MODELS[n], c, e, sizeof(e)))
+		if (load_model(out, &MODELS[n], c, s, e, sizeof(e)))
 			return 1;
-		if (missing_count(c, &MODELS[n]) < missing_count(c, &MODELS[best]))
+		if (missing_count(c, s, &MODELS[n]) < missing_count(c, s, &MODELS[best]))
 			best = n;
 	}
 	for (int n = 0; n < IMAGE_COUNT; n++)
@@ -833,17 +1008,17 @@ int scplay_roms_load(scplay_roms_t *out, const char *model_name, const char *rom
 		return 0;
 	}
 	char e[256];
-	missing_message(c, &MODELS[best], e, sizeof(e));
+	missing_message(c, s, &MODELS[best], e, sizeof(e));
 	snprintf(err, err_size, "%s (and no other model's set is complete either)", e);
 	return 0;
 }
 
-unsigned scplay_roms_available(const char *rom_path, const char *exe_dir)
+unsigned scplay_roms_available(const scplay_rom_source_t *s)
 {
-	const catalog_t *c = catalog_get(rom_path, exe_dir);
+	const catalog_t *c = catalog_of(s);
 	unsigned mask = 0;
 	for (int n = 0; n < MODEL_COUNT; n++)
-		if (set_complete(c, &MODELS[n]))
+		if (set_complete(c, s, &MODELS[n]))
 			mask |= 1u << MODELS[n].model;
 	return mask;
 }

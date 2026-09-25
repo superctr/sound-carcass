@@ -20,8 +20,7 @@ struct unit
 	session_t session;
 	scemu_computer_switch_t computer;
 	bool no_cache, keep_settings;
-	char rom_path[1024], exe_dir[1024];
-	bool have_rom_path, have_exe_dir;
+	scplay_rom_source_t source;
 
 	scemu_map_t map;
 	uint32_t midi_rate;
@@ -95,7 +94,7 @@ static void begin(unit_t *u)
 	scemu_set_midi_out(u->m, u->midi_out, u->midi_out_user);
 }
 
-unit_t *unit_open(const char *model_name, const char *rom_path, const char *exe_dir,
+unit_t *unit_open(const char *model_name, const scplay_rom_source_t *source,
                   bool no_cache, bool keep_settings, char *err, size_t err_size)
 {
 	unit_t *u = calloc(1, sizeof(*u));
@@ -104,17 +103,9 @@ unit_t *unit_open(const char *model_name, const char *rom_path, const char *exe_
 		snprintf(err, err_size, "out of memory");
 		return NULL;
 	}
-	if (rom_path)
-	{
-		snprintf(u->rom_path, sizeof(u->rom_path), "%s", rom_path);
-		u->have_rom_path = true;
-	}
-	if (exe_dir)
-	{
-		snprintf(u->exe_dir, sizeof(u->exe_dir), "%s", exe_dir);
-		u->have_exe_dir = true;
-	}
-	if (!scplay_roms_load(&u->roms, model_name, rom_path, exe_dir, err, err_size))
+	if (source)
+		u->source = *source;
+	if (!scplay_roms_load(&u->roms, model_name, &u->source, err, err_size))
 	{
 		free(u);
 		return NULL;
@@ -346,8 +337,7 @@ bool unit_prepare(unit_t *u, scemu_model_t model, scemu_computer_switch_t comput
 			scplay_roms_free(&u->next.roms);
 		u->next.ready = false;
 	}
-	if (!same_roms && !scplay_roms_load(&u->next.roms, name, u->have_rom_path ? u->rom_path : NULL,
-	                                    u->have_exe_dir ? u->exe_dir : NULL, err, err_size))
+	if (!same_roms && !scplay_roms_load(&u->next.roms, name, &u->source, err, err_size))
 		return false;
 	u->next.m = scemu_create(model, same_roms ? &u->roms.roms : &u->next.roms.roms, NULL);
 	if (!u->next.m)

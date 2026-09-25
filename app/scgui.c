@@ -98,6 +98,7 @@ static const bool midi_slot_is_extra[MIDI_SLOTS] = { false, false, true, true, f
 typedef struct options
 {
 	const char *model, *rom;
+	const char *control, *internal, *wave;   /* --control, --wave: the model's own files, whatever their CRCs */
 	scemu_map_t map;
 	uint32_t midi_rate;
 	int size;
@@ -129,6 +130,11 @@ static void usage(FILE *fp)
 	        "  --model NAME        sc88pro (default when its ROMs are found), sc88, sc88vl, sc8850,\n"
 	        "                      sc8820, sc55mk2, sc55\n"
 	        "  --rom PATH          a zip or directory with the ROM images\n"
+	        "  --control FILE      the model's control ROM, whatever its CRC (needs --model)\n"
+	        "  --internal FILE     the model's CPU ROM (SC-55, SC-55mkII, SC-8820, SC-8850),\n"
+	        "                      whatever its CRC (needs --model)\n"
+	        "  --wave FILE         the model's wave ROMs, descrambled and joined into one file,\n"
+	        "                      whatever its CRC (needs --model)\n"
 	        "  --map sc55|sc88|sc88pro|sc8850\n"
 	        "                      play every part from that instrument map\n"
 	        "  --midi-rate BAUD    31250 (default), 38400, 0\n"
@@ -156,6 +162,12 @@ static int parse_options(int argc, char **argv, options_t *o, GPtrArray *songs)
 			o->model = argv[++n];
 		else if (!strcmp(a, "--rom") && n + 1 < argc)
 			o->rom = argv[++n];
+		else if (!strcmp(a, "--control") && n + 1 < argc)
+			o->control = argv[++n];
+		else if (!strcmp(a, "--internal") && n + 1 < argc)
+			o->internal = argv[++n];
+		else if (!strcmp(a, "--wave") && n + 1 < argc)
+			o->wave = argv[++n];
 		else if (!strcmp(a, "--map") && n + 1 < argc)
 		{
 			const char *v = argv[++n];
@@ -194,6 +206,11 @@ static int parse_options(int argc, char **argv, options_t *o, GPtrArray *songs)
 		}
 		else
 			g_ptr_array_add(songs, g_strdup(a));
+	}
+	if ((o->control || o->internal || o->wave) && !o->model)
+	{
+		fprintf(stderr, "scgui: --control, --internal and --wave need --model\n");
+		return -1;
 	}
 	return 1;
 }
@@ -2685,7 +2702,18 @@ int main(int argc, char **argv)
 
 	char exe_dir[PATH_MAX];
 	session_exe_directory(argv[0], exe_dir, sizeof(exe_dir));
-	machine_options_t mo = { opt.model, opt.rom, exe_dir, opt.map, opt.midi_rate,
+	static scplay_rom_source_t roms;
+	scplay_rom_source_init(&roms, opt.rom, exe_dir);
+	for (int n = 0; n < CONFIG_SYSTEMS; n++)
+		scplay_rom_source_override(&roms, config_system_names[n], app.cfg.control[n], app.cfg.internal[n],
+		                           app.cfg.wave[n]);
+	if ((opt.control || opt.internal || opt.wave)
+	    && !scplay_rom_source_override(&roms, opt.model, opt.control, opt.internal, opt.wave))
+	{
+		fprintf(stderr, "scgui: unknown model %s\n", opt.model);
+		return 2;
+	}
+	machine_options_t mo = { opt.model, &roms, opt.map, opt.midi_rate,
 	                         { 0 },
 	                         opt.tail, opt.keep_settings, opt.no_cache, opt.no_audio, opt.boot_animation,
 	                         app.audio_choice >= 0 ? app.devices[app.audio_choice].index : -1,

@@ -14,6 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "scemu.h"
+#include "roms.h"
 
 typedef struct machine machine_t;
 
@@ -29,8 +30,7 @@ int machine_system_index(scemu_model_t model);
 typedef struct machine_options
 {
 	const char *model;        /* NULL: the best ROM set found */
-	const char *rom;          /* --rom, or NULL */
-	const char *exe_dir;
+	const scplay_rom_source_t *roms;  /* where the ROMs come from; it outlives the machine */
 	scemu_map_t map;
 	uint32_t midi_rate;
 	scemu_computer_switch_t computer[MACHINE_SYSTEMS];  /* the rear switch of each system */

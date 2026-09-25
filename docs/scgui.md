@@ -16,6 +16,7 @@ machine.  Files on the command line become the playlist and the first one plays.
 |---|---|
 | `--model sc88pro \| sc88 \| sc88vl \| sc8850 \| sc8820 \| sc55mk2 \| sc55` | which machine; the default is the SC-88Pro when its ROMs are found |
 | `--rom PATH` | a zip or a directory holding the ROM images, whatever they are named |
+| `--control FILE`, `--internal FILE`, `--wave FILE` | the model's own control ROM, internal ROM or joined descrambled wave file, whatever their CRCs, as in scplay; they need a model, from `--model` or the settings file |
 | `--size 4 \| 8` | the window size: 4 is the small panel (1399 × 440 for the SC-88 and the SC-88Pro, 1399 × 282 for the shallower SC-88VL, SC-55mkII and SC-55, 1696 × 692 for the SC-8850, 1421 × 242 for the SC-8820), 8 twice that.  The bake is named by the glass's dot pitch, which is 4 and 8 on the 88 family and the two SC-55s and 3 and 6 on the SC-8850, whose display has more and smaller dots; the SC-8820 has no glass and its bake is 7 and 14 pixels a millimetre.  On a HiDPI screen the large bake is used for the small size automatically |
 | `--map sc55 \| sc88 \| sc88pro \| sc8850` | play every part from that instrument map, as in scplay |
 | `--midi-rate BAUD` | the speed of the MIDI input, as in scplay |
@@ -286,7 +287,8 @@ one no longer matches.
 ## The settings file
 
 `$XDG_CONFIG_HOME/scemu/scgui.conf`, or `~/.config/scemu/scgui.conf`, keeps what the windows set: the
-machine and where its ROMs are, the window size (`size`) and whether the pointer's buttons are swapped
+machine and where its ROMs are (`rom`, and each system's own files, `control_sc88pro`,
+`internal_sc8850`, `wave_sc88vl` and so on, as [roms.md](roms.md) describes), the window size (`size`) and whether the pointer's buttons are swapped
 (`swap_buttons`), the output device, the rate asked of it (`audio_rate`,
 0 for the machine's own) and its buffer, the volume knob,
 the nine MIDI ties by the device's name, the message before each song, the instrument
