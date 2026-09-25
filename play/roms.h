@@ -56,7 +56,15 @@ void scplay_roms_free(scplay_roms_t *r);
 
 /* Bit per scemu_model_t: the models whose complete set is there, no image read. */
 unsigned scplay_roms_available(const scplay_rom_source_t *source);
+/* true when the model's set is complete; otherwise text says what is missing */
+bool scplay_roms_status(const scplay_rom_source_t *source, scemu_model_t model, char *text, size_t size);
+/* The places are scanned once and remembered; this forgets them, so the next
+ * call looks again (files added or taken away meanwhile).  The scan is not
+ * shared between threads: one thread at a time asks. */
+void scplay_roms_rescan(void);
 
+/* the model a name ("sc88pro") stands for, or -1 */
+int scplay_model_index(const char *name);
 const char *scplay_model_label(scemu_model_t model);
 const char *scplay_model_name(scemu_model_t model);
 /* the power key is a standby key in the machine's own matrix, with the STANDBY lamp beside it */

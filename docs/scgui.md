@@ -10,7 +10,9 @@ keys and display drive that playlist ("The Sound Brush" below).
 
 It finds its ROM images the way `scplay` does (recognised by their contents in `--rom`, beside the
 program or in `~/.mame/roms`, whatever they are named), and boots the firmware once, caching the booted
-machine.  Files on the command line become the playlist and the first one plays.
+machine.  Files on the command line become the playlist and the first one plays.  When no system can
+start -- no ROM images found, or the one asked for not complete -- the **ROM Files** window opens
+alone instead (below), and Start brings up the panel once a set is there.
 
 | option | |
 |---|---|
@@ -283,6 +285,18 @@ and says how many files went; the next start of a machine boots the firmware for
 snapshot.  What a machine remembers -- its own settings memory, kept when `keep_settings` is on -- is not
 a cache and is left alone.  Use it after a new build of scemu, whose machine a snapshot taken by the old
 one no longer matches.
+
+**ROM Files…**, the last button on the tab, opens the ROM Files window: where the images are looked
+for, and files of your own.  The top is the ROM folder or zip -- the settings file's `rom`, looked at
+before the directory beside the program and `~/.mame/roms` -- typed, or picked with **Folder…** or
+**Zip…**.  Under it each system says whether its set is **Found** (and which one is running) or
+**Not available**; which images a set takes is in [roms.md](roms.md).  **Overrides** names, for the
+system picked there, a control ROM, an internal ROM (the SC-55s', the SC-8820's and the SC-8850's) and
+the wave ROMs as one descrambled file, each taken whatever its CRC; one that is missing or of the wrong
+size is said on that system's line.  A change takes effect at once: the places are looked at again,
+the lines follow, the settings file is written, and a running machine whose own images changed comes up
+again on the new ones.  `--rom`, `--control`, `--internal` and `--wave` on the command line stand over
+what the window sets, for that run, as every option does.
 
 ## The settings file
 

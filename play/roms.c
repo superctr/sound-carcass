@@ -504,9 +504,15 @@ static void scan_source(catalog_t *c, const char *path)
 		scan_file(c, path, (uint64_t)st.st_size);
 }
 
+static catalog_t cache;
+
+void scplay_roms_rescan(void)
+{
+	cache.built = 0;
+}
+
 static const catalog_t *catalog_get(const char *rom_path, const char *exe_dir)
 {
-	static catalog_t cache;
 	const char *rom = rom_path ? rom_path : "";
 	const char *exe = exe_dir ? exe_dir : "";
 
@@ -1013,6 +1019,22 @@ int scplay_roms_load(scplay_roms_t *out, const char *model_name, const scplay_ro
 	return 0;
 }
 
+bool scplay_roms_status(const scplay_rom_source_t *s, scemu_model_t model, char *text, size_t size)
+{
+	const catalog_t *c = catalog_of(s);
+	for (int n = 0; n < MODEL_COUNT; n++)
+		if (MODELS[n].model == model)
+		{
+			text[0] = 0;
+			if (set_complete(c, s, &MODELS[n]))
+				return true;
+			missing_message(c, s, &MODELS[n], text, size);
+			return false;
+		}
+	snprintf(text, size, "unknown model");
+	return false;
+}
+
 unsigned scplay_roms_available(const scplay_rom_source_t *s)
 {
 	const catalog_t *c = catalog_of(s);
@@ -1037,6 +1059,14 @@ const char *scplay_model_label(scemu_model_t model)
 		if (MODELS[n].model == model)
 			return MODELS[n].label;
 	return "?";
+}
+
+int scplay_model_index(const char *name)
+{
+	for (int n = 0; name && n < MODEL_COUNT; n++)
+		if (!strcmp(MODELS[n].name, name))
+			return MODELS[n].model;
+	return -1;
 }
 
 const char *scplay_model_name(scemu_model_t model)

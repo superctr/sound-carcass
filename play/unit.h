@@ -112,6 +112,10 @@ bool unit_panel(unit_t *u, unit_panel_t *out);
  * the new one from its cache if the old one was on. */
 bool unit_prepare(unit_t *u, scemu_model_t model, scemu_computer_switch_t computer, char *err, size_t err_size);
 void unit_replace(unit_t *u, session_progress_fn progress, void *user);
+/* Where the ROMs come from from now on.  The running set stays; the next
+ * unit_prepare for the same model and switch loads it again, and when that
+ * gives other images than the running ones, prepares their machine. */
+void unit_set_source(unit_t *u, const scplay_rom_source_t *source);
 
 /* The factor a host puts on the words: 2, and 2.5 on the SC-8850, which plays
  * 2 dB under the rest of them.  The SC-88 family's 6 dB under the SC-55mkII

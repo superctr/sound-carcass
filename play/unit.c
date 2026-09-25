@@ -21,6 +21,7 @@ struct unit
 	scemu_computer_switch_t computer;
 	bool no_cache, keep_settings;
 	scplay_rom_source_t source;
+	bool source_changed;      /* the set loaded may not be the one the source now gives */
 
 	scemu_map_t map;
 	uint32_t midi_rate;
@@ -327,7 +328,7 @@ bool unit_prepare(unit_t *u, scemu_model_t model, scemu_computer_switch_t comput
 {
 	err[0] = 0;
 	const char *name = scplay_model_name(model);
-	bool same_roms = model == u->roms.model;
+	bool same_roms = model == u->roms.model && !u->source_changed;
 	if (!name || (same_roms && computer == u->computer))
 		return false;
 	if (u->next.ready)
@@ -339,6 +340,17 @@ bool unit_prepare(unit_t *u, scemu_model_t model, scemu_computer_switch_t comput
 	}
 	if (!same_roms && !scplay_roms_load(&u->next.roms, name, &u->source, err, err_size))
 		return false;
+	if (!same_roms && model == u->roms.model)
+	{
+		u->source_changed = false;
+		if (u->next.roms.hash == u->roms.hash)   /* the same images: nothing to reload */
+		{
+			scplay_roms_free(&u->next.roms);
+			same_roms = true;
+			if (computer == u->computer)
+				return false;
+		}
+	}
 	u->next.m = scemu_create(model, same_roms ? &u->roms.roms : &u->next.roms.roms, NULL);
 	if (!u->next.m)
 	{
@@ -352,6 +364,12 @@ bool unit_prepare(unit_t *u, scemu_model_t model, scemu_computer_switch_t comput
 	u->next.computer = computer;
 	u->next.ready = true;
 	return true;
+}
+
+void unit_set_source(unit_t *u, const scplay_rom_source_t *source)
+{
+	u->source = *source;
+	u->source_changed = true;
 }
 
 void unit_replace(unit_t *u, session_progress_fn progress, void *user)

@@ -27,7 +27,7 @@
 typedef enum command_kind
 {
 	CMD_LOAD, CMD_START, CMD_PAUSE, CMD_STOP, CMD_UNLOAD, CMD_SEEK, CMD_TEMPO, CMD_BUTTON, CMD_DIAL, CMD_POWER,
-	CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT, CMD_RESET, CMD_MAP, CMD_MODEL, CMD_SEND, CMD_ANIMATE, CMD_BRUSH,
+	CMD_GAIN, CMD_AUDIO, CMD_MIDI_IN, CMD_MIDI_OUT, CMD_RESET, CMD_MAP, CMD_MODEL, CMD_ROMS, CMD_SEND, CMD_ANIMATE, CMD_BRUSH,
 	CMD_QUIT
 } command_kind_t;
 
@@ -56,6 +56,8 @@ struct machine
 	machine_state_t state;
 	machine_rom_info_t info;
 	unsigned models;          /* a bit per scemu_model_t whose ROM set is there */
+	char status[SCEMU_MODEL_COUNT][256];   /* what each model's set lacks, "" when complete */
+	scplay_rom_source_t source;            /* where the ROMs come from; the machine's thread's */
 	int ports;                /* the port groups the running machine takes */
 
 	/* the thread's own */
@@ -232,9 +234,14 @@ static void set_error(machine_t *mc, const char *text)
  * behind it is not shared with another thread's load */
 static void set_rom_info(machine_t *mc)
 {
-	unsigned models = scplay_roms_available(mc->opt.roms);
+	unsigned models = 0;
+	char status[SCEMU_MODEL_COUNT][256];
+	for (int n = 0; n < SCEMU_MODEL_COUNT; n++)
+		if (scplay_roms_status(&mc->source, (scemu_model_t)n, status[n], sizeof(status[n])))
+			models |= 1u << n;
 	pthread_mutex_lock(&mc->lock);
 	mc->models = models;
+	memcpy(mc->status, status, sizeof(status));
 	mc->info.model = unit_model(mc->unit);
 	mc->info.label = unit_model_label(mc->unit);
 	snprintf(mc->info.version, sizeof(mc->info.version), "%s", unit_rom_version(mc->unit));
@@ -768,6 +775,14 @@ static void handle(machine_t *mc, const command_t *c)
 			mc->opt.computer[c->b] = (scemu_computer_switch_t)c->c;
 		switch_machine(mc, (scemu_model_t)c->a);
 		break;
+	case CMD_ROMS:
+		/* the places are looked at again, and the running set reloads when its images changed */
+		mc->source = *(const scplay_rom_source_t *)c->path;
+		scplay_roms_rescan();
+		unit_set_source(mc->unit, &mc->source);
+		switch_machine(mc, unit_model(mc->unit));
+		set_rom_info(mc);
+		break;
 	case CMD_QUIT:
 		break;
 	}
@@ -989,7 +1004,11 @@ machine_t *machine_start(const machine_options_t *o, char *err, size_t err_size)
 	if (!mc)
 		return NULL;
 	mc->opt = *o;
-	mc->unit = unit_open(o->model, o->roms, o->no_cache, o->keep_settings, err, err_size);
+	if (o->roms)
+		mc->source = *o->roms;
+	else
+		scplay_rom_source_init(&mc->source, NULL, NULL);
+	mc->unit = unit_open(o->model, &mc->source, o->no_cache, o->keep_settings, err, err_size);
 	if (!mc->unit)
 	{
 		free(mc);
@@ -1184,6 +1203,27 @@ void machine_set_model(machine_t *mc, scemu_model_t model)
 {
 	command_t c = { CMD_MODEL, (int)model, -1, 0, 0, 0, NULL };
 	post(mc, c);
+}
+
+void machine_set_rom_source(machine_t *mc, const scplay_rom_source_t *source)
+{
+	scplay_rom_source_t *copy = malloc(sizeof(*copy));
+	if (!copy)
+		return;
+	*copy = *source;
+	command_t c = { CMD_ROMS, 0, 0, 0, 0, 0, (char *)copy };
+	post(mc, c);
+}
+
+bool machine_rom_status(machine_t *mc, scemu_model_t model, char *text, size_t size)
+{
+	if (model < 0 || model >= SCEMU_MODEL_COUNT)
+		return false;
+	pthread_mutex_lock(&mc->lock);
+	snprintf(text, size, "%s", mc->status[model]);
+	bool complete = (mc->models >> model) & 1;
+	pthread_mutex_unlock(&mc->lock);
+	return complete;
 }
 
 void machine_set_computer_switch(machine_t *mc, scemu_computer_switch_t sw)

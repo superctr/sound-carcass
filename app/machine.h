@@ -30,7 +30,7 @@ int machine_system_index(scemu_model_t model);
 typedef struct machine_options
 {
 	const char *model;        /* NULL: the best ROM set found */
-	const scplay_rom_source_t *roms;  /* where the ROMs come from; it outlives the machine */
+	const scplay_rom_source_t *roms;  /* where the ROMs come from, copied; NULL the usual places */
 	scemu_map_t map;
 	uint32_t midi_rate;
 	scemu_computer_switch_t computer[MACHINE_SYSTEMS];  /* the rear switch of each system */
@@ -86,6 +86,12 @@ void machine_rom_info(machine_t *mc, machine_rom_info_t *out);
 /* a bitmask by scemu_model_t of the models whose ROM set was there when the
  * machine last loaded one */
 unsigned machine_models_available(machine_t *mc);
+/* true when the model's set was complete at that load; otherwise text says what it lacks */
+bool machine_rom_status(machine_t *mc, scemu_model_t model, char *text, size_t size);
+/* Where the ROMs come from from now on: the places are looked at again, the
+ * statuses follow, and the running machine restarts on its new set when its
+ * images changed.  A set no longer there leaves it running, with the error. */
+void machine_set_rom_source(machine_t *mc, const scplay_rom_source_t *source);
 
 void machine_snapshot(machine_t *mc, machine_state_t *out);
 

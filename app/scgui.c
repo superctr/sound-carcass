@@ -85,6 +85,15 @@ typedef struct app
 	machine_reset_t reset;
 	scemu_map_t map;
 	int combo_ids[64];
+	/* the ROM files window: the settings file's ROM keys, and how each system's set stands */
+	GtkWidget *rom_window, *rom_path_entry, *rom_status[MACHINE_SYSTEMS], *rom_system_drop, *rom_start;
+	GtkWidget *rom_entry[3], *rom_file_row[3][3];
+	int rom_system;            /* the row whose own files are shown */
+	bool rom_first;            /* opened because no machine could start: Start and Quit */
+	bool rom_started;
+	scplay_rom_source_t rom_source;
+	char exe_dir[PATH_MAX];
+	const char *cli_rom, *cli_model, *cli_files[3];   /* --rom, --model, --control, --internal, --wave */
 } app_t;
 
 static const char *const midi_slot_names[MIDI_SLOTS] = { "MIDI IN A", "MIDI IN B", "MIDI IN C", "MIDI IN D", "MIDI OUT",
@@ -1273,6 +1282,8 @@ static GtkWidget *interface_page(app_t *app)
 
 /* ---------------------------------------------------------------- system settings */
 
+static void on_rom_files_clicked(GtkButton *button, gpointer user);
+
 static void system_readout(app_t *app)
 {
 	if (!app->system_label)
@@ -1286,9 +1297,15 @@ static void system_readout(app_t *app)
 		snprintf(text + at, sizeof(text) - at, "\n%s", app->state.error);
 	gtk_label_set_text(GTK_LABEL(app->system_label), text);
 	app->system_updating = true;
+	const unsigned have = machine_models_available(app->mc);
 	for (int n = 0; n < MACHINE_SYSTEMS; n++)
+	{
+		const bool there = (have >> machine_systems[n]) & 1;
+		gtk_widget_set_sensitive(app->model_check[n], there);
+		gtk_widget_set_tooltip_text(app->model_check[n], there ? NULL : "ROM images not found");
 		if (machine_systems[n] == info.model)
 			gtk_check_button_set_active(GTK_CHECK_BUTTON(app->model_check[n]), TRUE);
+	}
 	int row = machine_system_index(info.model);
 	scemu_computer_switch_t sw = row < 0 ? SCEMU_COMPUTER_MIDI : computer_position(app->cfg.computer[row]);
 	for (int n = 0; n < COMPUTER_POSITIONS; n++)
@@ -1359,7 +1376,6 @@ static void on_clear_cache(GtkButton *button, gpointer user)
 static GtkWidget *system_page(app_t *app)
 {
 	GtkWidget *grid = settings_grid();
-	unsigned have = machine_models_available(app->mc);
 	scemu_model_t model = machine_model(app->mc);
 	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
 	app->system_updating = true;
@@ -1371,11 +1387,6 @@ static GtkWidget *system_page(app_t *app)
 			gtk_check_button_set_group(GTK_CHECK_BUTTON(b), GTK_CHECK_BUTTON(app->model_check[0]));
 		if (machine_systems[n] == model)
 			gtk_check_button_set_active(GTK_CHECK_BUTTON(b), TRUE);
-		if (!(have & (1u << machine_systems[n])))
-		{
-			gtk_widget_set_sensitive(b, FALSE);
-			gtk_widget_set_tooltip_text(b, "ROM images not found");
-		}
 		g_object_set_data(G_OBJECT(b), "model", GINT_TO_POINTER((int)machine_systems[n]));
 		g_signal_connect(b, "toggled", G_CALLBACK(on_model_toggled), app);
 		gtk_box_append(GTK_BOX(box), b);
@@ -1433,8 +1444,411 @@ static GtkWidget *system_page(app_t *app)
 	                                                  " cycle, another system, another position of the rear switch."
 	                                                  "  A song asked for while a boot is playing cuts it short.");
 	gtk_grid_attach(GTK_GRID(grid), app->skip_boot_check, 0, 4, 3, 1);
+
+	GtkWidget *roms = gtk_button_new_with_label("ROM Files…");
+	gtk_widget_set_halign(roms, GTK_ALIGN_START);
+	gtk_widget_set_tooltip_text(roms, "Where the ROM images are looked for, how each system's set stands,"
+	                                  " and files of your own to take in place of the ones found");
+	g_signal_connect(roms, "clicked", G_CALLBACK(on_rom_files_clicked), app);
+	grid_row(grid, 5, "ROM images", roms);
 	system_readout(app);
 	return grid;
+}
+
+/* ---------------------------------------------------------------- the ROM files window */
+
+enum { ROM_CONTROL, ROM_INTERNAL, ROM_WAVE, ROM_KINDS };
+static const char *const rom_kind_labels[ROM_KINDS] = { "Control ROM", "Internal ROM", "Wave ROMs" };
+static const char *const rom_kind_tips[ROM_KINDS] = {
+	"The control program, taken whatever its CRC: only its size is checked",
+	"The CPU's own ROM, on the SC-55, the SC-55mkII, the SC-8820 and the SC-8850",
+	"The wave ROMs descrambled and joined into one file, as a dump read out through the sound chip comes",
+};
+
+static char *rom_field(app_t *app, int kind, int row)
+{
+	return kind == ROM_CONTROL ? app->cfg.control[row] : kind == ROM_INTERNAL ? app->cfg.internal[row]
+	                                                                          : app->cfg.wave[row];
+}
+
+static bool has_internal_rom(scemu_model_t model)
+{
+	return model == SCEMU_MODEL_SC55 || model == SCEMU_MODEL_SC55MK2 || model == SCEMU_MODEL_SC8820
+	       || model == SCEMU_MODEL_SC8850;
+}
+
+/* the settings file's ROM keys, with the command line's over them for this run */
+static void rom_source_build(app_t *app)
+{
+	scplay_rom_source_t *s = &app->rom_source;
+	scplay_rom_source_init(s, app->cli_rom ? app->cli_rom : app->cfg.rom, app->exe_dir);
+	for (int n = 0; n < CONFIG_SYSTEMS; n++)
+		scplay_rom_source_override(s, config_system_names[n], app->cfg.control[n], app->cfg.internal[n],
+		                           app->cfg.wave[n]);
+	if (app->cli_files[ROM_CONTROL] || app->cli_files[ROM_INTERNAL] || app->cli_files[ROM_WAVE])
+		scplay_rom_source_override(s, app->cli_model, app->cli_files[ROM_CONTROL], app->cli_files[ROM_INTERNAL],
+		                           app->cli_files[ROM_WAVE]);
+}
+
+/* before the machine is there the window asks the loader itself; after, the machine's thread
+ * owns the scan and says how each set stood at its last look */
+static bool rom_status(app_t *app, scemu_model_t model, char *text, size_t size)
+{
+	if (app->mc)
+		return machine_rom_status(app->mc, model, text, size);
+	return scplay_roms_status(&app->rom_source, model, text, size);
+}
+
+static void rom_window_refresh(app_t *app)
+{
+	if (!app->rom_window)
+		return;
+	bool any = false;
+	for (int n = 0; n < MACHINE_SYSTEMS; n++)
+	{
+		char text[512];
+		const scemu_model_t model = machine_systems[n];
+		const bool complete = rom_status(app, model, text, sizeof(text));
+		any |= complete;
+		/* which images a set lacks is in the documentation; a file of the reader's own that will
+		 * not do is said, the loader's message less the model's name the row already shows */
+		const char *shown = "Not available";
+		if (complete)
+			shown = app->mc && machine_model(app->mc) == model ? "Found, running" : "Found";
+		else if (strstr(text, "override"))
+		{
+			const char *name = scplay_model_name(model);
+			const size_t len = strlen(name);
+			shown = !strncmp(text, name, len) && text[len] == ':' ? text + len + 2 : text;
+		}
+		gtk_label_set_text(GTK_LABEL(app->rom_status[n]), shown);
+		gtk_widget_set_opacity(app->rom_status[n], complete ? 1.0 : 0.7);
+	}
+	if (app->rom_start)
+		gtk_widget_set_sensitive(app->rom_start, any);
+}
+
+static void rom_files_show(app_t *app)
+{
+	const int row = app->rom_system;
+	const bool internal = has_internal_rom(machine_systems[row]);
+	for (int k = 0; k < ROM_KINDS; k++)
+	{
+		gtk_editable_set_text(GTK_EDITABLE(app->rom_entry[k]), rom_field(app, k, row));
+		for (int w = 0; w < 3; w++)
+			gtk_widget_set_sensitive(app->rom_file_row[k][w], k != ROM_INTERNAL || internal);
+	}
+}
+
+/* a ROM key changed: into the file a moment later, and the places looked at again */
+static void rom_apply(app_t *app)
+{
+	rom_source_build(app);
+	config_touch(app);
+	if (app->mc)
+		machine_set_rom_source(app->mc, &app->rom_source);   /* the tick shows the statuses it brings */
+	else
+	{
+		scplay_roms_rescan();
+		rom_window_refresh(app);
+	}
+}
+
+static void rom_set_path(app_t *app, const char *path)
+{
+	if (!strcmp(app->cfg.rom, path))
+		return;
+	snprintf(app->cfg.rom, sizeof(app->cfg.rom), "%s", path);
+	gtk_editable_set_text(GTK_EDITABLE(app->rom_path_entry), path);
+	rom_apply(app);
+}
+
+static void rom_set_file(app_t *app, int kind, const char *path)
+{
+	char *field = rom_field(app, kind, app->rom_system);
+	if (!strcmp(field, path))
+		return;
+	snprintf(field, sizeof(app->cfg.control[0]), "%s", path);
+	gtk_editable_set_text(GTK_EDITABLE(app->rom_entry[kind]), path);
+	rom_apply(app);
+}
+
+/* an entry takes what was typed on Enter or when the focus leaves it */
+static void rom_entry_take(app_t *app, GtkWidget *entry)
+{
+	const char *text = gtk_editable_get_text(GTK_EDITABLE(entry));
+	if (entry == app->rom_path_entry)
+		rom_set_path(app, text);
+	for (int k = 0; k < ROM_KINDS; k++)
+		if (entry == app->rom_entry[k])
+			rom_set_file(app, k, text);
+}
+
+static void on_rom_entry_activate(GtkEntry *entry, gpointer user)
+{
+	rom_entry_take(user, GTK_WIDGET(entry));
+}
+
+static void on_rom_entry_leave(GtkEventControllerFocus *focus, gpointer user)
+{
+	rom_entry_take(user, gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(focus)));
+}
+
+static void on_rom_system_selected(GObject *drop, GParamSpec *pspec, gpointer user)
+{
+	app_t *app = user;
+	(void)pspec;
+	app->rom_system = (int)gtk_drop_down_get_selected(GTK_DROP_DOWN(drop));
+	rom_files_show(app);
+}
+
+/* the choosers: the ROM path is a folder or a zip, an own file any file; the row they are for is
+ * the widget the dialog was opened from */
+static void on_rom_chosen(GObject *source, GAsyncResult *result, gpointer user)
+{
+	GtkWidget *button = user;
+	app_t *app = g_object_get_data(G_OBJECT(button), "app");
+	const int kind = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "kind"));
+	const bool folder = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "folder"));
+	GFile *file = folder ? gtk_file_dialog_select_folder_finish(GTK_FILE_DIALOG(source), result, NULL)
+	                     : gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), result, NULL);
+	if (file)
+	{
+		char *path = g_file_get_path(file);
+		if (path)
+		{
+			if (kind < 0)
+				rom_set_path(app, path);
+			else
+				rom_set_file(app, kind, path);
+			g_free(path);
+		}
+		g_object_unref(file);
+	}
+	g_object_unref(button);
+}
+
+static void on_rom_choose(GtkButton *button, gpointer user)
+{
+	app_t *app = user;
+	const int kind = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "kind"));
+	const bool folder = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "folder"));
+	GtkFileDialog *dialog = gtk_file_dialog_new();
+	gtk_file_dialog_set_title(dialog, kind < 0 ? (folder ? "The Folder Holding the ROM Images" : "A Zip of ROM Images")
+	                                           : rom_kind_labels[kind]);
+	if (kind < 0 && !folder)
+	{
+		GtkFileFilter *filter = gtk_file_filter_new();
+		gtk_file_filter_set_name(filter, "Zip archives");
+		gtk_file_filter_add_pattern(filter, "*.zip");
+		gtk_file_filter_add_pattern(filter, "*.ZIP");
+		GListStore *filters = g_list_store_new(GTK_TYPE_FILE_FILTER);
+		g_list_store_append(filters, filter);
+		gtk_file_dialog_set_filters(dialog, G_LIST_MODEL(filters));
+		g_object_unref(filters);
+		g_object_unref(filter);
+	}
+	g_object_set_data(G_OBJECT(button), "app", app);
+	g_object_ref(button);
+	if (folder)
+		gtk_file_dialog_select_folder(dialog, GTK_WINDOW(app->rom_window), NULL, on_rom_chosen, button);
+	else
+		gtk_file_dialog_open(dialog, GTK_WINDOW(app->rom_window), NULL, on_rom_chosen, button);
+	g_object_unref(dialog);
+}
+
+static void on_rom_clear(GtkButton *button, gpointer user)
+{
+	app_t *app = user;
+	rom_set_file(app, GPOINTER_TO_INT(g_object_get_data(G_OBJECT(button), "kind")), "");
+}
+
+static GtkWidget *rom_button(app_t *app, const char *label, int kind, bool folder, GCallback handler)
+{
+	GtkWidget *b = gtk_button_new_with_label(label);
+	g_object_set_data(G_OBJECT(b), "kind", GINT_TO_POINTER(kind));
+	g_object_set_data(G_OBJECT(b), "folder", GINT_TO_POINTER(folder));
+	g_signal_connect(b, "clicked", handler, app);
+	return b;
+}
+
+static GtkWidget *rom_entry(app_t *app, const char *text)
+{
+	GtkWidget *e = gtk_entry_new();
+	gtk_editable_set_text(GTK_EDITABLE(e), text);
+	gtk_widget_set_hexpand(e, TRUE);
+	gtk_editable_set_width_chars(GTK_EDITABLE(e), 36);
+	g_signal_connect(e, "activate", G_CALLBACK(on_rom_entry_activate), app);
+	GtkEventController *focus = gtk_event_controller_focus_new();
+	g_signal_connect(focus, "leave", G_CALLBACK(on_rom_entry_leave), app);
+	gtk_widget_add_controller(e, focus);
+	return e;
+}
+
+static GtkWidget *wrapped_label(const char *text)
+{
+	GtkWidget *l = gtk_label_new(text);
+	gtk_label_set_xalign(GTK_LABEL(l), 0);
+	gtk_label_set_wrap(GTK_LABEL(l), TRUE);
+	gtk_label_set_wrap_mode(GTK_LABEL(l), PANGO_WRAP_WORD_CHAR);
+	gtk_label_set_max_width_chars(GTK_LABEL(l), 64);
+	return l;
+}
+
+static void on_rom_start(GtkButton *button, gpointer user)
+{
+	app_t *app = user;
+	(void)button;
+	app->rom_started = true;
+	g_main_loop_quit(app->loop);
+}
+
+static void on_rom_quit(GtkButton *button, gpointer user)
+{
+	app_t *app = user;
+	(void)button;
+	if (app->rom_first)
+		g_main_loop_quit(app->loop);
+	else
+		gtk_widget_set_visible(app->rom_window, FALSE);
+}
+
+static gboolean on_rom_close(GtkWindow *w, gpointer user)
+{
+	app_t *app = user;
+	(void)w;
+	if (!app->rom_first)
+		return FALSE;   /* hidden, as the window hides on close */
+	g_main_loop_quit(app->loop);
+	return TRUE;
+}
+
+/* first: no machine could start, and the window stands alone with Start and Quit; why is the
+ * loader's message, shown at the top */
+static void rom_window_show(app_t *app, bool first, const char *why)
+{
+	if (app->rom_window && app->rom_first != first)
+	{
+		gtk_window_destroy(GTK_WINDOW(app->rom_window));
+		app->rom_window = NULL;
+	}
+	if (!app->rom_window)
+	{
+		app->rom_first = first;
+		GtkWidget *w = gtk_window_new();
+		gtk_window_set_title(GTK_WINDOW(w), "ROM Files");
+		gtk_window_set_hide_on_close(GTK_WINDOW(w), !first);
+		g_signal_connect(w, "close-request", G_CALLBACK(on_rom_close), app);
+
+		GtkWidget *grid = settings_grid();
+		int y = 0;
+		if (first)
+		{
+			char text[768];
+			snprintf(text, sizeof(text), "%s", why);
+			gtk_grid_attach(GTK_GRID(grid), wrapped_label(text), 0, y++, 4, 1);
+		}
+		gtk_grid_attach(GTK_GRID(grid),
+		                wrapped_label("Choose the folder or zip that holds your ROM images."),
+		                0, y++, 4, 1);
+
+		app->rom_path_entry = rom_entry(app, app->cfg.rom);
+		gtk_widget_set_tooltip_text(app->rom_path_entry, "A folder, looked into one level of subfolders deep,"
+		                                                 " or a zip");
+		grid_row(grid, y, "ROM folder or zip", app->rom_path_entry);
+		gtk_grid_attach(GTK_GRID(grid), rom_button(app, "Folder…", -1, true, G_CALLBACK(on_rom_choose)), 2, y, 1, 1);
+		gtk_grid_attach(GTK_GRID(grid), rom_button(app, "Zip…", -1, false, G_CALLBACK(on_rom_choose)), 3, y++, 1, 1);
+
+		GtkWidget *found = gtk_grid_new();
+		gtk_grid_set_row_spacing(GTK_GRID(found), 2);
+		gtk_grid_set_column_spacing(GTK_GRID(found), 12);
+		gtk_widget_set_margin_top(found, 6);
+		gtk_widget_set_margin_bottom(found, 6);
+		for (int n = 0; n < MACHINE_SYSTEMS; n++)
+		{
+			GtkWidget *name = gtk_label_new(scplay_model_label(machine_systems[n]));
+			gtk_label_set_xalign(GTK_LABEL(name), 0);
+			gtk_widget_set_valign(name, GTK_ALIGN_START);
+			gtk_grid_attach(GTK_GRID(found), name, 0, n, 1, 1);
+			app->rom_status[n] = wrapped_label("");
+			gtk_widget_set_hexpand(app->rom_status[n], TRUE);
+			gtk_grid_attach(GTK_GRID(found), app->rom_status[n], 1, n, 1, 1);
+		}
+		gtk_grid_attach(GTK_GRID(grid), found, 0, y++, 4, 1);
+
+		GtkWidget *own = gtk_label_new(NULL);
+		gtk_label_set_markup(GTK_LABEL(own), "<b>Overrides</b>");
+		gtk_label_set_xalign(GTK_LABEL(own), 0);
+		gtk_widget_set_margin_top(own, 6);
+		gtk_grid_attach(GTK_GRID(grid), own, 0, y++, 4, 1);
+		gtk_grid_attach(GTK_GRID(grid),
+		                wrapped_label("ROMs are automatically matched by their contents, alternatively you may"
+		                              " specify your own files below"),
+		                0, y++, 4, 1);
+
+		GtkStringList *systems = gtk_string_list_new(NULL);
+		for (int n = 0; n < MACHINE_SYSTEMS; n++)
+			gtk_string_list_append(systems, scplay_model_label(machine_systems[n]));
+		app->rom_system_drop = gtk_drop_down_new(G_LIST_MODEL(systems), NULL);
+		if (app->mc)
+		{
+			const int row = machine_system_index(machine_model(app->mc));
+			app->rom_system = row < 0 ? 0 : row;
+		}
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(app->rom_system_drop), (guint)app->rom_system);
+		g_signal_connect(app->rom_system_drop, "notify::selected", G_CALLBACK(on_rom_system_selected), app);
+		grid_row(grid, y++, "System", app->rom_system_drop);
+
+		for (int k = 0; k < ROM_KINDS; k++)
+		{
+			app->rom_entry[k] = rom_entry(app, "");
+			gtk_widget_set_tooltip_text(app->rom_entry[k], rom_kind_tips[k]);
+			app->rom_file_row[k][0] = grid_row(grid, y, rom_kind_labels[k], app->rom_entry[k]);
+			app->rom_file_row[k][1] = app->rom_entry[k];
+			GtkWidget *buttons = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+			gtk_box_append(GTK_BOX(buttons), rom_button(app, "File…", k, false, G_CALLBACK(on_rom_choose)));
+			gtk_box_append(GTK_BOX(buttons), rom_button(app, "Clear", k, false, G_CALLBACK(on_rom_clear)));
+			app->rom_file_row[k][2] = buttons;
+			gtk_grid_attach(GTK_GRID(grid), buttons, 2, y++, 2, 1);
+		}
+
+		if (app->cli_rom || app->cli_files[ROM_CONTROL] || app->cli_files[ROM_INTERNAL] || app->cli_files[ROM_WAVE])
+			gtk_grid_attach(GTK_GRID(grid),
+			                wrapped_label("The command line's --rom, --control, --internal and --wave stand over"
+			                              " these for this run."),
+			                0, y++, 4, 1);
+
+		GtkWidget *actions = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+		gtk_widget_set_halign(actions, GTK_ALIGN_END);
+		gtk_widget_set_margin_top(actions, 8);
+		gtk_box_append(GTK_BOX(actions), rom_button(app, first ? "Quit" : "Close", 0, false, G_CALLBACK(on_rom_quit)));
+		app->rom_start = NULL;
+		if (first)
+		{
+			app->rom_start = gtk_button_new_with_label("Start");
+			gtk_widget_add_css_class(app->rom_start, "suggested-action");
+			g_signal_connect(app->rom_start, "clicked", G_CALLBACK(on_rom_start), app);
+			gtk_box_append(GTK_BOX(actions), app->rom_start);
+		}
+		gtk_grid_attach(GTK_GRID(grid), actions, 0, y++, 4, 1);
+
+		gtk_window_set_child(GTK_WINDOW(w), grid);
+		app->rom_window = w;
+		rom_files_show(app);
+	}
+	/* over the window it was opened from: the Settings window, or the panel */
+	GtkWidget *parent = app->settings_window && gtk_widget_get_visible(app->settings_window) ? app->settings_window
+	                                                                                        : app->window;
+	if (parent)
+		gtk_window_set_transient_for(GTK_WINDOW(app->rom_window), GTK_WINDOW(parent));
+	rom_window_refresh(app);
+	gtk_window_present(GTK_WINDOW(app->rom_window));
+}
+
+static void on_rom_files_clicked(GtkButton *button, gpointer user)
+{
+	(void)button;
+	rom_window_show(user, false, NULL);
 }
 
 /* ---------------------------------------------------------------- the settings window */
@@ -2372,6 +2786,8 @@ static gboolean on_tick(gpointer user)
 			audio_readout(app);
 			system_readout(app);
 		}
+		if (app->rom_window && gtk_widget_get_visible(app->rom_window))
+			rom_window_refresh(app);
 		if (song_changed)
 			set_title(app);
 		if (!app->brush_engaged && finished_now && app->current >= 0 && app->current + 1 < (int)app->songs->len)
@@ -2700,20 +3116,19 @@ int main(int argc, char **argv)
 
 	gtk_init();
 
-	char exe_dir[PATH_MAX];
-	session_exe_directory(argv[0], exe_dir, sizeof(exe_dir));
-	static scplay_rom_source_t roms;
-	scplay_rom_source_init(&roms, opt.rom, exe_dir);
-	for (int n = 0; n < CONFIG_SYSTEMS; n++)
-		scplay_rom_source_override(&roms, config_system_names[n], app.cfg.control[n], app.cfg.internal[n],
-		                           app.cfg.wave[n]);
-	if ((opt.control || opt.internal || opt.wave)
-	    && !scplay_rom_source_override(&roms, opt.model, opt.control, opt.internal, opt.wave))
+	session_exe_directory(argv[0], app.exe_dir, sizeof(app.exe_dir));
+	app.cli_rom = opt.rom != (app.cfg.rom[0] ? app.cfg.rom : NULL) ? opt.rom : NULL;
+	app.cli_model = opt.model;
+	app.cli_files[ROM_CONTROL] = opt.control;
+	app.cli_files[ROM_INTERNAL] = opt.internal;
+	app.cli_files[ROM_WAVE] = opt.wave;
+	if ((opt.control || opt.internal || opt.wave) && scplay_model_index(opt.model) < 0)
 	{
 		fprintf(stderr, "scgui: unknown model %s\n", opt.model);
 		return 2;
 	}
-	machine_options_t mo = { opt.model, &roms, opt.map, opt.midi_rate,
+	rom_source_build(&app);
+	machine_options_t mo = { opt.model, &app.rom_source, opt.map, opt.midi_rate,
 	                         { 0 },
 	                         opt.tail, opt.keep_settings, opt.no_cache, opt.no_audio, opt.boot_animation,
 	                         app.audio_choice >= 0 ? app.devices[app.audio_choice].index : -1,
@@ -2723,12 +3138,47 @@ int main(int argc, char **argv)
 		mo.computer[n] = opt.computer[n];
 	char err[512];
 	app.mc = machine_start(&mo, err, sizeof(err));
+	if (!app.mc && strncmp(err, "unknown model", 13) != 0)
+	{
+		/* no set to start: the ROM files window, alone, until one is there and Start is pressed */
+		fprintf(stderr, "scgui: %s\n", err);
+		/* the window says it shortly: the images each set takes are in the documentation */
+		char why[768];
+		const int asked = scplay_model_index(mo.model);
+		if (asked < 0)
+			snprintf(why, sizeof(why), "%s", strstr(err, "no ROM images at all")
+			                                     ? "No ROM images were found.  Show scgui where they are."
+			                                     : "No system's ROM set is complete.");
+		else if (strstr(err, "override"))
+			snprintf(why, sizeof(why), "The %s could not start: %s", scplay_model_label((scemu_model_t)asked),
+			         err + strlen(mo.model) + 2);
+		else
+			snprintf(why, sizeof(why), "The %s's ROM images are not available.",
+			         scplay_model_label((scemu_model_t)asked));
+		app.loop = g_main_loop_new(NULL, FALSE);
+		rom_window_show(&app, true, why);
+		g_main_loop_run(app.loop);
+		g_main_loop_unref(app.loop);
+		app.loop = NULL;
+		gtk_window_destroy(GTK_WINDOW(app.rom_window));
+		app.rom_window = NULL;
+		if (!app.rom_started)
+		{
+			if (app.config_timer)
+				g_source_remove(app.config_timer);
+			if (app.config_file[0])
+				config_save(&app.cfg, app.config_file);
+			return 1;
+		}
+		char status[512];
+		const int wanted = scplay_model_index(mo.model);
+		if (wanted >= 0 && !scplay_roms_status(&app.rom_source, (scemu_model_t)wanted, status, sizeof(status)))
+			mo.model = NULL;   /* the system asked for is still short: the best one there */
+		app.mc = machine_start(&mo, err, sizeof(err));
+	}
 	if (!app.mc)
 	{
 		fprintf(stderr, "scgui: %s\n", err);
-		if (strncmp(err, "unknown model", 13) != 0)
-			fprintf(stderr, "scgui: put sc88pro.zip (or sc88.zip, sc88vl.zip) beside the program"
-			                " or in ~/.mame/roms, or give --rom\n");
 		return 1;
 	}
 
