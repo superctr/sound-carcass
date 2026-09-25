@@ -37,12 +37,7 @@ const char *sc8850_validate_roms(scemu_model_t model, const scemu_roms_t *roms)
 		return "program flash must be 1 MB";
 	if (!roms->tone_rom || roms->tone_rom_size != SC8850_TONE_ROM_SIZE)
 		return "tone flash must be 2 MB";
-	if (roms->wave_rom_count != 2)
-		return "two wave ROMs expected";
-	for (int n = 0; n < 2; n++)
-		if (!roms->wave_rom[n] || roms->wave_rom_size[n] != 0x1000000)
-			return "wave ROMs must be 16 MB each";
-	return NULL;
+	return wave_rom_validate(model, roms);
 }
 
 /* ---------------------------------------------------------------- the gate array */

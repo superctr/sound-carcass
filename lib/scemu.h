@@ -37,7 +37,12 @@ typedef enum scemu_model
 
 /* ROM images exactly as dumped from the chips; the library knows each model's
  * byte order and wave ROM wiring.  program_rom is the control ROM.  Wave ROMs
- * are given in board order (the SC-88's IC14, IC8, IC7, IC6). */
+ * are given in board order (the SC-88's IC14, IC8, IC7, IC6).  A wave set
+ * already descrambled is given as one image joined in address order
+ * (wave_rom_count 1): the machine's whole wave space, or on the SC-55mkII and
+ * the SC-55 their 3 MB of chips without the mirrors.  The SC-88Pro and the
+ * VE-GS Pro also take the SC-8850's or the SC-8820's wave set, as its chips or
+ * descrambled, whose first 20 MB is theirs. */
 typedef struct scemu_roms
 {
 	const void *program_rom;

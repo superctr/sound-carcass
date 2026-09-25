@@ -3,7 +3,8 @@
  * the search directories is looked at.  The one exception is the SC-8820's
  * CPU ROM, which is sc8820rom's build rather than a dump and so has no fixed
  * CRC: a 64 KB image is taken for it when it carries that build's version
- * routine at the address the flash calls.
+ * routine at the address the flash calls.  A descrambled wave set is known
+ * only as one image joined in address order, never as separate chips.
  *
  * Copyright (c) 2026 ian karlsson
  * SPDX-License-Identifier: BSD-3-Clause
@@ -28,6 +29,8 @@ enum
 {
 	SET_SC88_CTL, SET_SC88VL_CTL, SET_PRO_CTL, SET_8850_CTL, SET_MK2_CTL, SET_8820_CTL, SET_55_CTL,
 	SET_SC88_WAVE, SET_PRO_WAVE, SET_8850_WAVE, SET_MK2_WAVE, SET_8820_WAVE, SET_55_WAVE,
+	SET_SC88_WAVE_JOINED, SET_PRO_WAVE_JOINED, SET_8850_WAVE_JOINED, SET_MK2_WAVE_JOINED,
+	SET_8820_WAVE_JOINED, SET_55_WAVE_JOINED,
 	SET_8850_BOOT, SET_8850_TONE, SET_MK2_BOOT, SET_MK2_SUB, SET_8820_BOOT, SET_55_BOOT,
 	SET_NONE = -1
 };
@@ -59,6 +62,7 @@ static const rom_image_t IMAGES[] =
 	{ 0x05f939f2, 0x200000, SET_SC88_WAVE,  1, 0, NULL, 0, "wave ROM ic8" },
 	{ 0xa6fc7393, 0x200000, SET_SC88_WAVE,  2, 0, NULL, 0, "wave ROM ic7" },
 	{ 0x7bc514aa, 0x200000, SET_SC88_WAVE,  3, 0, NULL, 0, "wave ROM ic6" },
+	{ 0xefcf0d43, 0x800000, SET_SC88_WAVE_JOINED, 0, 0, NULL, 0, "descrambled wave ROMs" },
 
 	{ 0x7b0d392d, 0x100000, SET_PRO_CTL,    0, 102, "1.02", 0, "control ROM" },
 	{ 0x820824d2, 0x100000, SET_PRO_CTL,    0, 104, "1.04", 0, "control ROM" },
@@ -68,32 +72,46 @@ static const rom_image_t IMAGES[] =
 	{ 0x5f883ddd, 0x400000, SET_PRO_WAVE,   2, 0, NULL, 0, "wave ROM ic22" },
 	{ 0xecb4dd39, 0x400000, SET_PRO_WAVE,   3, 0, NULL, 0, "wave ROM ic23" },
 	{ 0x93541e95, 0x400000, SET_PRO_WAVE,   4, 0, NULL, 0, "wave ROM ic24" },
+	{ 0xc5db4bad, 0x1400000, SET_PRO_WAVE_JOINED, 0, 0, NULL, 0, "descrambled wave ROMs" },
 
 	{ 0x3ef69f93, 0x100000, SET_8850_CTL,   0, 100, "1.00", 0, "program flash ic9" },
 	{ 0x4b2f36e3, 0x010000, SET_8850_BOOT,  0, 0, NULL, 0, "CPU ROM ic1" },
 	{ 0x390faa62, 0x200000, SET_8850_TONE,  0, 0, NULL, 0, "tone flash ic10" },
 	{ 0x2cfe5aa2, 0x1000000, SET_8850_WAVE, 0, 0, NULL, 0, "wave ROM ic53" },
 	{ 0x623015b6, 0x1000000, SET_8850_WAVE, 1, 0, NULL, 0, "wave ROM ic54" },
+	{ 0x35c212ee, 0x2000000, SET_8850_WAVE_JOINED, 0, 0, NULL, 0, "descrambled wave ROMs" },
 
 	{ 0x352ad418, 0x200000, SET_8820_CTL,   0, 100, "1.00", 0, "program flash ic5" },
 	{ CRC_BY_CONTENT, 0x010000, SET_8820_BOOT, 0, 0, NULL, 0, "CPU ROM ic1 (sc8820rom's build)" },
 	{ 0x2cfe5aa2, 0x1000000, SET_8820_WAVE, 0, 0, NULL, 0, "wave ROM ic7" },
 	{ 0x38908222, 0x800000, SET_8820_WAVE,  1, 0, NULL, 0, "wave ROM ic8" },
+	{ 0xaacf3ad8, 0x1800000, SET_8820_WAVE_JOINED, 0, 0, NULL, 0, "descrambled wave ROMs" },
 
 	{ 0xfcee1e8e, 0x080000, SET_MK2_CTL,    0, 101, "1.01", 0, "control ROM" },
 	{ 0x9b66631f, 0x008000, SET_MK2_BOOT,   0, 0, NULL, 0, "CPU ROM" },
 	{ 0x702c0a82, 0x001000, SET_MK2_SUB,    0, 0, NULL, 0, "sub-CPU ROM" },
 	{ 0x1519d3b3, 0x200000, SET_MK2_WAVE,   0, 0, NULL, 0, "wave ROM ic15" },
 	{ 0x0f826c7f, 0x100000, SET_MK2_WAVE,   1, 0, NULL, 0, "wave ROM ic16" },
+	{ 0x91b58f99, 0x300000, SET_MK2_WAVE_JOINED, 0, 0, NULL, 0, "descrambled wave ROMs" },
 
 	{ 0x2dc58549, 0x040000, SET_55_CTL,     0, 121, "1.21", 0, "control ROM ic23" },
 	{ 0x4ed0d171, 0x008000, SET_55_BOOT,    0, 0, NULL, 0, "CPU ROM ic30" },
 	{ 0x1ac774d3, 0x100000, SET_55_WAVE,    0, 0, NULL, 0, "wave ROM GSS A ic28" },
 	{ 0x8dcc592a, 0x100000, SET_55_WAVE,    1, 0, NULL, 0, "wave ROM GSS B ic27" },
 	{ 0xe21ebc04, 0x100000, SET_55_WAVE,    2, 0, NULL, 0, "wave ROM GSS C ic26" },
+	{ 0x067aa3e4, 0x300000, SET_55_WAVE_JOINED, 0, 0, NULL, 0, "descrambled wave ROMs" },
 };
 
 #define IMAGE_COUNT ((int)(sizeof(IMAGES) / sizeof(IMAGES[0])))
+
+/* a wave set a model takes; a descrambled set is one joined image */
+typedef struct wave_option
+{
+	int set;
+	int count;
+} wave_option_t;
+
+#define WAVE_OPTIONS 6
 
 typedef struct model_def
 {
@@ -101,21 +119,28 @@ typedef struct model_def
 	const char *label;
 	scemu_model_t model;
 	int control_set;
-	int wave_set;
-	int wave_count;
+	wave_option_t waves[WAVE_OPTIONS];   /* its own chips first; a zero count ends the list */
 	int boot_set;         /* the CPU's own ROM on the machines that have one; SET_NONE elsewhere */
 	int tone_set;         /* the SC-8850's tone flash */
 } model_def_t;
 
 static const model_def_t MODELS[] =
 {
-	{ "sc88pro", "SC-88Pro",  SCEMU_MODEL_SC88PRO, SET_PRO_CTL,    SET_PRO_WAVE,  5, SET_NONE,      SET_NONE },
-	{ "sc88",    "SC-88",     SCEMU_MODEL_SC88,    SET_SC88_CTL,   SET_SC88_WAVE, 4, SET_NONE,      SET_NONE },
-	{ "sc88vl",  "SC-88VL",   SCEMU_MODEL_SC88VL,  SET_SC88VL_CTL, SET_SC88_WAVE, 4, SET_NONE,      SET_NONE },
-	{ "sc8850",  "SC-8850",   SCEMU_MODEL_SC8850,  SET_8850_CTL,   SET_8850_WAVE, 2, SET_8850_BOOT, SET_8850_TONE },
-	{ "sc8820",  "SC-8820",   SCEMU_MODEL_SC8820,  SET_8820_CTL,   SET_8820_WAVE, 2, SET_8820_BOOT, SET_NONE },
-	{ "sc55mk2", "SC-55mkII", SCEMU_MODEL_SC55MK2, SET_MK2_CTL,    SET_MK2_WAVE,  2, SET_MK2_BOOT,  SET_NONE },
-	{ "sc55",    "SC-55",     SCEMU_MODEL_SC55,    SET_55_CTL,     SET_55_WAVE,   3, SET_55_BOOT,   SET_NONE },
+	{ "sc88pro", "SC-88Pro",  SCEMU_MODEL_SC88PRO, SET_PRO_CTL,
+	  { { SET_PRO_WAVE, 5 }, { SET_PRO_WAVE_JOINED, 1 }, { SET_8850_WAVE_JOINED, 1 }, { SET_8850_WAVE, 2 },
+	    { SET_8820_WAVE_JOINED, 1 }, { SET_8820_WAVE, 2 } }, SET_NONE, SET_NONE },
+	{ "sc88",    "SC-88",     SCEMU_MODEL_SC88,    SET_SC88_CTL,
+	  { { SET_SC88_WAVE, 4 }, { SET_SC88_WAVE_JOINED, 1 } }, SET_NONE, SET_NONE },
+	{ "sc88vl",  "SC-88VL",   SCEMU_MODEL_SC88VL,  SET_SC88VL_CTL,
+	  { { SET_SC88_WAVE, 4 }, { SET_SC88_WAVE_JOINED, 1 } }, SET_NONE, SET_NONE },
+	{ "sc8850",  "SC-8850",   SCEMU_MODEL_SC8850,  SET_8850_CTL,
+	  { { SET_8850_WAVE, 2 }, { SET_8850_WAVE_JOINED, 1 } }, SET_8850_BOOT, SET_8850_TONE },
+	{ "sc8820",  "SC-8820",   SCEMU_MODEL_SC8820,  SET_8820_CTL,
+	  { { SET_8820_WAVE, 2 }, { SET_8820_WAVE_JOINED, 1 } }, SET_8820_BOOT, SET_NONE },
+	{ "sc55mk2", "SC-55mkII", SCEMU_MODEL_SC55MK2, SET_MK2_CTL,
+	  { { SET_MK2_WAVE, 2 }, { SET_MK2_WAVE_JOINED, 1 } }, SET_MK2_BOOT, SET_NONE },
+	{ "sc55",    "SC-55",     SCEMU_MODEL_SC55,    SET_55_CTL,
+	  { { SET_55_WAVE, 3 }, { SET_55_WAVE_JOINED, 1 } }, SET_55_BOOT, SET_NONE },
 };
 
 #define MODEL_COUNT ((int)(sizeof(MODELS) / sizeof(MODELS[0])))
@@ -578,12 +603,29 @@ static int find_wave(const catalog_t *c, int set, int slot)
 	return -1;
 }
 
+static int wave_missing(const catalog_t *c, const wave_option_t *w)
+{
+	int missing = 0;
+	for (int n = 0; n < w->count; n++)
+		if (find_wave(c, w->set, n) < 0)
+			missing++;
+	return missing;
+}
+
+/* the first of the model's wave sets that is all there, else -1 */
+static int find_waves(const catalog_t *c, const model_def_t *d)
+{
+	for (int n = 0; n < WAVE_OPTIONS && d->waves[n].count; n++)
+		if (!wave_missing(c, &d->waves[n]))
+			return n;
+	return -1;
+}
+
 static int missing_count(const catalog_t *c, const model_def_t *d)
 {
 	int missing = find_control(c, d->control_set) < 0;
-	for (int n = 0; n < d->wave_count; n++)
-		if (find_wave(c, d->wave_set, n) < 0)
-			missing++;
+	if (find_waves(c, d) < 0)
+		missing += wave_missing(c, &d->waves[0]);
 	if (d->boot_set != SET_NONE && find_control(c, d->boot_set) < 0)
 		missing++;
 	if (d->tone_set != SET_NONE && find_control(c, d->tone_set) < 0)
@@ -640,12 +682,13 @@ static void missing_message(const catalog_t *c, const model_def_t *d, char *err,
 		append(err, err_size, &at, ")");
 		sep = ", no ";
 	}
-	for (int n = 0; n < d->wave_count; n++)
+	const wave_option_t *own = &d->waves[0];
+	for (int n = 0; find_waves(c, d) < 0 && n < own->count; n++)
 	{
-		if (find_wave(c, d->wave_set, n) >= 0)
+		if (find_wave(c, own->set, n) >= 0)
 			continue;
 		for (int i = 0; i < IMAGE_COUNT; i++)
-			if (IMAGES[i].set == d->wave_set && IMAGES[i].slot == n)
+			if (IMAGES[i].set == own->set && IMAGES[i].slot == n)
 			{
 				append(err, err_size, &at, "%s%s (%s, crc %08x)", sep, IMAGES[i].role,
 				       size_text(IMAGES[i].size, text, sizeof(text)), IMAGES[i].crc);
@@ -700,15 +743,16 @@ static int load_model(scplay_roms_t *out, const model_def_t *d, const catalog_t 
 	out->owned[out->owned_count++] = program;
 	out->roms.program_rom = program;
 	out->roms.program_rom_size = IMAGES[ctl].size;
-	out->roms.wave_rom_count = d->wave_count;
+	const wave_option_t *waves = &d->waves[find_waves(c, d)];
+	out->roms.wave_rom_count = waves->count;
 	snprintf(out->version, sizeof(out->version), "%s", IMAGES[ctl].version);
 	snprintf(out->origin, sizeof(out->origin), "%s", c->found[ctl].path);
 
 	uint64_t h = hash_image(0xcbf29ce484222325ull, &IMAGES[ctl]);
 
-	for (int n = 0; n < d->wave_count; n++)
+	for (int n = 0; n < waves->count; n++)
 	{
-		int index = find_wave(c, d->wave_set, n);
+		int index = find_wave(c, waves->set, n);
 		void *wave = image_read(c, index);
 		if (!wave)
 		{

@@ -7,19 +7,15 @@ typedef struct rom_layout
 {
 	size_t program_size;
 	bool program_word_swapped;
-	int wave_count;
-	size_t wave_size;
 } rom_layout_t;
 
 static const rom_layout_t LAYOUT[SCEMU_MODEL_COUNT] =
 {
-	[SCEMU_MODEL_SC88]    = { 0x080000, false, 4, 0x200000 },
-	[SCEMU_MODEL_SC88VL]  = { 0x080000, true,  4, 0x200000 },
-	[SCEMU_MODEL_SC88PRO] = { 0x100000, false, 5, 0x400000 },
-	[SCEMU_MODEL_VEGSPRO] = { 0x100000, true,  3, 0 },
+	[SCEMU_MODEL_SC88]    = { 0x080000, false },
+	[SCEMU_MODEL_SC88VL]  = { 0x080000, true },
+	[SCEMU_MODEL_SC88PRO] = { 0x100000, false },
+	[SCEMU_MODEL_VEGSPRO] = { 0x100000, true },
 };
-
-static const size_t VEGSPRO_WAVE[3] = { 0x800000, 0x800000, 0x400000 };
 
 static const sc88_map_t MAP_SC88 = { 0x080000, { 0x008000, 0x0e8000 }, 0x0e0000, 0x0f0000, 0x0fc100, 0 };
 static const sc88_map_t MAP_PRO = { 0xc00000, { 0, 0 }, 0xc80000, 0xe00000, 0xefc100, 0xf00000 };
@@ -33,17 +29,7 @@ const char *sc88_validate_roms(scemu_model_t model, const scemu_roms_t *roms)
 		return "no program ROM";
 	if (roms->program_rom_size != l->program_size)
 		return "program ROM has the wrong size";
-	if (roms->wave_rom_count != l->wave_count)
-		return "wrong number of wave ROMs";
-	for (int n = 0; n < l->wave_count; n++)
-	{
-		size_t want = l->wave_size ? l->wave_size : VEGSPRO_WAVE[n];
-		if (!roms->wave_rom[n])
-			return "missing wave ROM";
-		if (roms->wave_rom_size[n] != want)
-			return "wave ROM has the wrong size";
-	}
-	return NULL;
+	return wave_rom_validate(model, roms);
 }
 
 /* ---------------------------------------------------------------- the gate array */

@@ -25,6 +25,27 @@ complete SC-88VL.
 
 Where several versions of a control ROM are there, the newest is taken.
 
+## Descrambled wave ROMs
+
+A machine's wave ROMs may also be given already descrambled, as **one file**: the whole set joined in
+the order the sound chip addresses it.  That is how a dump made from a working unit usually arrives:
+rather than coming off the chips, it is read through the sound chip with a modified control ROM that
+answers memory requests over MIDI system exclusive, so it comes out descrambled and in one piece.  The
+earlier models' control ROMs are socketed, and the SC-8820 and SC-8850 take theirs as an update over
+MIDI.  Descrambled chips kept as separate files are not recognised.
+Where both a machine's own chips and a descrambled file are there, the chips are taken.
+
+| machine | size | CRC32 |
+|---|---|---|
+| SC-55 | 3 MiB | `067aa3e4` |
+| SC-55mkII | 3 MiB | `91b58f99` |
+| SC-88, SC-88VL | 8 MiB | `efcf0d43` |
+| SC-88Pro | 20 MiB | `c5db4bad` |
+| SC-8820 | 24 MiB | `aacf3ad8` |
+| SC-8850 | 32 MiB | `35c212ee` |
+
+The SC-55 and SC-55mkII files are their chips back to back, without the mirrors the boards make of them.
+
 ## SC-55
 
 Five images: the control program, the main CPU's own internal ROM and the three wave ROMs.  The control
@@ -89,6 +110,11 @@ image is also circulated labelled "Version 1.01"; it is 1.04.)
 
 The SC-88Pro's wave images are reconstructed from the vegspro dumps — the same sample data, on wider
 chips there.
+
+The SC-88Pro also plays from a later machine's wave set, whose first 20 MB is the SC-88Pro's own: the
+SC-8850's two wave ROMs or its descrambled file, or the SC-8820's.  Its own chips are taken first, then
+its own descrambled file, then the SC-8850's set, then the SC-8820's.  The SC-88's samples are in those
+sets too, but at other addresses, so the SC-88 and SC-88VL need their own.
 
 ## SC-8850
 

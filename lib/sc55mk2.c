@@ -15,13 +15,7 @@ const char *sc55mk2_validate_roms(scemu_model_t model, const scemu_roms_t *roms)
 		return "no internal ROM";
 	if (roms->boot_rom_size != SC55MK2_INTERNAL_ROM_SIZE)
 		return "internal ROM has the wrong size";
-	if (roms->wave_rom_count != 2)
-		return "wrong number of wave ROMs";
-	if (!roms->wave_rom[0] || !roms->wave_rom[1])
-		return "missing wave ROM";
-	if (roms->wave_rom_size[0] != 0x200000 || roms->wave_rom_size[1] != 0x100000)
-		return "wave ROM has the wrong size";
-	return NULL;
+	return wave_rom_validate(model, roms);
 }
 
 /* ---------------------------------------------------------------- wiring */

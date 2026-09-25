@@ -25,10 +25,7 @@ const char *sc8820_validate_roms(scemu_model_t model, const scemu_roms_t *roms)
 		return "program flash must be 2 MB";
 	if (roms->tone_rom || roms->tone_rom_size)
 		return "the SC-8820 has no separate tone flash";
-	if (roms->wave_rom_count != 2 || !roms->wave_rom[0] || !roms->wave_rom[1]
-	    || roms->wave_rom_size[0] != 0x1000000 || roms->wave_rom_size[1] != 0x800000)
-		return "wave ROMs must be 16 MB and 8 MB";
-	return NULL;
+	return wave_rom_validate(model, roms);
 }
 
 /* ---------------------------------------------------------------- the panel */
