@@ -74,6 +74,7 @@ typedef struct xp_voice
 	uint8_t phase;
 	uint8_t format;
 	uint8_t fade_entry;
+	int32_t sample;
 } xp_voice_t;
 
 /* the multiply input a slot's col[5:4] selects, and what it selects instead when the function is 0 */
@@ -95,6 +96,7 @@ typedef struct xp_slot
 	uint16_t cram;
 	int32_t coefficient;
 	int32_t raw;
+	int32_t logic;
 } xp_slot_t;
 
 /* The datapath registers that live across slots and frames. */

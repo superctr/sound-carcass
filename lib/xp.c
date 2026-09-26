@@ -58,6 +58,7 @@ static const ramp_pages_t RAMPS[5] = {
 };
 
 static inline int32_t clamp24(int64_t v) { return (int32_t)(v > 0x7fffff ? 0x7fffff : v < -0x800000 ? -0x800000 : v); }
+static inline int32_t clamp16(int64_t v) { return (int32_t)(v > 0x7fff ? 0x7fff : v < -0x8000 ? -0x8000 : v); }
 static inline int32_t wrap29(int64_t v) { return (int32_t)((int64_t)((uint64_t)v << 35) >> 35); }
 static inline int32_t wrap24(int32_t v) { return (int32_t)((uint32_t)v << 8) >> 8; }
 static inline int32_t wrap20(int32_t v) { return (int32_t)((uint32_t)v << 12) >> 12; }
@@ -788,6 +789,43 @@ static void clear_named_words(xp_t *xp)
 		xp->iram[cell_of(0x40 + __builtin_ctzll(named), xp->parity ^ 1)] = 0;
 }
 
+static int32_t filter(xp_t *xp, int n, int mode, int32_t in)
+{
+	const int32_t f = page(xp, n, XP_PAGE_CUTOFF) & 0xfffff;
+	const int32_t q = page(xp, n, XP_PAGE_RESO_SEED) & 0xfffff;
+	int32_t low = wrap24((int32_t)page(xp, n, XP_PAGE_FILTER_LOW));
+	int32_t band = wrap24((int32_t)page(xp, n, XP_PAGE_FILTER_BAND));
+	low = clamp24(low + ((int64_t)f * band) / (1 << 19));
+	const int32_t high = clamp24(in - ((int32_t)(((int64_t)q * band) / (1 << 19)) + low));
+	band = clamp24(band + ((int64_t)f * high) / (1 << 19));
+	set_page(xp, n, XP_PAGE_FILTER_LOW, (uint32_t)low & 0xffffff);
+	set_page(xp, n, XP_PAGE_FILTER_BAND, (uint32_t)band & 0xffffff);
+	switch (mode)
+	{
+	case 0: return low;
+	case 1: return band;
+	case 2: return high;
+	default: return clamp24((int64_t)high - low);
+	}
+}
+
+static int32_t amplify(const xp_t *xp, int n, int32_t value)
+{
+	return clamp24(((int64_t)value * ((page(xp, n, XP_PAGE_SMOOTH) & 0xffff) << 4)) / (1 << 19));
+}
+
+static bool pairs(const xp_t *xp, int n)
+{
+	const uint32_t control = page(xp, n, XP_PAGE_FILTER);
+	const int structure = (control >> 12) & 15;
+	return !bit(n, 0) && bit(control, 4) && structure >= 1 && structure <= 9;
+}
+
+static bool sounding(const xp_t *xp, int n)
+{
+	return xp->voices[n].phase == XP_RUNNING && !bit(page(xp, n, XP_PAGE_CONTROL), 10);
+}
+
 static void run_voice(xp_t *xp, int n)
 {
 	xp_voice_t *v = &xp->voices[n];
@@ -930,24 +968,55 @@ static void run_voice(xp_t *xp, int n)
 	if (halted)
 		return;
 
-	const int32_t f = page(xp, n, XP_PAGE_CUTOFF) & 0xfffff;
-	const int32_t q = page(xp, n, XP_PAGE_RESO_SEED) & 0xfffff;
-	int32_t low = wrap24((int32_t)page(xp, n, XP_PAGE_FILTER_LOW));
-	int32_t band = wrap24((int32_t)page(xp, n, XP_PAGE_FILTER_BAND));
-	low = clamp24(low + ((int64_t)f * band) / (1 << 19));
-	const int32_t high = clamp24(sample - ((int32_t)(((int64_t)q * band) / (1 << 19)) + low));
-	band = clamp24(band + ((int64_t)f * high) / (1 << 19));
-	set_page(xp, n, XP_PAGE_FILTER_LOW, (uint32_t)low & 0xffffff);
-	set_page(xp, n, XP_PAGE_FILTER_BAND, (uint32_t)band & 0xffffff);
-	switch ((page(xp, n, XP_PAGE_FILTER) >> 10) & 3)
+	if (pairs(xp, n & ~1))
 	{
-	case 0: sample = low; break;
-	case 1: sample = band; break;
-	case 2: sample = high; break;
-	case 3: sample = clamp24((int64_t)high - low); break;
+		v->sample = sample;
+		return;
 	}
 
-	set_page(xp, n, XP_PAGE_OUTPUT, (uint32_t)clamp24(((int64_t)sample * (smooth << 4)) / (1 << 19)) & 0xffffff);
+	set_page(xp, n, XP_PAGE_OUTPUT, (uint32_t)amplify(xp, n, filter(xp, n, (page(xp, n, XP_PAGE_FILTER) >> 10) & 3, sample)) & 0xffffff);
+}
+
+static int32_t boost(int booster, int32_t x) { return clamp16((int64_t)x << booster); }
+static int32_t ring(int32_t modulator, int32_t carrier) { return clamp24(((int64_t)clamp16(modulator) * carrier) / 32768); }
+
+static void run_pair(xp_t *xp, int n)
+{
+	const int m = n + 1;
+	set_page(xp, m, XP_PAGE_OUTPUT, 0);
+
+	if (!running(xp, n) || !sounding(xp, n) || (running(xp, m) && !sounding(xp, m)))
+		return;
+
+	const uint32_t control = page(xp, n, XP_PAGE_FILTER);
+	const int booster = (control >> 6) & 3;
+	const int mode1 = (control >> 10) & 3;
+	const int mode2 = (control >> 8) & 3;
+	const int32_t w1 = xp->voices[n].sample;
+	const int32_t w2 = running(xp, m) ? xp->voices[m].sample : 0;
+
+	int32_t out, modulator, carrier;
+	switch ((control >> 12) & 15)
+	{
+	case 1: out = filter(xp, m, mode2, filter(xp, n, mode1, clamp16((int64_t)amplify(xp, n, w1) + w2))); break;
+	case 2: out = filter(xp, m, mode2, boost(booster, filter(xp, n, mode1, clamp16((int64_t)amplify(xp, n, w1) + w2)))); break;
+	case 3: out = filter(xp, m, mode2, filter(xp, n, mode1, boost(booster, clamp16((int64_t)amplify(xp, n, w1) + w2)))); break;
+	case 4: out = filter(xp, m, mode2, filter(xp, n, mode1, ring(amplify(xp, n, w1), w2))); break;
+	case 5: out = filter(xp, m, mode2, filter(xp, n, mode1, clamp16((int64_t)ring(amplify(xp, n, w1), w2) + w2))); break;
+	case 6: out = filter(xp, m, mode2, ring(amplify(xp, n, filter(xp, n, mode1, w1)), w2)); break;
+	case 7: out = filter(xp, m, mode2, clamp16((int64_t)ring(amplify(xp, n, filter(xp, n, mode1, w1)), w2) + w2)); break;
+	case 8:
+		modulator = amplify(xp, n, filter(xp, n, mode1, w1));
+		out = ring(modulator, filter(xp, m, mode2, w2));
+		break;
+	default:
+		modulator = amplify(xp, n, filter(xp, n, mode1, w1));
+		carrier = filter(xp, m, mode2, w2);
+		out = clamp16((int64_t)ring(modulator, carrier) + carrier);
+		break;
+	}
+
+	set_page(xp, n, XP_PAGE_OUTPUT, (uint32_t)amplify(xp, m, out) & 0xffffff);
 }
 
 /* --- a voice whose frame is the identity but for its service counter is stepped by that counter alone */
@@ -1105,6 +1174,7 @@ static void decode_cram(xp_slot_t *s, uint16_t c)
 	s->cram = c;
 	s->coefficient = mantissa << shift_select[c >> 14];
 	s->raw = bit(c, 15) ? (int32_t)((c & 0x3fff) << 13) : mantissa;
+	s->logic = bit(c, 15) ? (int32_t)((uint32_t)(c & 0x7fff) << 13) : (((int32_t)(int16_t)(c << 1) >> 1) & 0xffffff);
 }
 
 void xp_decode_program(xp_t *xp)
@@ -1501,15 +1571,25 @@ static void e_alu(jit_builder_t *b, int fn, int mode, sljit_s32 raw, sljit_sw ra
 			sljit_emit_op2(b->c, SLJIT_ASHR, XP_REG_ACC, 0, XP_REG_PPREV, 0, SLJIT_IMM, 13);
 		break;
 	case 0xd:
-		if (mode < 3)
+		if (mode)
 		{
-			sljit_emit_op2(b->c, mode == 0 ? SLJIT_AND : mode == 1 ? SLJIT_OR : SLJIT_XOR, XP_REG_ACC, 0, XP_REG_ACC, 0, raw, raww);
+			sljit_emit_op2(b->c, mode == 1 ? SLJIT_AND : mode == 2 ? SLJIT_OR : SLJIT_XOR, XP_REG_ACC, 0, XP_REG_ACC, 0, raw, raww);
 			e_wrap29(b, XP_REG_ACC);
 		}
 		break;
 	case 0xe:
 		if (mode < 2)
 			e_minmax(b, XP_REG_ACC, raw, raww, mode == 1);
+		else
+		{
+			sljit_emit_op2(b->c, SLJIT_XOR, SLJIT_R3, 0, XP_REG_ACC, 0, raw, raww);
+			struct sljit_jump *differ = sljit_emit_cmp(b->c, SLJIT_SIG_LESS, SLJIT_R3, 0, SLJIT_IMM, 0);
+			e_minmax(b, XP_REG_ACC, raw, raww, mode == 3);
+			struct sljit_jump *done = sljit_emit_jump(b->c, SLJIT_JUMP);
+			sljit_set_label(differ, sljit_emit_label(b->c));
+			e_minmax(b, XP_REG_ACC, raw, raww, mode == 2);
+			sljit_set_label(done, sljit_emit_label(b->c));
+		}
 		break;
 	case 0xf:
 		switch (mode)
@@ -1666,11 +1746,14 @@ static int e_execute(jit_builder_t *b, int i, const xp_slot_t *s, const xp_sched
 	}
 	if (live)
 	{
-		e_load(b, SLJIT_R4, SLOT_CELL(i, raw));
+		if (fn == 0xd)
+			e_load(b, SLJIT_R4, SLOT_CELL(i, logic));
+		else
+			e_load(b, SLJIT_R4, SLOT_CELL(i, raw));
 		e_alu(b, fn, mode, SLJIT_R4, 0);
 	}
 	else
-		e_alu(b, fn, mode, SLJIT_IMM, s->raw);
+		e_alu(b, fn, mode, SLJIT_IMM, (fn == 0xd) ? s->logic : s->raw);
 	return issued ? 1 : 0;
 }
 
@@ -1945,15 +2028,23 @@ void xp_run_frame(xp_t *xp)
 	for (int n = 0; n < voice_count(xp); n++)
 	{
 		if (!running(xp, n))
-		{
 			run_voice(xp, n);
-			continue;
+		else
+		{
+			const int32_t output = wrap24((int32_t)page(xp, n, XP_PAGE_OUTPUT));
+			if (output)
+				for (int bank = 0; bank < 4; bank++)
+					deposit(xp, n, bank, output);
+			if (pairs(xp, n & ~1))
+			{
+				xp->still[n] = 0;
+				run_voice(xp, n);
+			}
+			else
+				run_voice_watched(xp, n);
 		}
-		const int32_t output = wrap24((int32_t)page(xp, n, XP_PAGE_OUTPUT));
-		if (output)
-			for (int bank = 0; bank < 4; bank++)
-				deposit(xp, n, bank, output);
-		run_voice_watched(xp, n);
+		if (bit(n, 0) && pairs(xp, n - 1))
+			run_pair(xp, n - 1);
 	}
 
 	run_dsp(xp);
@@ -2004,6 +2095,7 @@ void xp_state(xp_t *xp, state_registry_t *reg)
 	state_field(reg, xp->voices, XP_VOICES, phase);
 	state_field(reg, xp->voices, XP_VOICES, format);
 	state_field(reg, xp->voices, XP_VOICES, fade_entry);
+	state_field(reg, xp->voices, XP_VOICES, sample);
 	state_array(reg, xp->still);
 	state_var(reg, xp->run_mask);
 	state_var(reg, xp->run_pending);
