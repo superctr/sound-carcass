@@ -178,7 +178,7 @@ static uint8_t bus_read8(void *user, uint32_t address)
 	case DEV_LSP:   return lsp_host_read(&b->lsp, offset);
 	case DEV_XP:
 	{
-		const uint16_t word = xp_read(&b->xp, offset >> 1);
+		const uint16_t word = xp_read(&b->xp, offset >> 1, (address & 1) ? 0x00ff : 0xff00);
 		return (uint8_t)((address & 1) ? word : word >> 8);
 	}
 	case DEV_FLASH:
@@ -197,7 +197,7 @@ static uint16_t bus_read16(void *user, uint32_t address)
 	switch (decode(address, &offset))
 	{
 	case DEV_DRAM:  return (uint16_t)((b->dram[offset] << 8) | b->dram[offset + 1]);
-	case DEV_XP:    return xp_read(&b->xp, offset >> 1);
+	case DEV_XP:    return xp_read(&b->xp, offset >> 1, 0xffff);
 	case DEV_FLASH: return flash_read(&b->flash, offset);
 	case DEV_NONE:  return 0;
 	default:        return (uint16_t)((bus_read8(user, address) << 8) | bus_read8(user, address + 1));

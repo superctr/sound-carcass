@@ -258,7 +258,7 @@ static uint16_t bus_read16(void *user, uint32_t address)
 	{
 	case DEV_ROM:  return (uint16_t)((b->program_rom[offset] << 8) | b->program_rom[offset + 1]);
 	case DEV_SRAM: return (uint16_t)((b->sram[offset] << 8) | b->sram[offset + 1]);
-	case DEV_XP:   return xp_read(&b->xp, offset >> 1);
+	case DEV_XP:   return xp_read(&b->xp, offset >> 1, 0xffff);
 	case DEV_SUB:  return (uint16_t)((sub_hle_read(&b->sub, offset) << 8) | sub_hle_read(&b->sub, offset + 1));
 	case DEV_GA:   return (uint16_t)((sc88_ga_read(&b->ga, offset) << 8) | sc88_ga_read(&b->ga, offset + 1));
 	case DEV_LSP:  return (uint16_t)((lsp_host_read(&b->lsp, offset) << 8) | lsp_host_read(&b->lsp, offset + 1));
@@ -276,7 +276,7 @@ static uint8_t bus_read8(void *user, uint32_t address)
 	case DEV_SRAM: return b->sram[offset];
 	case DEV_XP:
 	{
-		const uint16_t word = xp_read(&b->xp, offset >> 1);
+		const uint16_t word = xp_read(&b->xp, offset >> 1, (address & 1) ? 0x00ff : 0xff00);
 		return (uint8_t)((address & 1) ? word : word >> 8);
 	}
 	case DEV_SUB:  return sub_hle_read(&b->sub, offset);

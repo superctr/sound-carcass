@@ -188,7 +188,7 @@ void xp_release(xp_t *xp);
 void xp_reset(xp_t *xp);
 
 /* The host window: offset is the word index in the 16 KB window. */
-uint16_t xp_read(xp_t *xp, uint32_t offset);
+uint16_t xp_read(xp_t *xp, uint32_t offset, uint16_t mask);
 void xp_write(xp_t *xp, uint32_t offset, uint16_t data, uint16_t mask);
 
 void xp_run_frame(xp_t *xp);

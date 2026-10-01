@@ -282,7 +282,7 @@ static void write_iram_target(xp_t *xp, int word, uint16_t value)
 	}
 }
 
-static void load_latch(xp_t *xp, uint32_t address)
+static void load_latch(xp_t *xp, uint32_t address, uint32_t lane)
 {
 	if (address < XP_CRAM_BASE)
 	{
@@ -310,9 +310,14 @@ static void load_latch(xp_t *xp, uint32_t address)
 		xp->read_latch = xp->regs[address >> 1];
 	else if (address >= XP_ROM_WINDOW)
 	{
-		const uint32_t byte = ((uint32_t)(xp->regs[XP_ROM_BANK >> 1] & 0x7f) << 20)
-			| ((uint32_t)(xp->regs[XP_ROM_PAGE >> 1] & 0x3ff) << 10) | (address - XP_ROM_WINDOW);
-		xp->read_latch = wave_byte(xp, byte) | ((uint32_t)wave_byte(xp, byte + 1) << 8);
+		const uint32_t base = ((uint32_t)(xp->regs[XP_ROM_BANK >> 1] & 0x7f) << 20) | ((uint32_t)(xp->regs[XP_ROM_PAGE >> 1] & 0x3ff) << 10);
+		const unsigned select = base >> 24;
+		const uint8_t descriptor = (uint8_t)(xp->regs[(XP_ROM_SELECT >> 1) + (select >> 1)] >> (bit(select, 0) ? 8 : 0));
+		const uint32_t byte = base | ((address - XP_ROM_WINDOW) + (bit(descriptor, 0) ? 0 : lane));
+		if (bit(descriptor, 0))
+			xp->read_latch = wave_byte(xp, byte) | ((uint32_t)wave_byte(xp, byte + 1) << 8);
+		else
+			xp->read_latch = wave_byte(xp, byte);
 	}
 }
 
@@ -330,13 +335,13 @@ static void commit_run_mask(xp_t *xp);
 static void decode_cram(xp_slot_t *s, uint16_t c);
 static uint16_t decode_offset(const xp_t *xp, int i);
 
-uint16_t xp_read(xp_t *xp, uint32_t offset)
+uint16_t xp_read(xp_t *xp, uint32_t offset, uint16_t mask)
 {
 	const uint32_t address = translate(xp, (offset << 1) & 0x3ffe);
 	uint16_t data = 0;
 
 	if (address < XP_RUN_MASK || address >= XP_SEND_BASE)
-		load_latch(xp, address);
+		load_latch(xp, address, mask == 0x00ff ? 1 : 0);
 	else
 	{
 		if (address < XP_ROM_SELECT)
