@@ -487,6 +487,7 @@ static void commit_run_mask(xp_t *xp)
 		if ((launched >> n) & 1)
 		{
 			xp->voices[n].phase = XP_PRELOAD;
+			xp->voices[n].launched = 1;
 			xp->still[n] = 0;
 		}
 }
@@ -833,7 +834,7 @@ static void run_voice(xp_t *xp, int n)
 	if (!running(xp, n))
 	{
 		const int32_t smooth = page(xp, n, XP_PAGE_SMOOTH) & 0xffff;
-		if (smooth)
+		if (smooth && v->launched)
 			set_page(xp, n, XP_PAGE_SMOOTH, (uint32_t)max32((smooth * 7) >> 3, 1));
 		set_page(xp, n, XP_PAGE_FILTER_BAND, 0);
 		set_page(xp, n, XP_PAGE_FILTER_LOW, 0);
@@ -2095,6 +2096,7 @@ void xp_state(xp_t *xp, state_registry_t *reg)
 	state_field(reg, xp->voices, XP_VOICES, phase);
 	state_field(reg, xp->voices, XP_VOICES, format);
 	state_field(reg, xp->voices, XP_VOICES, fade_entry);
+	state_field(reg, xp->voices, XP_VOICES, launched);
 	state_field(reg, xp->voices, XP_VOICES, sample);
 	state_array(reg, xp->still);
 	state_var(reg, xp->run_mask);

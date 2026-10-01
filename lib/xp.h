@@ -74,6 +74,7 @@ typedef struct xp_voice
 	uint8_t phase;
 	uint8_t format;
 	uint8_t fade_entry;
+	uint8_t launched;
 	int32_t sample;
 } xp_voice_t;
 
