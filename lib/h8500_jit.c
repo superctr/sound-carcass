@@ -59,6 +59,12 @@ struct h8500_jit
 	uint8_t *rd16[PAGE_COUNT];
 	uint8_t *wr8[PAGE_COUNT];
 	uint8_t *wr16[PAGE_COUNT];
+	/* what a fast-path access to the page costs; costed when any does, at
+	 * the wait states the blocks were translated with */
+	uint8_t cost8[PAGE_COUNT];
+	uint8_t cost16[PAGE_COUNT];
+	bool costed;
+	uint8_t waits;
 	uint32_t limit_base;
 	uint32_t io_base, io_size, addr_mask;
 	uint64_t stat_blocks_run;
@@ -176,8 +182,10 @@ int h8500_jit_run(h8500_t *cpu, int cycles)
 			int level;
 			int vector = h8500_irq_select(cpu, &level);
 			flush(cpu);
+			cpu->bus_states = 0;
 			h8500_take_interrupt(cpu, vector, level);
-			cpu->jit_pending = 20;
+			cpu->jit_pending = H8500_IRQ_STATES + cpu->bus_states;
+			cpu->bus_states = 0;
 			recompute(cpu);
 			j->stat_interrupts++;
 			continue;
@@ -194,7 +202,7 @@ int h8500_jit_run(h8500_t *cpu, int cycles)
 		{
 			uint32_t key = ((uint32_t)cpu->cp << 16) | cpu->pc;
 			block_t *b;
-			if (j->count >= CACHE_BLOCK_MAX || j->code_size >= CACHE_CODE_MAX)
+			if (j->count >= CACHE_BLOCK_MAX || j->code_size >= CACHE_CODE_MAX || cpu->waits != j->waits)
 				h8500_jit_flush(cpu);
 			b = lookup(j, key);
 			if (b->key == KEY_NONE)
@@ -248,6 +256,8 @@ static void SLJIT_FUNC hwrite8(h8500_t *cpu, sljit_sw addr, sljit_sw data)
 		flush(cpu);
 		h8500_mem_write8(cpu, a, (uint8_t)data);
 		recompute(cpu);
+		if (cpu->waits != cpu->jit->waits)
+			cpu->jit_limit = 0;
 		return;
 	}
 	h8500_mem_write8(cpu, a, (uint8_t)data);
@@ -261,6 +271,8 @@ static void SLJIT_FUNC hwrite16(h8500_t *cpu, sljit_sw addr, sljit_sw data)
 		flush(cpu);
 		h8500_mem_write16(cpu, a, (uint16_t)data);
 		recompute(cpu);
+		if (cpu->waits != cpu->jit->waits)
+			cpu->jit_limit = 0;
 		return;
 	}
 	h8500_mem_write16(cpu, a, (uint16_t)data);
@@ -310,7 +322,11 @@ typedef struct insn
 	uint8_t ext[2];
 	uint16_t imm;
 	int16_t disp;
-	int cyc;
+	/* the states of each way out: taken / not taken (Bcc), taken / count
+	 * out / condition false (SCB), quotient / overflow / zero (DIVXU); adj
+	 * when a computed destination's parity is added at run time */
+	int cyc, cyc2, cyc3;
+	bool adj;
 	uint8_t fw, fr;
 	bool term;
 	bool byte_stack;
@@ -386,43 +402,42 @@ static void decode_general(decoder_t *d, insn_t *i)
 {
 	uint8_t op = dfetch8(d);
 	int mode = i->mode;
-	int cyc = h8500_cyc_src[mode];
-	int rmw = h8500_cyc_rmw[mode];
+	int cyc = h8500_general_states(op, mode, i->sz);
 	i->op = op;
 
 	switch (op)
 	{
 	case 0x04: case 0x06:
 		i->imm = dfetch8(d);
-		set(i, op == 0x04 ? K_G_CMPIMM : K_G_MOVIMM, rmw + 1, op == 0x04 ? FLAGS_ALL : (FLAG_N | FLAG_Z | FLAG_V), 0);
+		set(i, op == 0x04 ? K_G_CMPIMM : K_G_MOVIMM, cyc, op == 0x04 ? FLAGS_ALL : (FLAG_N | FLAG_Z | FLAG_V), 0);
 		return;
 	case 0x05: case 0x07:
 		i->imm = dfetch16(d);
-		set(i, op == 0x05 ? K_G_CMPIMM : K_G_MOVIMM, rmw + 2, op == 0x05 ? FLAGS_ALL : (FLAG_N | FLAG_Z | FLAG_V), 0);
+		set(i, op == 0x05 ? K_G_CMPIMM : K_G_MOVIMM, cyc, op == 0x05 ? FLAGS_ALL : (FLAG_N | FLAG_Z | FLAG_V), 0);
 		return;
 	case 0x08: case 0x09: case 0x0c: case 0x0d:
-		set(i, K_G_ADDQ, rmw, FLAGS_ALL, 0);
+		set(i, K_G_ADDQ, cyc, FLAGS_ALL, 0);
 		return;
 	case 0x10:
 		if (mode != EM_REG) return;
-		set(i, K_G_SWAP, 4, FLAG_N | FLAG_Z | FLAG_V, 0);
+		set(i, K_G_SWAP, cyc, FLAG_N | FLAG_Z | FLAG_V, 0);
 		return;
 	case 0x11:
 		if (mode != EM_REG) return;
-		set(i, K_G_EXTS, 3, FLAGS_ALL, 0);
+		set(i, K_G_EXTS, cyc, FLAGS_ALL, 0);
 		return;
 	case 0x12:
 		if (mode != EM_REG) return;
-		set(i, K_G_EXTU, 3, FLAGS_ALL, 0);
+		set(i, K_G_EXTU, cyc, FLAGS_ALL, 0);
 		return;
-	case 0x13: set(i, K_G_CLR, rmw, FLAGS_ALL, 0); return;
-	case 0x14: set(i, K_G_NEG, rmw, FLAGS_ALL, 0); return;
-	case 0x15: set(i, K_G_NOT, rmw, FLAG_N | FLAG_Z | FLAG_V, 0); return;
+	case 0x13: set(i, K_G_CLR, cyc, FLAGS_ALL, 0); return;
+	case 0x14: set(i, K_G_NEG, cyc, FLAGS_ALL, 0); return;
+	case 0x15: set(i, K_G_NOT, cyc, FLAG_N | FLAG_Z | FLAG_V, 0); return;
 	case 0x16: set(i, K_G_TST, cyc, FLAGS_ALL, 0); return;
-	case 0x17: set(i, K_G_TAS, rmw, FLAGS_ALL, 0); return;
+	case 0x17: set(i, K_G_TAS, cyc, FLAGS_ALL, 0); return;
 	case 0x18: case 0x19: case 0x1a: case 0x1b:
 	case 0x1c: case 0x1d: case 0x1e: case 0x1f:
-		set(i, K_G_SHIFT, rmw, FLAGS_ALL, (op >= 0x1e) ? FLAG_C : 0);
+		set(i, K_G_SHIFT, cyc, FLAGS_ALL, (op >= 0x1e) ? FLAG_C : 0);
 		return;
 	default:
 		break;
@@ -440,28 +455,28 @@ static void decode_general(decoder_t *d, insn_t *i)
 		if (mode == EM_IMM8 || mode == EM_IMM16)
 			set(i, K_G_CRIMM, cyc, FLAGS_ALL, FLAGS_ALL);
 		else
-			set(i, K_G_BITR, rmw, FLAG_Z, 0);
+			set(i, K_G_BITR, cyc, FLAG_Z, 0);
 		return;
 	case 0x78: set(i, K_G_BTSTR, cyc, FLAG_Z, 0); return;
 	case 0x80: set(i, K_G_MOVFROM, cyc, FLAG_N | FLAG_Z | FLAG_V, 0); return;
 	case 0x88: set(i, K_G_LDC, cyc, FLAGS_ALL, FLAGS_ALL); return;
-	case 0x98: set(i, K_G_STC, rmw, 0, FLAGS_ALL); return;
+	case 0x98: set(i, K_G_STC, cyc, 0, FLAGS_ALL); return;
 	case 0x90:
 		if (mode == EM_REG)
-			set(i, K_G_XCH, 4, 0, 0);
+			set(i, K_G_XCH, cyc, 0, 0);
 		else
-			set(i, K_G_MOVTO, rmw, FLAG_N | FLAG_Z | FLAG_V, 0);
+			set(i, K_G_MOVTO, cyc, FLAG_N | FLAG_Z | FLAG_V, 0);
 		return;
 	case 0xa0: set(i, K_G_ADDX, cyc, FLAGS_ALL, FLAG_Z | FLAG_C); return;
 	case 0xb0: set(i, K_G_SUBX, cyc, FLAGS_ALL, FLAG_Z | FLAG_C); return;
-	case 0xa8: set(i, K_G_MULXU, i->sz ? 24 : 14, FLAGS_ALL, 0); return;
-	case 0xb8: set(i, K_G_DIVXU, i->sz ? 26 : 20, FLAGS_ALL, FLAGS_ALL); return;
+	case 0xa8: set(i, K_G_MULXU, cyc, FLAGS_ALL, 0); return;
+	case 0xb8: set(i, K_G_DIVXU, cyc, FLAGS_ALL, FLAGS_ALL); return;
 	default: break;
 	}
 
 	switch (op & 0xf0)
 	{
-	case 0xc0: case 0xd0: case 0xe0: set(i, K_G_BITI, rmw, FLAG_Z, 0); return;
+	case 0xc0: case 0xd0: case 0xe0: set(i, K_G_BITI, cyc, FLAG_Z, 0); return;
 	case 0xf0: set(i, K_G_BITI, cyc, FLAG_Z, 0); return;
 	default: break;
 	}
@@ -613,6 +628,80 @@ static void decode(decoder_t *d, insn_t *i)
 	i->len = (uint8_t)(d->pc - i->pc);
 }
 
+/* the states of the decoded instruction at the wait states in force, as the
+ * interpreter counts them: Table A-7's, the fetch's, and for a destination
+ * known now its Table A-8 adjustment */
+static void time_insn(const h8500_t *cpu, insn_t *i)
+{
+	int w = cpu->waits;
+	uint16_t target = (uint16_t)(i->next + i->disp);
+	int count = 0, n;
+#define F(jk, adj) h8500_fetch_states(cpu, i->addr, (jk), (adj), w)
+
+	i->adj = h8500_fetch_states(cpu, i->addr, 0, 1, w) == 1;
+	switch (i->kind)
+	{
+	case K_FALLBACK:
+		return;
+	case K_NOP: i->cyc = 2 + F(1, 0); return;
+	case K_SCB:
+		i->cyc = 8 + F(6, target & 1);
+		i->cyc2 = 4 + F(3, 0);
+		i->cyc3 = 3 + F(3, 0);
+		return;
+	case K_LDM: case K_STM:
+		for (n = 0; n < 8; n++)
+			count += (i->b1 >> n) & 1;
+		i->cyc = 6 + (i->kind == K_LDM ? 4 : 3) * count + F(2, 0);
+		return;
+	case K_PJSR24: i->cyc = 15 + F(6, i->imm & 1); return;
+	case K_PJMP24: i->cyc = 9 + F(6, i->imm & 1); return;
+	case K_BSR: i->cyc = 9 + F(i->b0 == 0x0e ? 4 : 5, target & 1); return;
+	case K_UNLK: i->cyc = 5 + F(1, 0); return;
+	case K_JMP16: i->cyc = 7 + F(5, i->imm & 1); return;
+	case K_JSR16: i->cyc = 9 + F(5, i->imm & 1); return;
+	case K_PRTD: i->cyc = 13 + F(i->b1 == 0x14 ? 5 : 6, 0); return;
+	case K_PRTS: i->cyc = 12 + F(5, 0); return;
+	case K_PJMPR: i->cyc = 8 + F(5, 0); return;
+	case K_PJSRR: i->cyc = 13 + F(5, 0); return;
+	case K_JMPR: i->cyc = 6 + F(5, 0); return;
+	case K_JSRR: i->cyc = 9 + F(5, 0); return;
+	case K_JMPD: i->cyc = (i->b1 & 0xf8) == 0xe0 ? 7 + F(5, 0) : 8 + F(6, 0); return;
+	case K_JSRD: i->cyc = (i->b1 & 0xf8) == 0xe8 ? 9 + F(5, 0) : 10 + F(6, 0); return;
+	case K_RTD: i->cyc = 9 + F(i->b0 == 0x14 ? 4 : 5, 0); return;
+	case K_LINK: i->cyc = i->b0 == 0x17 ? 6 + F(2, 0) : 7 + F(3, 0); return;
+	case K_RTS: i->cyc = 8 + F(4, 0); return;
+	case K_SLEEP: i->cyc = 2 + F(0, 0); return;
+	case K_BCC:
+		i->cyc = 7 + F(i->b0 < 0x30 ? 5 : 6, target & 1);
+		i->cyc2 = 3 + F(i->len, 0);
+		return;
+	case K_TRAPA: i->cyc = 22 + F(4, 0); return;
+	case K_RTE: i->cyc = 15 + F(4, 0); return;
+	case K_CMPE: case K_CMPI: case K_MOVE: case K_MOVI:
+		i->cyc += F(i->len, 0);
+		return;
+	case K_MOVL: case K_MOVS:
+		i->cyc += F(i->len, h8500_adjust(H8500_ADJ_OTHER, EM_ABS8, i->pc));
+		return;
+	case K_MOVF: case K_MOVFS:
+		i->cyc += F(i->len, h8500_adjust(H8500_ADJ_OTHER, EM_D8, i->pc));
+		return;
+	case K_G_DIVXU:
+	{
+		int f = F(i->len, h8500_general_adjust(i->op, i->mode, i->pc));
+		i->cyc = h8500_divxu_states(i->mode, i->sz, 0) + f;
+		i->cyc2 = h8500_divxu_states(i->mode, i->sz, 1) + f;
+		i->cyc3 = h8500_divxu_states(i->mode, i->sz, 2) + f;
+		return;
+	}
+	default:
+		i->cyc += F(i->len, h8500_general_adjust(i->op, i->mode, i->pc));
+		return;
+	}
+#undef F
+}
+
 /* ------------------------------------------------------------------ */
 /* emission                                                           */
 /* ------------------------------------------------------------------ */
@@ -649,6 +738,7 @@ typedef struct emitter
 	int exit_count;
 	bool ea_committed;
 	bool failed;
+	bool slow;
 } emitter_t;
 
 static void op1(emitter_t *e, sljit_s32 op, sljit_s32 d, sljit_sw dw, sljit_s32 s, sljit_sw sw)
@@ -705,11 +795,25 @@ static void emit_exit_now(emitter_t *e, uint16_t pc)
 	emit_return(e);
 }
 
+/* the instruction's states, and those its slow-path accesses left in
+ * bus_states: they count from the end of the instruction, as the
+ * interpreter's do, so a register-file access later in it does not see them */
+static void account(emitter_t *e, int cyc)
+{
+	if (e->slow)
+	{
+		op1(e, SLJIT_MOV_U32, SLJIT_R0, 0, CELL(bus_states));
+		op2(e, SLJIT_ADD, PENDING, 0, PENDING, 0, SLJIT_R0, 0);
+		op1(e, SLJIT_MOV_U32, CELL(bus_states), SLJIT_IMM, 0);
+	}
+	op2(e, SLJIT_ADD, PENDING, 0, PENDING, 0, SLJIT_IMM, cyc);
+}
+
 /* the boundary between two instructions: account the cycles, leave if the
  * budget or the peripheral horizon is reached */
 static void boundary(emitter_t *e, int cyc, uint16_t next)
 {
-	op2(e, SLJIT_ADD, PENDING, 0, PENDING, 0, SLJIT_IMM, cyc);
+	account(e, cyc);
 	exit_to(e, sljit_emit_cmp(e->c, SLJIT_SIG_GREATER_EQUAL, PENDING, 0, LIMIT, 0), next);
 }
 
@@ -772,12 +876,23 @@ static void call1(emitter_t *e, void *fn)
 
 /* ---- memory ---- */
 
+/* the page's cost of an access in EA on the fast path; clobbers R0 */
+static void fast_cost(emitter_t *e, int sz)
+{
+	if (!e->j->costed)
+		return;
+	op2(e, SLJIT_LSHR, SLJIT_R0, 0, EA, 0, SLJIT_IMM, PAGE_SHIFT);
+	op1(e, SLJIT_MOV_U8, SLJIT_R0, 0, SLJIT_MEM1(SLJIT_R0), (sljit_sw)(sz ? e->j->cost16 : e->j->cost8));
+	op2(e, SLJIT_ADD, PENDING, 0, PENDING, 0, SLJIT_R0, 0);
+}
+
 /* value at the 24-bit address in EA into dst (zero-extended) */
 static void mem_read(emitter_t *e, int sz, sljit_s32 dst)
 {
 	struct sljit_jump *slow1, *slow2, *slow3 = NULL, *done;
 	uint8_t **table = sz ? e->j->rd16 : e->j->rd8;
 
+	e->slow = true;
 	op2(e, SLJIT_SUB, SLJIT_R1, 0, EA, 0, SLJIT_IMM, sz ? e->j->io_base - 1 : e->j->io_base);
 	slow1 = sljit_emit_cmp(e->c, SLJIT_LESS, SLJIT_R1, 0, SLJIT_IMM, sz ? e->j->io_size + 1 : e->j->io_size);
 	if (sz)
@@ -789,6 +904,7 @@ static void mem_read(emitter_t *e, int sz, sljit_s32 dst)
 	movi(e, SLJIT_R2, (sljit_sw)table);
 	op1(e, SLJIT_MOV_P, SLJIT_R1, 0, SLJIT_MEM2(SLJIT_R2, SLJIT_R1), 3);
 	slow2 = sljit_emit_cmp(e->c, SLJIT_EQUAL, SLJIT_R1, 0, SLJIT_IMM, 0);
+	fast_cost(e, sz);
 	if (sz)
 	{
 		op1(e, SLJIT_MOV_U16, dst, 0, SLJIT_MEM2(SLJIT_R1, EA), 0);
@@ -817,6 +933,7 @@ static void mem_write(emitter_t *e, int sz, sljit_s32 src)
 	struct sljit_jump *slow1, *slow2, *slow3 = NULL, *done;
 	uint8_t **table = sz ? e->j->wr16 : e->j->wr8;
 
+	e->slow = true;
 	op2(e, SLJIT_SUB, SLJIT_R1, 0, EA, 0, SLJIT_IMM, sz ? e->j->io_base - 1 : e->j->io_base);
 	slow1 = sljit_emit_cmp(e->c, SLJIT_LESS, SLJIT_R1, 0, SLJIT_IMM, sz ? e->j->io_size + 1 : e->j->io_size);
 	if (sz)
@@ -828,6 +945,7 @@ static void mem_write(emitter_t *e, int sz, sljit_s32 src)
 	movi(e, SLJIT_R2, (sljit_sw)table);
 	op1(e, SLJIT_MOV_P, SLJIT_R1, 0, SLJIT_MEM2(SLJIT_R2, SLJIT_R1), 3);
 	slow2 = sljit_emit_cmp(e->c, SLJIT_EQUAL, SLJIT_R1, 0, SLJIT_IMM, 0);
+	fast_cost(e, sz);
 	if (sz)
 	{
 		op1(e, SLJIT_REV_U16, SLJIT_R2, 0, src, 0);
@@ -1102,16 +1220,23 @@ static void pop16(emitter_t *e, sljit_s32 dst)
 
 /* ---- the instructions ---- */
 
-static void computed_exit(emitter_t *e, sljit_s32 pc_src, sljit_sw pc_srcw, int cyc)
+/* a branch to a computed destination; i->adj adds its parity (Table A-8) */
+static void computed_exit(emitter_t *e, const insn_t *i, sljit_s32 pc_src, sljit_sw pc_srcw)
 {
 	op1(e, SLJIT_MOV_U16, CELL(pc), pc_src, pc_srcw);
-	op2(e, SLJIT_ADD, PENDING, 0, PENDING, 0, SLJIT_IMM, cyc);
+	account(e, i->cyc);
+	if (i->adj)
+	{
+		op1(e, SLJIT_MOV_U16, SLJIT_R0, 0, CELL(pc));
+		op2(e, SLJIT_AND, SLJIT_R0, 0, SLJIT_R0, 0, SLJIT_IMM, 1);
+		op2(e, SLJIT_ADD, PENDING, 0, PENDING, 0, SLJIT_R0, 0);
+	}
 	emit_return(e);
 }
 
 static void direct_exit(emitter_t *e, uint8_t cp, uint16_t pc, int cyc)
 {
-	op2(e, SLJIT_ADD, PENDING, 0, PENDING, 0, SLJIT_IMM, cyc);
+	account(e, cyc);
 	exit_to(e, sljit_emit_cmp(e->c, SLJIT_SIG_GREATER_EQUAL, PENDING, 0, LIMIT, 0), pc);
 	chain(e, cp, pc);
 }
@@ -1149,14 +1274,14 @@ static void emit_scb(emitter_t *e, const insn_t *i)
 	op2(e, SLJIT_AND, SLJIT_R0, 0, SLJIT_R0, 0, SLJIT_IMM, 0xffff);
 	op1(e, SLJIT_MOV_U16, REG16(i->reg), SLJIT_R0, 0);
 	ended = sljit_emit_cmp(e->c, SLJIT_EQUAL, SLJIT_R0, 0, SLJIT_IMM, 0xffff);
-	direct_exit(e, e->cp, target, 8);
+	direct_exit(e, e->cp, target, i->cyc);
 
 	bind(e, ended);
-	direct_exit(e, e->cp, i->next, 4);
+	direct_exit(e, e->cp, i->next, i->cyc2);
 	if (skip)
 	{
 		bind(e, skip);
-		direct_exit(e, e->cp, i->next, 3);
+		direct_exit(e, e->cp, i->next, i->cyc3);
 	}
 }
 
@@ -1179,7 +1304,8 @@ static void emit_ldm(emitter_t *e, const insn_t *i)
 		op2(e, SLJIT_AND, VAL, 0, VAL, 0, SLJIT_IMM, 0xffff);
 	}
 	op1(e, SLJIT_MOV_U16, REG16(7), VAL, 0);
-	boundary(e, 6 + 4 * count, i->next);
+	(void)count;
+	boundary(e, i->cyc, i->next);
 }
 
 static void emit_stm(emitter_t *e, const insn_t *i)
@@ -1205,7 +1331,8 @@ static void emit_stm(emitter_t *e, const insn_t *i)
 		mem_write(e, 1, VAL2);
 	}
 	op1(e, SLJIT_MOV_U16, REG16(7), VAL, 0);
-	boundary(e, 6 + 3 * count, i->next);
+	(void)count;
+	boundary(e, i->cyc, i->next);
 }
 
 static void emit_bcc(emitter_t *e, const insn_t *i)
@@ -1215,19 +1342,19 @@ static void emit_bcc(emitter_t *e, const insn_t *i)
 	struct sljit_jump *not_taken;
 	if (cc == 0)
 	{
-		direct_exit(e, e->cp, target, 7);
+		direct_exit(e, e->cp, target, i->cyc);
 		return;
 	}
 	if (cc == 1)
 	{
-		direct_exit(e, e->cp, i->next, 3);
+		direct_exit(e, e->cp, i->next, i->cyc2);
 		return;
 	}
 	condition(e, cc);
 	not_taken = sljit_emit_cmp(e->c, SLJIT_EQUAL, SLJIT_R0, 0, SLJIT_IMM, 0);
-	direct_exit(e, e->cp, target, 7);
+	direct_exit(e, e->cp, target, i->cyc);
 	bind(e, not_taken);
-	direct_exit(e, e->cp, i->next, 3);
+	direct_exit(e, e->cp, i->next, i->cyc2);
 }
 
 /* Z from the bit test of VAL against the mask in R1 */
@@ -1376,16 +1503,20 @@ static void emit_divxu(emitter_t *e, const insn_t *i)
 	done2 = sljit_emit_jump(e->c, SLJIT_JUMP);
 
 	bind(e, zero);
+	e->slow = true;
 	call_pre(e);
 	movi(e, SLJIT_R1, i->pc);
 	sljit_emit_icall(e->c, SLJIT_CALL, SLJIT_ARGS2V(P, W), SLJIT_IMM, (sljit_sw)(uintptr_t)hdivzero);
 	call_post(e);
-	op2(e, SLJIT_ADD, PENDING, 0, PENDING, 0, SLJIT_IMM, i->sz ? 22 : 16);
+	account(e, i->cyc3);
 	emit_return(e);
 
 	bind(e, done1);
-	bind(e, done2);
 	boundary(e, i->cyc, i->next);
+	done1 = sljit_emit_jump(e->c, SLJIT_JUMP);
+	bind(e, done2);
+	boundary(e, i->cyc2, i->next);
+	bind(e, done1);
 }
 
 static sljit_sw cr_offset(int c)
@@ -1476,7 +1607,7 @@ static void emit_ldc(emitter_t *e, const insn_t *i)
 			cr_write(e, c, VAL);
 	}
 	op1(e, SLJIT_MOV_U8, CELL(no_irq), SLJIT_IMM, 1);
-	op2(e, SLJIT_ADD, PENDING, 0, PENDING, 0, SLJIT_IMM, i->cyc);
+	account(e, i->cyc);
 	emit_exit_now(e, i->next);
 }
 
@@ -1533,7 +1664,7 @@ static void emit_crimm(emitter_t *e, const insn_t *i)
 			flags_nz(e, SLJIT_R0, 8, 0);
 		}
 	}
-	op2(e, SLJIT_ADD, PENDING, 0, PENDING, 0, SLJIT_IMM, i->cyc);
+	account(e, i->cyc);
 	emit_exit_now(e, i->next);
 }
 
@@ -1554,19 +1685,18 @@ static void emit_trapa(emitter_t *e, const insn_t *i)
 	op1(e, SLJIT_MOV_U8, CELL(cp), VAL, 0);
 	movi(e, EA, va + 2);
 	mem_read(e, 1, VAL);
-	computed_exit(e, VAL, 0, 22);
+	computed_exit(e, i, VAL, 0);
 }
 
 static void emit_rte(emitter_t *e, const insn_t *i)
 {
-	(void)i;
 	pop16(e, VAL);
 	cr_write(e, 0, VAL);
 	pop16(e, VAL);
 	op1(e, SLJIT_MOV_U8, CELL(cp), VAL, 0);
 	pop16(e, VAL);
 	op1(e, SLJIT_MOV_U8, CELL(no_irq), SLJIT_IMM, 1);
-	computed_exit(e, VAL, 0, 15);
+	computed_exit(e, i, VAL, 0);
 }
 
 static void emit_insn(emitter_t *e, const insn_t *i, int need)
@@ -1575,13 +1705,14 @@ static void emit_insn(emitter_t *e, const insn_t *i, int need)
 	sljit_sw mask = i->sz ? 0xffff : 0xff;
 	int d = i->op & 7;
 
+	e->slow = false;
 	switch (i->kind)
 	{
 	case K_FALLBACK:
 		emit_fallback(e, i);
 		return;
 	case K_NOP:
-		boundary(e, 2, i->next);
+		boundary(e, i->cyc, i->next);
 		return;
 	case K_SCB:
 		emit_scb(e, i);
@@ -1598,31 +1729,31 @@ static void emit_insn(emitter_t *e, const insn_t *i, int need)
 		op1(e, SLJIT_MOV_U8, SLJIT_R3, 0, CELL(cp));
 		push16(e, SLJIT_R3);
 		op1(e, SLJIT_MOV_U8, CELL(cp), SLJIT_IMM, i->b1);
-		direct_exit(e, i->b1, i->imm, 15);
+		direct_exit(e, i->b1, i->imm, i->cyc);
 		return;
 	case K_PJMP24:
 		op1(e, SLJIT_MOV_U8, CELL(cp), SLJIT_IMM, i->b1);
-		direct_exit(e, i->b1, i->imm, 9);
+		direct_exit(e, i->b1, i->imm, i->cyc);
 		return;
 	case K_BSR:
 		movi(e, SLJIT_R3, i->next);
 		push16(e, SLJIT_R3);
-		direct_exit(e, e->cp, (uint16_t)(i->next + i->disp), 9);
+		direct_exit(e, e->cp, (uint16_t)(i->next + i->disp), i->cyc);
 		return;
 	case K_UNLK:
 		op1(e, SLJIT_MOV_U16, SLJIT_R0, 0, REG16(6));
 		op1(e, SLJIT_MOV_U16, REG16(7), SLJIT_R0, 0);
 		pop16(e, VAL);
 		op1(e, SLJIT_MOV_U16, REG16(6), VAL, 0);
-		boundary(e, 5, i->next);
+		boundary(e, i->cyc, i->next);
 		return;
 	case K_JMP16:
-		direct_exit(e, e->cp, i->imm, 7);
+		direct_exit(e, e->cp, i->imm, i->cyc);
 		return;
 	case K_JSR16:
 		movi(e, SLJIT_R3, i->next);
 		push16(e, SLJIT_R3);
-		direct_exit(e, e->cp, i->imm, 9);
+		direct_exit(e, e->cp, i->imm, i->cyc);
 		return;
 	case K_PRTD:
 	case K_PRTS:
@@ -1635,11 +1766,11 @@ static void emit_insn(emitter_t *e, const insn_t *i, int need)
 			op2(e, SLJIT_ADD, SLJIT_R0, 0, SLJIT_R0, 0, SLJIT_IMM, i->disp);
 			op1(e, SLJIT_MOV_U16, REG16(7), SLJIT_R0, 0);
 		}
-		computed_exit(e, VAL, 0, i->cyc);
+		computed_exit(e, i, VAL, 0);
 		return;
 	case K_PJMPR:
 		op1(e, SLJIT_MOV_U8, CELL(cp), REG8(i->reg));
-		computed_exit(e, REG16((i->reg + 1) & 7), i->cyc);
+		computed_exit(e, i, REG16((i->reg + 1) & 7));
 		return;
 	case K_PJSRR:
 		op1(e, SLJIT_MOV_U16, VAL, 0, REG16(i->reg));
@@ -1649,16 +1780,16 @@ static void emit_insn(emitter_t *e, const insn_t *i, int need)
 		op1(e, SLJIT_MOV_U8, SLJIT_R3, 0, CELL(cp));
 		push16(e, SLJIT_R3);
 		op1(e, SLJIT_MOV_U8, CELL(cp), VAL, 0);
-		computed_exit(e, VAL2, 0, i->cyc);
+		computed_exit(e, i, VAL2, 0);
 		return;
 	case K_JMPR:
-		computed_exit(e, REG16(i->reg), i->cyc);
+		computed_exit(e, i, REG16(i->reg));
 		return;
 	case K_JSRR:
 		op1(e, SLJIT_MOV_U16, VAL, 0, REG16(i->reg));
 		movi(e, SLJIT_R3, i->next);
 		push16(e, SLJIT_R3);
-		computed_exit(e, VAL, 0, i->cyc);
+		computed_exit(e, i, VAL, 0);
 		return;
 	case K_JMPD:
 	case K_JSRD:
@@ -1670,14 +1801,14 @@ static void emit_insn(emitter_t *e, const insn_t *i, int need)
 			movi(e, SLJIT_R3, i->next);
 			push16(e, SLJIT_R3);
 		}
-		computed_exit(e, VAL, 0, i->cyc);
+		computed_exit(e, i, VAL, 0);
 		return;
 	case K_RTD:
 		pop16(e, VAL);
 		op1(e, SLJIT_MOV_U16, SLJIT_R0, 0, REG16(7));
 		op2(e, SLJIT_ADD, SLJIT_R0, 0, SLJIT_R0, 0, SLJIT_IMM, i->disp);
 		op1(e, SLJIT_MOV_U16, REG16(7), SLJIT_R0, 0);
-		computed_exit(e, VAL, 0, 9);
+		computed_exit(e, i, VAL, 0);
 		return;
 	case K_LINK:
 		op1(e, SLJIT_MOV_U16, SLJIT_R3, 0, REG16(6));
@@ -1690,11 +1821,11 @@ static void emit_insn(emitter_t *e, const insn_t *i, int need)
 		return;
 	case K_RTS:
 		pop16(e, VAL);
-		computed_exit(e, VAL, 0, 8);
+		computed_exit(e, i, VAL, 0);
 		return;
 	case K_SLEEP:
 		op1(e, SLJIT_MOV_U8, CELL(sleeping), SLJIT_IMM, 1);
-		op2(e, SLJIT_ADD, PENDING, 0, PENDING, 0, SLJIT_IMM, 2);
+		account(e, i->cyc);
 		emit_exit_now(e, i->next);
 		return;
 	case K_BCC:
@@ -1744,7 +1875,7 @@ static void emit_insn(emitter_t *e, const insn_t *i, int need)
 		}
 		if (need)
 			flags_nz(e, VAL, w, 0);
-		boundary(e, 5, i->next);
+		boundary(e, i->cyc, i->next);
 		return;
 	case K_MOVF:
 	case K_MOVFS:
@@ -1766,7 +1897,7 @@ static void emit_insn(emitter_t *e, const insn_t *i, int need)
 		}
 		if (need)
 			flags_nz(e, VAL, w, 0);
-		boundary(e, 5, i->next);
+		boundary(e, i->cyc, i->next);
 		return;
 	default:
 		break;
@@ -2085,7 +2216,10 @@ static block_t *translate(h8500_t *cpu, uint32_t key)
 		return b;
 
 	for (n = 0; n < count; n++)
+	{
 		need[n] = insns[n].fw;
+		time_insn(cpu, &insns[n]);
+	}
 
 	memset(&e, 0, sizeof(e));
 	e.j = j;
@@ -2148,6 +2282,8 @@ static void build_pages(h8500_t *cpu)
 	struct h8500_jit *j = cpu->jit;
 	const h8500_variant_t *v = cpu->var;
 	uint32_t p;
+	j->costed = false;
+	j->waits = cpu->waits;
 	for (p = 0; p < PAGE_COUNT; p++)
 	{
 		uint32_t addr = (p << PAGE_SHIFT) & v->addr_mask;
@@ -2155,6 +2291,10 @@ static void build_pages(h8500_t *cpu)
 		int n;
 		uint8_t *biased;
 		j->rd8[p] = j->rd16[p] = j->wr8[p] = j->wr16[p] = NULL;
+		j->cost8[p] = (uint8_t)h8500_access_states(cpu, addr, 0);
+		j->cost16[p] = (uint8_t)h8500_access_states(cpu, addr, 1);
+		if (j->cost8[p] | j->cost16[p])
+			j->costed = true;
 		if (v->ram_size && addr + (1u << PAGE_SHIFT) > v->ram_base && addr < v->io_base)
 			continue;
 		for (n = 0; n < cpu->region_count; n++)
@@ -2234,6 +2374,7 @@ void h8500_jit_flush(h8500_t *cpu)
 	}
 	j->count = 0;
 	j->code_size = 0;
+	build_pages(cpu);
 }
 
 void h8500_jit_detach(h8500_t *cpu)

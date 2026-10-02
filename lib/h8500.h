@@ -101,7 +101,9 @@ typedef struct h8500_variant
 	uint32_t addr_mask;
 	uint16_t io_base, io_size;
 	uint16_t ram_base, ram_size;
+	uint16_t rom_size;
 	bool bus8;
+	int16_t wcr_reg;
 
 	int port_count;
 	int16_t port_ddr[H8500_MAX_PORTS];
@@ -185,8 +187,12 @@ typedef struct h8500
 	} sci[2];
 	uint16_t port_out[H8500_MAX_PORTS];
 
-	/* time */
+	/* time; bus_states is what the operand accesses of the instruction in
+	 * flight cost beyond the tables, waits the wait states WCR puts on an
+	 * off-chip access */
 	uint64_t cycles;
+	uint32_t bus_states;
+	uint8_t waits;
 
 	/* the dynamic translator (h8500_jit.c), when attached */
 	struct h8500_jit *jit;

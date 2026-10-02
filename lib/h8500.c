@@ -34,10 +34,6 @@ static void wdt_write16(h8500_t *cpu, uint16_t data);
 #define take_interrupt h8500_take_interrupt
 #define exec_one h8500_exec_one
 
-const uint8_t h8500_cyc_src[10] = { 2, 5, 5, 6, 5, 6, 5, 6, 3, 4 };
-const uint8_t h8500_cyc_rmw[10] = { 2, 7, 7, 8, 7, 8, 7, 8, 3, 4 };
-#define cyc_src h8500_cyc_src
-#define cyc_rmw h8500_cyc_rmw
 
 /* ------------------------------------------------------------------ */
 /* memory                                                             */
@@ -74,7 +70,7 @@ static int is_iram(h8500_t *cpu, uint32_t addr)
 	return addr < cpu->var->io_base;
 }
 
-uint8_t h8500_mem_read8(h8500_t *cpu, uint32_t addr)
+static uint8_t bus_read8(h8500_t *cpu, uint32_t addr)
 {
 	uint8_t *p;
 	addr &= cpu->var->addr_mask;
@@ -86,7 +82,7 @@ uint8_t h8500_mem_read8(h8500_t *cpu, uint32_t addr)
 	return cpu->bus.read8 ? cpu->bus.read8(cpu->bus.user, addr) : 0xff;
 }
 
-void h8500_mem_write8(h8500_t *cpu, uint32_t addr, uint8_t data)
+static void bus_write8(h8500_t *cpu, uint32_t addr, uint8_t data)
 {
 	uint8_t *p;
 	addr &= cpu->var->addr_mask;
@@ -108,12 +104,12 @@ void h8500_mem_write8(h8500_t *cpu, uint32_t addr, uint8_t data)
 		cpu->bus.write8(cpu->bus.user, addr, data);
 }
 
-uint16_t h8500_mem_read16(h8500_t *cpu, uint32_t addr)
+static uint16_t bus_read16(h8500_t *cpu, uint32_t addr)
 {
 	uint8_t *p;
 	addr &= cpu->var->addr_mask;
 	if (addr & 1)
-		return (uint16_t)((mem_read8(cpu, addr) << 8) | mem_read8(cpu, addr + 1));
+		return (uint16_t)((bus_read8(cpu, addr) << 8) | bus_read8(cpu, addr + 1));
 	if (is_internal(cpu, addr))
 	{
 		if (is_iram(cpu, addr))
@@ -125,20 +121,20 @@ uint16_t h8500_mem_read16(h8500_t *cpu, uint32_t addr)
 	if (region_find(cpu, addr, 2, &p))
 		return (uint16_t)((p[0] << 8) | p[1]);
 	if (cpu->var->bus8)
-		return (uint16_t)((mem_read8(cpu, addr) << 8) | mem_read8(cpu, addr + 1));
+		return (uint16_t)((bus_read8(cpu, addr) << 8) | bus_read8(cpu, addr + 1));
 	if (cpu->bus.read16)
 		return cpu->bus.read16(cpu->bus.user, addr);
 	return 0xffff;
 }
 
-void h8500_mem_write16(h8500_t *cpu, uint32_t addr, uint16_t data)
+static void bus_write16(h8500_t *cpu, uint32_t addr, uint16_t data)
 {
 	uint8_t *p;
 	addr &= cpu->var->addr_mask;
 	if (addr & 1)
 	{
-		mem_write8(cpu, addr, (uint8_t)(data >> 8));
-		mem_write8(cpu, addr + 1, (uint8_t)data);
+		bus_write8(cpu, addr, (uint8_t)(data >> 8));
+		bus_write8(cpu, addr + 1, (uint8_t)data);
 		return;
 	}
 	if (is_internal(cpu, addr))
@@ -171,17 +167,68 @@ void h8500_mem_write16(h8500_t *cpu, uint32_t addr, uint16_t data)
 	}
 	if (cpu->var->bus8)
 	{
-		mem_write8(cpu, addr, (uint8_t)(data >> 8));
-		mem_write8(cpu, addr + 1, (uint8_t)data);
+		bus_write8(cpu, addr, (uint8_t)(data >> 8));
+		bus_write8(cpu, addr + 1, (uint8_t)data);
 		return;
 	}
 	if (cpu->bus.write16)
 		cpu->bus.write16(cpu->bus.user, addr, data);
 }
 
+/* What an operand access costs beyond the tables, which assume the 16-bit
+ * 2-state space: the register field is 8 bits wide and takes 3 states, and so
+ * does the H8/532's external bus, plus WCR's wait states.  The H8/510's areas
+ * are taken as 16-bit 2-state throughout. */
+static uint32_t access_states(const h8500_t *cpu, uint32_t addr, int word)
+{
+	const h8500_variant_t *v = cpu->var;
+	addr &= v->addr_mask;
+	if (addr - v->io_base < v->io_size)
+		return word ? 4 : 1;
+	if (!v->bus8 || addr < v->rom_size || addr - v->ram_base < v->ram_size)
+		return 0;
+	return word ? 4u + 2u * cpu->waits : 1u + cpu->waits;
+}
+
+static uint32_t access16_states(const h8500_t *cpu, uint32_t addr)
+{
+	if (addr & 1)
+		return access_states(cpu, addr, 0) + access_states(cpu, addr + 1, 0);
+	return access_states(cpu, addr, 1);
+}
+
+uint8_t h8500_mem_read8(h8500_t *cpu, uint32_t addr)
+{
+	cpu->bus_states += access_states(cpu, addr, 0);
+	return bus_read8(cpu, addr);
+}
+
+void h8500_mem_write8(h8500_t *cpu, uint32_t addr, uint8_t data)
+{
+	cpu->bus_states += access_states(cpu, addr, 0);
+	bus_write8(cpu, addr, data);
+}
+
+uint16_t h8500_mem_read16(h8500_t *cpu, uint32_t addr)
+{
+	cpu->bus_states += access16_states(cpu, addr);
+	return bus_read16(cpu, addr);
+}
+
+void h8500_mem_write16(h8500_t *cpu, uint32_t addr, uint16_t data)
+{
+	cpu->bus_states += access16_states(cpu, addr);
+	bus_write16(cpu, addr, data);
+}
+
+uint32_t h8500_access_states(const h8500_t *cpu, uint32_t addr, int word)
+{
+	return access_states(cpu, addr, word);
+}
+
 static uint8_t fetch8(h8500_t *cpu)
 {
-	uint8_t v = mem_read8(cpu, ((uint32_t)cpu->cp << 16) | cpu->pc);
+	uint8_t v = bus_read8(cpu, ((uint32_t)cpu->cp << 16) | cpu->pc);
 	cpu->pc++;
 	return v;
 }
@@ -279,7 +326,9 @@ static const h8500_variant_t variant_h8510 =
 	.addr_mask = 0xffffffu,
 	.io_base = 0xfe80, .io_size = 0x180,
 	.ram_base = 0xfe80, .ram_size = 0,
+	.rom_size = 0,
 	.bus8 = false,
+	.wcr_reg = -1,
 
 	.port_count = 8,
 	.port_ddr = { -1, R_P1DDR, R_P2DDR, R_P3DDR, R_P4DDR, R_P5DDR, R_P6DDR, -1, R_P8DDR, -1 },
@@ -331,7 +380,9 @@ static const h8500_variant_t variant_h8532 =
 	.addr_mask = 0x0fffffu,
 	.io_base = 0xff80, .io_size = 0x80,
 	.ram_base = 0xfb80, .ram_size = 0x400,
+	.rom_size = 0x8000,
 	.bus8 = true,
+	.wcr_reg = 0x78,
 
 	.port_count = 9,
 	.port_ddr = { -1, M_P1DDR, M_P2DDR, -1, M_P4DDR, M_P5DDR, M_P6DDR, M_P7DDR, -1, M_P9DDR },
@@ -1026,6 +1077,21 @@ uint8_t h8500_io_read(h8500_t *cpu, uint16_t address)
 	return cpu->io[o];
 }
 
+/* WCR: programmable and pin wait modes put WC1-0 wait states on every
+ * off-chip access, pin auto-wait mode only while WAIT is low; WAIT is taken
+ * as high */
+static void update_waits(h8500_t *cpu)
+{
+	uint8_t wcr;
+	if (cpu->var->wcr_reg < 0)
+	{
+		cpu->waits = 0;
+		return;
+	}
+	wcr = cpu->io[cpu->var->wcr_reg];
+	cpu->waits = (wcr & 0x0c) == 0x00 || (wcr & 0x0c) == 0x08 ? (uint8_t)(wcr & 3) : 0;
+}
+
 void h8500_io_write(h8500_t *cpu, uint16_t address, uint8_t data)
 {
 	const h8500_variant_t *v = cpu->var;
@@ -1034,6 +1100,12 @@ void h8500_io_write(h8500_t *cpu, uint16_t address, uint8_t data)
 
 	if (o >= v->io_size)
 		return;
+	if ((int)o == v->wcr_reg)
+	{
+		cpu->io[o] = (uint8_t)(data | 0xf0);
+		update_waits(cpu);
+		return;
+	}
 	unit = cpu->io_unit[o];
 
 	switch (cpu->io_kind[o])
@@ -1444,6 +1516,145 @@ typedef struct
 
 enum { EM_REG = 0, EM_IND, EM_D8, EM_D16, EM_PREDEC, EM_POSTINC, EM_ABS8, EM_ABS16, EM_IMM8, EM_IMM16 };
 
+/* ------------------------------------------------------------------ */
+/* execution states: the H8/520 hardware manual's appendix A.4        */
+/* ------------------------------------------------------------------ */
+
+/* Table A-7 (1)-(4), by addressing mode: the read-only row (ADD, MOV:G,
+ * TST ...) and the read-modify-write one (ADD:Q, NEG, the shifts ...) */
+static const uint8_t cyc_src[10] = { 2, 5, 5, 6, 5, 6, 5, 6, 3, 4 };
+static const uint8_t cyc_rmw[10] = { 2, 7, 7, 8, 7, 8, 7, 8, 3, 4 };
+
+/* the general group's states before the fetch and the operand accesses;
+ * DIVXU is h8500_divxu_states, the 00-prefixed DADD/DSUB/MOVFPE/MOVTPE are
+ * the caller's */
+int h8500_general_states(uint8_t op, int mode, int sz)
+{
+	int src = cyc_src[mode], rmw = cyc_rmw[mode], reg = mode == EM_REG;
+
+	switch (op)
+	{
+	case 0x04: return src + 1;                       /* CMP:G #xx:8,<EA> */
+	case 0x05: return src + 2;                       /* CMP:G #xx:16,<EA> */
+	case 0x06: return src + 2;                       /* MOV:G #xx:8,<EA> */
+	case 0x07: return src + 3;                       /* MOV:G #xx:16,<EA> */
+	case 0x08: case 0x09: case 0x0c: case 0x0d:      /* ADD:Q */
+	case 0x14: case 0x15:                            /* NEG, NOT */
+		return rmw;
+	case 0x10: case 0x11: case 0x12:                 /* SWAP, EXTS, EXTU */
+		return 3;
+	case 0x13: case 0x16:                            /* CLR, TST */
+		return src;
+	case 0x17:                                       /* TAS */
+		return reg ? 4 : rmw;
+	default:
+		break;
+	}
+	if (op >= 0x18 && op <= 0x1f)                    /* shifts and rotates */
+		return rmw;
+
+	switch (op & 0xf8)
+	{
+	case 0x28: case 0x38:                            /* ADDS, SUBS */
+	case 0x78:                                       /* BTST Rs */
+		return reg ? 3 : src;
+	case 0x48: case 0x58: case 0x68:                 /* ORC/ANDC/XORC, or BSET/BCLR/BNOT Rs */
+		if (mode == EM_IMM8)
+			return 5;
+		if (mode == EM_IMM16)
+			return 9;
+		return reg ? 4 : rmw;
+	case 0x88:                                       /* LDC */
+		return src + 1 + sz;
+	case 0x90:                                       /* XCH, MOV:G Rs,<EA> */
+		return reg ? 4 : src;
+	case 0x98:                                       /* STC */
+		return reg ? 4 : rmw;
+	case 0xa8:                                       /* MULXU */
+		if (sz)
+			return reg ? 23 : src + 20 + (mode == EM_IMM16);
+		return reg ? 16 : src + 14 + (mode == EM_IMM8);
+	case 0xb8:
+		return h8500_divxu_states(mode, sz, 0);
+	default:
+		break;
+	}
+
+	switch (op & 0xf0)
+	{
+	case 0xc0: case 0xd0: case 0xe0:                 /* BSET/BCLR/BNOT #xx */
+		return reg ? 4 : rmw;
+	case 0xf0:                                       /* BTST #xx */
+		return reg ? 3 : src;
+	default:
+		return src;
+	}
+}
+
+/* DIVXU: 0 a quotient, 1 an overflow, 2 a zero divisor (maximum mode, the
+ * exception included; the immediate figures are the table's) */
+int h8500_divxu_states(int mode, int sz, int outcome)
+{
+	int src = cyc_src[mode];
+	switch (outcome)
+	{
+	case 0: return src + (sz ? 24 : 18);
+	case 1: return src + 6;
+	default:
+		if (mode == EM_IMM8 || mode == EM_IMM16)
+			return sz ? 27 : 21;
+		return src + 23;
+	}
+}
+
+/* Table A-8 (b): the adjustment for an instruction fetched from the 16-bit
+ * 2-state space, by addressing mode and the parity of its first byte */
+static const uint8_t adjust_tab[3][2][10] =
+{
+	{ { 0, 1, 0, 1, 1, 1, 0, 1, 0, 0 }, { 0, 0, 1, 0, 0, 0, 1, 0, 0, 0 } },
+	{ { 0, 1, 1, 1, 1, 1, 1, 1, 0, 0 }, { 0, 1, 1, 1, 1, 1, 1, 1, 0, 0 } },
+	{ { 0, 2, 0, 2, 2, 2, 0, 2, 0, 0 }, { 0, 0, 2, 0, 0, 0, 2, 0, 0, 0 } }
+};
+
+int h8500_adjust(int cls, int mode, uint16_t pc)
+{
+	return adjust_tab[cls][pc & 1][mode];
+}
+
+int h8500_general_adjust(uint8_t op, int mode, uint16_t pc)
+{
+	return h8500_adjust(op == 0x06 ? H8500_ADJ_MOVB : op == 0x07 ? H8500_ADJ_MOVW : H8500_ADJ_OTHER, mode, pc);
+}
+
+/* A.4.1: an instruction of jk fetch cycles from the address.  The on-chip
+ * memory, and every H8/510 area, is the 16-bit 2-state space and costs only
+ * Table A-8's adjustment; the H8/532's external bus is 8 bits wide and takes
+ * 3 states and WCR's wait states a byte. */
+int h8500_fetch_states(const h8500_t *cpu, uint32_t addr, int jk, int adj, int waits)
+{
+	const h8500_variant_t *v = cpu->var;
+	addr &= v->addr_mask;
+	if (!v->bus8 || addr < v->rom_size || addr - v->ram_base < v->ram_size)
+		return adj;
+	return (2 + waits) * jk;
+}
+
+/* what the fetch of the instruction in flight is: jk fetch cycles (-1 for
+ * its length), and the Table A-8 adjustment */
+typedef struct
+{
+	int jk;
+	int adj;
+} fetch_t;
+
+/* Table A-8 (a): a branch's adjustment is its destination's parity */
+static int branched(h8500_t *cpu, fetch_t *f, int jk, int states)
+{
+	f->jk = jk;
+	f->adj = cpu->pc & 1;
+	return states;
+}
+
 static int ea_is_byte_stack(const ea_t *e)
 {
 	return e->ea == 0xb7 || e->ea == 0xc7;
@@ -1726,12 +1937,14 @@ static void do_bitop(h8500_t *cpu, ea_t *e, int op, int bit, int bitreg)
 /* the general (EA-first) instruction group                           */
 /* ------------------------------------------------------------------ */
 
-static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
+static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc, fetch_t *f)
 {
 	uint8_t op = fetch8(cpu);
 	int mode = e->mode;
-	int cyc = cyc_src[mode];
+	int cyc = h8500_general_states(op, mode, e->sz);
 	int d;
+
+	f->adj = h8500_general_adjust(op, mode, start_pc);
 
 	switch (op)
 	{
@@ -1742,12 +1955,12 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 		{
 			uint8_t v = ea_read8(cpu, e);
 			cpu->r[op2 & 7] = (uint16_t)((cpu->r[op2 & 7] & 0xff00) | v);
-			return cyc + 6;
+			return cyc_src[mode] + 8;
 		}
 		if ((op2 & 0xf8) == 0x90)
 		{
 			ea_write8(cpu, e, (uint8_t)cpu->r[op2 & 7]);
-			return cyc + 6;
+			return cyc_src[mode] + 8;
 		}
 		if ((op2 & 0xf0) == 0xa0 || (op2 & 0xf0) == 0xb0)
 		{
@@ -1814,7 +2027,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 				cpu->sr &= (uint16_t)~FLAG_V;
 			}
 		}
-		return cyc_rmw[mode] + 1;
+		return cyc;
 	}
 
 	case 0x05: case 0x07:
@@ -1842,7 +2055,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 				cpu->sr &= (uint16_t)~FLAG_V;
 			}
 		}
-		return cyc_rmw[mode] + 2;
+		return cyc;
 	}
 
 	case 0x08: case 0x09: case 0x0c: case 0x0d:
@@ -1852,7 +2065,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 			ea_write16(cpu, e, do_add16(cpu, ea_read16(cpu, e), (uint16_t)add, 0, 0));
 		else
 			ea_write8(cpu, e, do_add8(cpu, ea_read8(cpu, e), (uint8_t)add, 0, 0));
-		return cyc_rmw[mode];
+		return cyc;
 	}
 
 	case 0x10:                                       /* SWAP Rd */
@@ -1865,7 +2078,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 			set_nz16(cpu, v);
 			cpu->sr &= (uint16_t)~FLAG_V;
 		}
-		return 4;
+		return cyc;
 
 	case 0x11:                                       /* EXTS Rd */
 		if (mode != EM_REG)
@@ -1876,7 +2089,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 			set_nz16(cpu, v);
 			cpu->sr &= (uint16_t)~(FLAG_V | FLAG_C);
 		}
-		return 3;
+		return cyc;
 
 	case 0x12:                                       /* EXTU Rd */
 		if (mode != EM_REG)
@@ -1887,7 +2100,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 			set_nz16(cpu, v);
 			cpu->sr &= (uint16_t)~(FLAG_N | FLAG_V | FLAG_C);
 		}
-		return 3;
+		return cyc;
 
 	case 0x13:                                       /* CLR */
 		if (e->sz)
@@ -1896,14 +2109,14 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 			ea_write8(cpu, e, 0);
 		cpu->sr &= (uint16_t)~(FLAG_N | FLAG_V | FLAG_C);
 		cpu->sr |= FLAG_Z;
-		return cyc_rmw[mode];
+		return cyc;
 
 	case 0x14:                                       /* NEG */
 		if (e->sz)
 			ea_write16(cpu, e, do_sub16(cpu, 0, ea_read16(cpu, e), 0, 0));
 		else
 			ea_write8(cpu, e, do_sub8(cpu, 0, ea_read8(cpu, e), 0, 0));
-		return cyc_rmw[mode];
+		return cyc;
 
 	case 0x15:                                       /* NOT */
 		if (e->sz)
@@ -1919,7 +2132,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 			set_nz8(cpu, r);
 		}
 		cpu->sr &= (uint16_t)~FLAG_V;
-		return cyc_rmw[mode];
+		return cyc;
 
 	case 0x16:                                       /* TST */
 		if (e->sz)
@@ -1935,13 +2148,13 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 		set_nz8(cpu, v);
 		cpu->sr &= (uint16_t)~(FLAG_V | FLAG_C);
 		ea_write8(cpu, e, (uint8_t)(v | 0x80));
-		return cyc_rmw[mode];
+		return cyc;
 	}
 
 	case 0x18: case 0x19: case 0x1a: case 0x1b:
 	case 0x1c: case 0x1d: case 0x1e: case 0x1f:
 		do_shift(cpu, e, op);
-		return cyc_rmw[mode];
+		return cyc;
 
 	default:
 		break;
@@ -2063,7 +2276,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 		}
 		do_bitop(cpu, e, ((op & 0xf8) == 0x48) ? 0 : ((op & 0xf8) == 0x58) ? 1 : 2,
 			 cpu->r[d], -1);
-		return cyc_rmw[mode];
+		return cyc;
 
 	case 0x78:                                       /* BTST Rs */
 		do_bitop(cpu, e, 3, 0, d);
@@ -2122,7 +2335,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 			uint16_t t = cpu->r[e->reg];
 			cpu->r[e->reg] = cpu->r[d];
 			cpu->r[d] = t;
-			return 4;
+			return cyc;
 		}
 		if (e->sz)
 		{
@@ -2137,7 +2350,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 			set_nz8(cpu, v);
 		}
 		cpu->sr &= (uint16_t)~FLAG_V;
-		return cyc_rmw[mode];
+		return cyc;
 
 	case 0x98:                                       /* STC CR,<EAd> */
 	{
@@ -2161,7 +2374,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 		{
 			ea_write8(cpu, e, (uint8_t)cr_read(cpu, c));
 		}
-		return cyc_rmw[mode];
+		return cyc;
 	}
 
 	case 0xa0:                                       /* ADDX */
@@ -2202,7 +2415,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 			cpu->sr &= (uint16_t)~(FLAG_N | FLAG_Z | FLAG_V | FLAG_C);
 			if (r & 0x80000000u) cpu->sr |= FLAG_N;
 			if (!r) cpu->sr |= FLAG_Z;
-			return 24;
+			return cyc;
 		}
 		else
 		{
@@ -2211,7 +2424,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 			cpu->r[d] = r;
 			set_nz16(cpu, r);
 			cpu->sr &= (uint16_t)~(FLAG_V | FLAG_C);
-			return 14;
+			return cyc;
 		}
 
 	case 0xb8:                                       /* DIVXU */
@@ -2223,14 +2436,15 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 			{
 				cpu->sr &= (uint16_t)~(FLAG_N | FLAG_V | FLAG_C);
 				cpu->sr |= FLAG_Z;
+				f->jk = (uint16_t)(cpu->pc - start_pc);
 				exception(cpu, VEC_DIVZERO, start_pc, -1);
-				return 22;
+				return h8500_divxu_states(mode, 1, 2);
 			}
 			if ((dividend >> 16) >= s)
 			{
 				cpu->sr &= (uint16_t)~(FLAG_N | FLAG_Z | FLAG_C);
 				cpu->sr |= FLAG_V;
-				return 26;
+				return h8500_divxu_states(mode, 1, 1);
 			}
 			{
 				uint16_t q = (uint16_t)(dividend / s);
@@ -2240,7 +2454,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 				cpu->sr &= (uint16_t)~FLAG_C;
 				set_nz16(cpu, q);
 				cpu->sr &= (uint16_t)~FLAG_V;
-				return 26;
+				return cyc;
 			}
 		}
 		else
@@ -2251,14 +2465,15 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 			{
 				cpu->sr &= (uint16_t)~(FLAG_N | FLAG_V | FLAG_C);
 				cpu->sr |= FLAG_Z;
+				f->jk = (uint16_t)(cpu->pc - start_pc);
 				exception(cpu, VEC_DIVZERO, start_pc, -1);
-				return 16;
+				return h8500_divxu_states(mode, 0, 2);
 			}
 			if ((dividend >> 8) >= s)
 			{
 				cpu->sr &= (uint16_t)~(FLAG_N | FLAG_Z | FLAG_C);
 				cpu->sr |= FLAG_V;
-				return 20;
+				return h8500_divxu_states(mode, 0, 1);
 			}
 			{
 				uint8_t q = (uint8_t)(dividend / s);
@@ -2267,7 +2482,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 				cpu->sr &= (uint16_t)~FLAG_C;
 				set_nz8(cpu, q);
 				cpu->sr &= (uint16_t)~FLAG_V;
-				return 20;
+				return cyc;
 			}
 		}
 
@@ -2277,9 +2492,9 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 
 	switch (op & 0xf0)
 	{
-	case 0xc0: do_bitop(cpu, e, 0, op & 15, -1); return cyc_rmw[mode];
-	case 0xd0: do_bitop(cpu, e, 1, op & 15, -1); return cyc_rmw[mode];
-	case 0xe0: do_bitop(cpu, e, 2, op & 15, -1); return cyc_rmw[mode];
+	case 0xc0: do_bitop(cpu, e, 0, op & 15, -1); return cyc;
+	case 0xd0: do_bitop(cpu, e, 1, op & 15, -1); return cyc;
+	case 0xe0: do_bitop(cpu, e, 2, op & 15, -1); return cyc;
 	case 0xf0: do_bitop(cpu, e, 3, op & 15, -1); return cyc;
 	default: break;
 	}
@@ -2291,7 +2506,7 @@ static int exec_general(h8500_t *cpu, ea_t *e, uint16_t start_pc)
 /* the special (opcode-first) instruction group                       */
 /* ------------------------------------------------------------------ */
 
-static int exec_11(h8500_t *cpu, uint16_t start_pc)
+static int exec_11(h8500_t *cpu, uint16_t start_pc, fetch_t *f)
 {
 	uint8_t b = fetch8(cpu);
 	uint16_t target;
@@ -2306,7 +2521,7 @@ static int exec_11(h8500_t *cpu, uint16_t start_pc)
 		cpu->cp = (uint8_t)pop16(cpu);
 		cpu->pc = pop16(cpu);
 		cpu->r[7] = (uint16_t)(cpu->r[7] + imm);
-		return 13;
+		return branched(cpu, f, 5, 13);
 	}
 	case 0x1c:                                       /* PRTD #xx:16 */
 	{
@@ -2314,12 +2529,12 @@ static int exec_11(h8500_t *cpu, uint16_t start_pc)
 		cpu->cp = (uint8_t)pop16(cpu);
 		cpu->pc = pop16(cpu);
 		cpu->r[7] = (uint16_t)(cpu->r[7] + imm);
-		return 13;
+		return branched(cpu, f, 6, 13);
 	}
 	case 0x19:                                       /* PRTS */
 		cpu->cp = (uint8_t)pop16(cpu);
 		cpu->pc = pop16(cpu);
-		return 12;
+		return branched(cpu, f, 5, 12);
 	default:
 		break;
 	}
@@ -2329,7 +2544,7 @@ static int exec_11(h8500_t *cpu, uint16_t start_pc)
 	case 0xc0:                                       /* PJMP @Rn */
 		cpu->cp = (uint8_t)cpu->r[n];
 		cpu->pc = cpu->r[(n + 1) & 7];
-		return 8;
+		return branched(cpu, f, 5, 8);
 	case 0xc8:                                       /* PJSR @Rn */
 	{
 		uint8_t ncp = (uint8_t)cpu->r[n];
@@ -2338,34 +2553,34 @@ static int exec_11(h8500_t *cpu, uint16_t start_pc)
 		push16(cpu, cpu->cp);
 		cpu->cp = ncp;
 		cpu->pc = npc;
-		return 13;
+		return branched(cpu, f, 5, 13);
 	}
 	case 0xd0:                                       /* JMP @Rn */
 		cpu->pc = cpu->r[n];
-		return 6;
+		return branched(cpu, f, 5, 6);
 	case 0xd8:                                       /* JSR @Rn */
 		target = cpu->r[n];
 		push16(cpu, cpu->pc);
 		cpu->pc = target;
-		return 9;
+		return branched(cpu, f, 5, 9);
 	case 0xe0:                                       /* JMP @(d:8,Rn) */
 		target = (uint16_t)(cpu->r[n] + (int8_t)fetch8(cpu));
 		cpu->pc = target;
-		return 7;
+		return branched(cpu, f, 5, 7);
 	case 0xe8:                                       /* JSR @(d:8,Rn) */
 		target = (uint16_t)(cpu->r[n] + (int8_t)fetch8(cpu));
 		push16(cpu, cpu->pc);
 		cpu->pc = target;
-		return 9;
+		return branched(cpu, f, 5, 9);
 	case 0xf0:                                       /* JMP @(d:16,Rn) */
 		target = (uint16_t)(cpu->r[n] + (int16_t)fetch16(cpu));
 		cpu->pc = target;
-		return 8;
+		return branched(cpu, f, 6, 8);
 	case 0xf8:                                       /* JSR @(d:16,Rn) */
 		target = (uint16_t)(cpu->r[n] + (int16_t)fetch16(cpu));
 		push16(cpu, cpu->pc);
 		cpu->pc = target;
-		return 10;
+		return branched(cpu, f, 6, 10);
 	default:
 		break;
 	}
@@ -2373,7 +2588,7 @@ static int exec_11(h8500_t *cpu, uint16_t start_pc)
 	return -1;
 }
 
-int h8500_exec_one(h8500_t *cpu)
+static int exec_insn(h8500_t *cpu, fetch_t *f)
 {
 	uint16_t start_pc = cpu->pc;
 	uint8_t b0 = fetch8(cpu);
@@ -2383,6 +2598,7 @@ int h8500_exec_one(h8500_t *cpu)
 	switch (b0)
 	{
 	case 0x00:                                       /* NOP */
+		f->jk = 1;
 		return 2;
 
 	case 0x01: case 0x06: case 0x07:                 /* SCB/F, SCB/NE, SCB/EQ */
@@ -2394,6 +2610,7 @@ int h8500_exec_one(h8500_t *cpu)
 			break;
 		n = b1 & 7;
 		disp = (int8_t)fetch8(cpu);
+		f->jk = 3;
 		if (b0 == 0x06 && !(cpu->sr & FLAG_Z))
 			return 3;
 		if (b0 == 0x07 && (cpu->sr & FLAG_Z))
@@ -2402,7 +2619,7 @@ int h8500_exec_one(h8500_t *cpu)
 		if (cpu->r[n] == 0xffff)
 			return 4;
 		cpu->pc = (uint16_t)(cpu->pc + disp);
-		return 8;
+		return branched(cpu, f, 6, 8);
 	}
 
 	case 0x02:                                       /* LDM */
@@ -2423,6 +2640,7 @@ int h8500_exec_one(h8500_t *cpu)
 			sp = (uint16_t)(sp + 2);
 		}
 		cpu->r[7] = sp;
+		f->jk = 2;
 		return 6 + 4 * count;
 	}
 
@@ -2441,6 +2659,7 @@ int h8500_exec_one(h8500_t *cpu)
 				(n == 7) ? (uint16_t)(cpu->r[7] - 2) : cpu->r[n]);
 		}
 		cpu->r[7] = sp;
+		f->jk = 2;
 		return 6 + 3 * count;
 	}
 
@@ -2452,7 +2671,7 @@ int h8500_exec_one(h8500_t *cpu)
 		push16(cpu, cpu->cp);
 		cpu->cp = page;
 		cpu->pc = addr;
-		return 15;
+		return branched(cpu, f, 6, 15);
 	}
 
 	case 0x13:                                       /* PJMP @aa:24 */
@@ -2461,7 +2680,7 @@ int h8500_exec_one(h8500_t *cpu)
 		uint16_t addr = fetch16(cpu);
 		cpu->cp = page;
 		cpu->pc = addr;
-		return 9;
+		return branched(cpu, f, 6, 9);
 	}
 
 	case 0x08:                                       /* TRAPA #VEC */
@@ -2470,15 +2689,16 @@ int h8500_exec_one(h8500_t *cpu)
 		if ((b1 & 0xf0) != 0x10)
 			break;
 		exception(cpu, VEC_TRAPA + (b1 & 15), cpu->pc, -1);
-		return 22;
+		return branched(cpu, f, 4, 22);
 	}
 
 	case 0x09:                                       /* TRAP/VS */
 		if (cpu->sr & FLAG_V)
 		{
 			exception(cpu, VEC_TRAPV, cpu->pc, -1);
-			return 23;
+			return branched(cpu, f, 4, 23);
 		}
+		f->jk = 1;
 		return 3;
 
 	case 0x0a:                                       /* RTE */
@@ -2486,14 +2706,14 @@ int h8500_exec_one(h8500_t *cpu)
 		cpu->cp = (uint8_t)pop16(cpu);
 		cpu->pc = pop16(cpu);
 		cpu->no_irq = true;
-		return 15;
+		return branched(cpu, f, 4, 15);
 
 	case 0x0e:                                       /* BSR d:8 */
 	{
 		int8_t disp = (int8_t)fetch8(cpu);
 		push16(cpu, cpu->pc);
 		cpu->pc = (uint16_t)(cpu->pc + disp);
-		return 9;
+		return branched(cpu, f, 4, 9);
 	}
 
 	case 0x1e:                                       /* BSR d:16 */
@@ -2501,28 +2721,29 @@ int h8500_exec_one(h8500_t *cpu)
 		int16_t disp = (int16_t)fetch16(cpu);
 		push16(cpu, cpu->pc);
 		cpu->pc = (uint16_t)(cpu->pc + disp);
-		return 9;
+		return branched(cpu, f, 5, 9);
 	}
 
 	case 0x0f:                                       /* UNLK */
 		cpu->r[7] = cpu->r[6];
 		cpu->r[6] = pop16(cpu);
+		f->jk = 1;
 		return 5;
 
 	case 0x10:                                       /* JMP @aa:16 */
 		cpu->pc = fetch16(cpu);
-		return 7;
+		return branched(cpu, f, 5, 7);
 
 	case 0x18:                                       /* JSR @aa:16 */
 	{
 		uint16_t addr = fetch16(cpu);
 		push16(cpu, cpu->pc);
 		cpu->pc = addr;
-		return 9;
+		return branched(cpu, f, 5, 9);
 	}
 
 	case 0x11:
-		cyc = exec_11(cpu, start_pc);
+		cyc = exec_11(cpu, start_pc, f);
 		if (cyc < 0)
 			break;
 		return cyc;
@@ -2532,7 +2753,7 @@ int h8500_exec_one(h8500_t *cpu)
 		int8_t imm = (int8_t)fetch8(cpu);
 		cpu->pc = pop16(cpu);
 		cpu->r[7] = (uint16_t)(cpu->r[7] + imm);
-		return 9;
+		return branched(cpu, f, 4, 9);
 	}
 
 	case 0x1c:                                       /* RTD #xx:16 */
@@ -2540,7 +2761,7 @@ int h8500_exec_one(h8500_t *cpu)
 		int16_t imm = (int16_t)fetch16(cpu);
 		cpu->pc = pop16(cpu);
 		cpu->r[7] = (uint16_t)(cpu->r[7] + imm);
-		return 9;
+		return branched(cpu, f, 5, 9);
 	}
 
 	case 0x17:                                       /* LINK FP,#xx:8 */
@@ -2549,6 +2770,7 @@ int h8500_exec_one(h8500_t *cpu)
 		push16(cpu, cpu->r[6]);
 		cpu->r[6] = cpu->r[7];
 		cpu->r[7] = (uint16_t)(cpu->r[7] + imm);
+		f->jk = 2;
 		return 6;
 	}
 
@@ -2558,15 +2780,17 @@ int h8500_exec_one(h8500_t *cpu)
 		push16(cpu, cpu->r[6]);
 		cpu->r[6] = cpu->r[7];
 		cpu->r[7] = (uint16_t)(cpu->r[7] + imm);
+		f->jk = 3;
 		return 7;
 	}
 
 	case 0x19:                                       /* RTS */
 		cpu->pc = pop16(cpu);
-		return 8;
+		return branched(cpu, f, 4, 8);
 
 	case 0x1a:                                       /* SLEEP */
 		cpu->sleeping = true;
+		f->jk = 0;
 		return 2;
 
 	default:
@@ -2579,7 +2803,7 @@ int h8500_exec_one(h8500_t *cpu)
 		if (!cond_true(cpu, b0 & 15))
 			return 3;
 		cpu->pc = (uint16_t)(cpu->pc + disp);
-		return 7;
+		return branched(cpu, f, 5, 7);
 	}
 
 	if (b0 >= 0x30 && b0 <= 0x3f)                    /* Bcc d:16 */
@@ -2588,7 +2812,7 @@ int h8500_exec_one(h8500_t *cpu)
 		if (!cond_true(cpu, b0 & 15))
 			return 3;
 		cpu->pc = (uint16_t)(cpu->pc + disp);
-		return 7;
+		return branched(cpu, f, 6, 7);
 	}
 
 	if (b0 >= 0x40 && b0 <= 0x9f)
@@ -2657,6 +2881,7 @@ int h8500_exec_one(h8500_t *cpu)
 				}
 			}
 			cpu->sr &= (uint16_t)~FLAG_V;
+			f->adj = h8500_adjust(H8500_ADJ_OTHER, EM_ABS8, start_pc);
 			return 5;
 		}
 
@@ -2697,6 +2922,7 @@ int h8500_exec_one(h8500_t *cpu)
 				}
 			}
 			cpu->sr &= (uint16_t)~FLAG_V;
+			f->adj = h8500_adjust(H8500_ADJ_OTHER, EM_D8, start_pc);
 			return 5;
 		}
 	}
@@ -2706,7 +2932,7 @@ int h8500_exec_one(h8500_t *cpu)
 	{
 		if (ea_decode(cpu, &e, b0))
 		{
-			cyc = exec_general(cpu, &e, start_pc);
+			cyc = exec_general(cpu, &e, start_pc, f);
 			if (cyc >= 0)
 				return cyc;
 		}
@@ -2714,7 +2940,25 @@ int h8500_exec_one(h8500_t *cpu)
 
 	cpu->pc = start_pc;
 	exception(cpu, VEC_INVALID, start_pc, -1);
-	return 22;
+	return branched(cpu, f, 4, 22);
+}
+
+/* Table A-7's states, the fetch's, and the operand accesses' */
+int h8500_exec_one(h8500_t *cpu)
+{
+	uint32_t at = ((uint32_t)cpu->cp << 16) | cpu->pc;
+	uint16_t start_pc = cpu->pc;
+	int waits = cpu->waits;
+	fetch_t f = { -1, 0 };
+	int cyc;
+
+	cpu->bus_states = 0;
+	cyc = exec_insn(cpu, &f);
+	if (f.jk < 0)
+		f.jk = (uint16_t)(cpu->pc - start_pc);
+	cyc += h8500_fetch_states(cpu, at, f.jk, f.adj, waits) + (int)cpu->bus_states;
+	cpu->bus_states = 0;
+	return cyc;
 }
 
 /* ------------------------------------------------------------------ */
@@ -2801,6 +3045,10 @@ void h8500_reset(h8500_t *cpu)
 	for (i = 1; i <= v->port_count; i++)
 		if (v->port_ddr[i] >= 0)
 			cpu->io[v->port_ddr[i]] = v->port_ddr_reset[i];
+	if (v->wcr_reg >= 0)
+		cpu->io[v->wcr_reg] = 0xf3;
+	update_waits(cpu);
+	cpu->bus_states = 0;
 	cpu->io[v->tmr_reg + T_TCSR] = 0x10;
 	cpu->io[v->tmr_reg + T_TCORA] = cpu->io[v->tmr_reg + T_TCORB] = 0xff;
 	for (i = 0; i < v->frt_count; i++)
@@ -2847,8 +3095,10 @@ int h8500_step(h8500_t *cpu)
 		int vector = irq_select(cpu, &level);
 		if (vector >= 0)
 		{
+			cpu->bus_states = 0;
 			take_interrupt(cpu, vector, level);
-			cycles = 20;
+			cycles = H8500_IRQ_STATES + (int)cpu->bus_states;
+			cpu->bus_states = 0;
 			cpu->cycles += (uint64_t)cycles;
 			peripherals_tick(cpu, (uint32_t)cycles);
 			return cycles;
@@ -2889,6 +3139,8 @@ static bool state_restored(void *user)
 {
 	h8500_t *cpu = user;
 	cpu->irq_ready = false;
+	update_waits(cpu);
+	cpu->bus_states = 0;
 	cpu->jit_pending = 0;
 	cpu->jit_limit = 0;
 	cpu->jit_deadline = 0;

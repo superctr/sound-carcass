@@ -18,8 +18,18 @@ int h8500_irq_select(h8500_t *cpu, int *out_level);
 void h8500_take_interrupt(h8500_t *cpu, int vector, int level);
 void h8500_exception(h8500_t *cpu, int vector, uint16_t ret_pc, int level);
 
-extern const uint8_t h8500_cyc_src[10];
-extern const uint8_t h8500_cyc_rmw[10];
+/* Execution states, from the H8/520 hardware manual's appendix A.4: Table
+ * A-7's figures, Table A-8's adjustment for a fetch from the 16-bit 2-state
+ * space, a fetch's states, and what an operand access adds. */
+enum { H8500_ADJ_OTHER = 0, H8500_ADJ_MOVB, H8500_ADJ_MOVW };
+#define H8500_IRQ_STATES 23
+
+int h8500_general_states(uint8_t op, int mode, int sz);
+int h8500_divxu_states(int mode, int sz, int outcome);
+int h8500_adjust(int cls, int mode, uint16_t pc);
+int h8500_general_adjust(uint8_t op, int mode, uint16_t pc);
+int h8500_fetch_states(const h8500_t *cpu, uint32_t addr, int jk, int adj, int waits);
+uint32_t h8500_access_states(const h8500_t *cpu, uint32_t addr, int word);
 
 int h8500_jit_run(h8500_t *cpu, int cycles);
 
