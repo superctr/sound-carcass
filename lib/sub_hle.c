@@ -276,6 +276,8 @@ static void send_sysex(sub_hle_t *sub, int src, const sub_source_t *s)
 		code = 0xee;
 	else if (size >= 5 && x[0] == 0x7f)
 		code = 0xef;
+	else if (size >= 5 && x[0] == 0x43 && sub->xg)
+		code = 0xec;
 	else
 		return;
 

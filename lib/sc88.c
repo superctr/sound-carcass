@@ -472,6 +472,7 @@ bool sc88_init(sc88_t *b, scemu_model_t model, const scemu_roms_t *roms, const s
 	lcd_init(&b->lcd);
 	sc88_ga_init(&b->ga, &b->lcd, ga_irq, b);
 	sub_hle_init(&b->sub, sub_irq, sub_midi_out, b);
+	b->sub.xg = (model == SCEMU_MODEL_SC88PRO);
 	/* the SC-88VL's main board straps return SD7 to strobe SSC2, which selects its own chord table */
 	if (model == SCEMU_MODEL_SC88VL)
 		sub_hle_set_key(&b->sub, 2, 7, true);

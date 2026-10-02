@@ -48,6 +48,7 @@ typedef struct sub_hle
 	uint8_t pa, pa_dir, pb, pb_dir;
 	bool int_state;
 	bool in_reset;
+	bool xg;   /* passes Yamaha exclusive on (SC-88Pro) */
 
 	sub_source_t src[SUB_SOURCES];
 	sub_message_t queue[SUB_QUEUE_SIZE];
