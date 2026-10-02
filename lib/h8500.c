@@ -175,19 +175,40 @@ static void bus_write16(h8500_t *cpu, uint32_t addr, uint16_t data)
 		cpu->bus.write16(cpu->bus.user, addr, data);
 }
 
-/* What an operand access costs beyond the tables, which assume the 16-bit
- * 2-state space: the register field is 8 bits wide and takes 3 states, and so
- * does the H8/532's external bus, plus WCR's wait states.  The H8/510's areas
- * are taken as 16-bit 2-state throughout. */
+/* The kind of memory at a (masked) address outside the register field:
+ * AREA_3STATE and AREA_8BIT, or neither for the 16-bit 2-state space the
+ * tables assume.  The H8/532's on-chip ROM and RAM are that space and its
+ * external bus is 8-bit 3-state; on the H8/510 the 16-bit area ends at
+ * ARBT:0000, page 0 always inside it, and the 3-state one starts at AR3T:0000
+ * and at F0:0000 at the latest. */
+enum { AREA_3STATE = 1, AREA_8BIT = 2 };
+
+static int area(const h8500_t *cpu, uint32_t addr)
+{
+	const h8500_variant_t *v = cpu->var;
+	if (v->bus8)
+		return addr < v->rom_size || addr - v->ram_base < v->ram_size ? 0 : AREA_3STATE | AREA_8BIT;
+	return (addr >= 0x10000 && addr > cpu->byte_top ? AREA_8BIT : 0) |
+	       (addr >= cpu->slow_base ? AREA_3STATE : 0);
+}
+
+/* What an operand access costs beyond the tables (A.4.1): the register field
+ * is 8-bit 3-state without wait states; the areas as the formulas give them,
+ * with WCR's wait states on every 3-state bus cycle. */
 static uint32_t access_states(const h8500_t *cpu, uint32_t addr, int word)
 {
 	const h8500_variant_t *v = cpu->var;
+	uint32_t w = cpu->waits;
 	addr &= v->addr_mask;
 	if (addr - v->io_base < v->io_size)
 		return word ? 4 : 1;
-	if (!v->bus8 || addr < v->rom_size || addr - v->ram_base < v->ram_size)
-		return 0;
-	return word ? 4u + 2u * cpu->waits : 1u + cpu->waits;
+	switch (area(cpu, addr))
+	{
+	case AREA_3STATE: return 1 + w;
+	case AREA_8BIT: return word ? 2 : 0;
+	case AREA_3STATE | AREA_8BIT: return word ? 4 + 2 * w : 1 + w;
+	default: return 0;
+	}
 }
 
 static uint32_t access16_states(const h8500_t *cpu, uint32_t addr)
@@ -328,7 +349,7 @@ static const h8500_variant_t variant_h8510 =
 	.ram_base = 0xfe80, .ram_size = 0,
 	.rom_size = 0,
 	.bus8 = false,
-	.wcr_reg = -1,
+	.wcr_reg = 0x94, .arbt_reg = 0x96, .ar3t_reg = 0x97,
 
 	.port_count = 8,
 	.port_ddr = { -1, R_P1DDR, R_P2DDR, R_P3DDR, R_P4DDR, R_P5DDR, R_P6DDR, -1, R_P8DDR, -1 },
@@ -382,7 +403,7 @@ static const h8500_variant_t variant_h8532 =
 	.ram_base = 0xfb80, .ram_size = 0x400,
 	.rom_size = 0x8000,
 	.bus8 = true,
-	.wcr_reg = 0x78,
+	.wcr_reg = 0x78, .arbt_reg = -1, .ar3t_reg = -1,
 
 	.port_count = 9,
 	.port_ddr = { -1, M_P1DDR, M_P2DDR, -1, M_P4DDR, M_P5DDR, M_P6DDR, M_P7DDR, -1, M_P9DDR },
@@ -1078,18 +1099,20 @@ uint8_t h8500_io_read(h8500_t *cpu, uint16_t address)
 }
 
 /* WCR: programmable and pin wait modes put WC1-0 wait states on every
- * off-chip access, pin auto-wait mode only while WAIT is low; WAIT is taken
- * as high */
-static void update_waits(h8500_t *cpu)
+ * 3-state access, pin auto-wait mode only while WAIT is low; WAIT is taken
+ * as high.  ARBT and AR3T place the H8/510's areas in 64 KB steps. */
+static void update_bus(h8500_t *cpu)
 {
-	uint8_t wcr;
-	if (cpu->var->wcr_reg < 0)
-	{
-		cpu->waits = 0;
-		return;
-	}
-	wcr = cpu->io[cpu->var->wcr_reg];
+	const h8500_variant_t *v = cpu->var;
+	uint8_t wcr = cpu->io[v->wcr_reg];
 	cpu->waits = (wcr & 0x0c) == 0x00 || (wcr & 0x0c) == 0x08 ? (uint8_t)(wcr & 3) : 0;
+	if (v->arbt_reg >= 0)
+	{
+		uint32_t s3 = (uint32_t)cpu->io[v->ar3t_reg] << 16;
+		cpu->byte_top = (uint32_t)cpu->io[v->arbt_reg] << 16;
+		cpu->slow_base = s3 < 0xf00000 ? s3 : 0xf00000;
+	}
+	cpu->bus_gen++;
 }
 
 void h8500_io_write(h8500_t *cpu, uint16_t address, uint8_t data)
@@ -1100,10 +1123,10 @@ void h8500_io_write(h8500_t *cpu, uint16_t address, uint8_t data)
 
 	if (o >= v->io_size)
 		return;
-	if ((int)o == v->wcr_reg)
+	if ((int)o == v->wcr_reg || (int)o == v->arbt_reg || (int)o == v->ar3t_reg)
 	{
-		cpu->io[o] = (uint8_t)(data | 0xf0);
-		update_waits(cpu);
+		cpu->io[o] = (int)o == v->wcr_reg ? (uint8_t)(data | 0xf0) : data;
+		update_bus(cpu);
 		return;
 	}
 	unit = cpu->io_unit[o];
@@ -1626,17 +1649,29 @@ int h8500_general_adjust(uint8_t op, int mode, uint16_t pc)
 	return h8500_adjust(op == 0x06 ? H8500_ADJ_MOVB : op == 0x07 ? H8500_ADJ_MOVW : H8500_ADJ_OTHER, mode, pc);
 }
 
-/* A.4.1: an instruction of jk fetch cycles from the address.  The on-chip
- * memory, and every H8/510 area, is the 16-bit 2-state space and costs only
- * Table A-8's adjustment; the H8/532's external bus is 8 bits wide and takes
- * 3 states and WCR's wait states a byte. */
-int h8500_fetch_states(const h8500_t *cpu, uint32_t addr, int jk, int adj, int waits)
+/* the area an instruction at the address is fetched from */
+int h8500_fetch_area(const h8500_t *cpu, uint32_t addr)
 {
 	const h8500_variant_t *v = cpu->var;
 	addr &= v->addr_mask;
-	if (!v->bus8 || addr < v->rom_size || addr - v->ram_base < v->ram_size)
-		return adj;
-	return (2 + waits) * jk;
+	if (addr - v->io_base < v->io_size)
+		return AREA_3STATE | AREA_8BIT;
+	return area(cpu, addr);
+}
+
+/* A.4.1: an instruction of jk fetch cycles from the area.  A 16-bit bus
+ * adds Table A-8's adjustment, and in 3 states half the fetch cycles,
+ * rounded down; an 8-bit one the fetch cycles, twice in 3 states; WCR's wait
+ * states come on each 3-state cycle. */
+int h8500_fetch_states(int fetch_area, int jk, int adj, int waits)
+{
+	switch (fetch_area)
+	{
+	case AREA_3STATE: return adj + (1 + waits) * (jk / 2);
+	case AREA_8BIT: return jk;
+	case AREA_3STATE | AREA_8BIT: return (2 + waits) * jk;
+	default: return adj;
+	}
 }
 
 /* what the fetch of the instruction in flight is: jk fetch cycles (-1 for
@@ -2946,7 +2981,7 @@ static int exec_insn(h8500_t *cpu, fetch_t *f)
 /* Table A-7's states, the fetch's, and the operand accesses' */
 int h8500_exec_one(h8500_t *cpu)
 {
-	uint32_t at = ((uint32_t)cpu->cp << 16) | cpu->pc;
+	int fetch_area = h8500_fetch_area(cpu, ((uint32_t)cpu->cp << 16) | cpu->pc);
 	uint16_t start_pc = cpu->pc;
 	int waits = cpu->waits;
 	fetch_t f = { -1, 0 };
@@ -2956,7 +2991,7 @@ int h8500_exec_one(h8500_t *cpu)
 	cyc = exec_insn(cpu, &f);
 	if (f.jk < 0)
 		f.jk = (uint16_t)(cpu->pc - start_pc);
-	cyc += h8500_fetch_states(cpu, at, f.jk, f.adj, waits) + (int)cpu->bus_states;
+	cyc += h8500_fetch_states(fetch_area, f.jk, f.adj, waits) + (int)cpu->bus_states;
 	cpu->bus_states = 0;
 	return cyc;
 }
@@ -3045,10 +3080,13 @@ void h8500_reset(h8500_t *cpu)
 	for (i = 1; i <= v->port_count; i++)
 		if (v->port_ddr[i] >= 0)
 			cpu->io[v->port_ddr[i]] = v->port_ddr_reset[i];
-	if (v->wcr_reg >= 0)
-		cpu->io[v->wcr_reg] = 0xf3;
-	update_waits(cpu);
-	cpu->bus_states = 0;
+	cpu->io[v->wcr_reg] = 0xf3;
+	if (v->arbt_reg >= 0)
+	{
+		cpu->io[v->arbt_reg] = 0xff;
+		cpu->io[v->ar3t_reg] = 0x00;
+	}
+	update_bus(cpu);
 	cpu->io[v->tmr_reg + T_TCSR] = 0x10;
 	cpu->io[v->tmr_reg + T_TCORA] = cpu->io[v->tmr_reg + T_TCORB] = 0xff;
 	for (i = 0; i < v->frt_count; i++)
@@ -3083,6 +3121,7 @@ void h8500_reset(h8500_t *cpu)
 
 	cpu->cp = (uint8_t)mem_read16(cpu, 0);
 	cpu->pc = mem_read16(cpu, 2);
+	cpu->bus_states = 0;
 }
 
 int h8500_step(h8500_t *cpu)
@@ -3139,7 +3178,7 @@ static bool state_restored(void *user)
 {
 	h8500_t *cpu = user;
 	cpu->irq_ready = false;
-	update_waits(cpu);
+	update_bus(cpu);
 	cpu->bus_states = 0;
 	cpu->jit_pending = 0;
 	cpu->jit_limit = 0;

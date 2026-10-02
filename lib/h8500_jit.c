@@ -59,12 +59,12 @@ struct h8500_jit
 	uint8_t *rd16[PAGE_COUNT];
 	uint8_t *wr8[PAGE_COUNT];
 	uint8_t *wr16[PAGE_COUNT];
-	/* what a fast-path access to the page costs; costed when any does, at
-	 * the wait states the blocks were translated with */
+	/* what a fast-path access to the page costs, costed when any does; the
+	 * blocks and the costs are for the bus as it was at bus_gen */
 	uint8_t cost8[PAGE_COUNT];
 	uint8_t cost16[PAGE_COUNT];
 	bool costed;
-	uint8_t waits;
+	uint32_t bus_gen;
 	uint32_t limit_base;
 	uint32_t io_base, io_size, addr_mask;
 	uint64_t stat_blocks_run;
@@ -202,7 +202,7 @@ int h8500_jit_run(h8500_t *cpu, int cycles)
 		{
 			uint32_t key = ((uint32_t)cpu->cp << 16) | cpu->pc;
 			block_t *b;
-			if (j->count >= CACHE_BLOCK_MAX || j->code_size >= CACHE_CODE_MAX || cpu->waits != j->waits)
+			if (j->count >= CACHE_BLOCK_MAX || j->code_size >= CACHE_CODE_MAX || cpu->bus_gen != j->bus_gen)
 				h8500_jit_flush(cpu);
 			b = lookup(j, key);
 			if (b->key == KEY_NONE)
@@ -256,7 +256,7 @@ static void SLJIT_FUNC hwrite8(h8500_t *cpu, sljit_sw addr, sljit_sw data)
 		flush(cpu);
 		h8500_mem_write8(cpu, a, (uint8_t)data);
 		recompute(cpu);
-		if (cpu->waits != cpu->jit->waits)
+		if (cpu->bus_gen != cpu->jit->bus_gen)
 			cpu->jit_limit = 0;
 		return;
 	}
@@ -271,7 +271,7 @@ static void SLJIT_FUNC hwrite16(h8500_t *cpu, sljit_sw addr, sljit_sw data)
 		flush(cpu);
 		h8500_mem_write16(cpu, a, (uint16_t)data);
 		recompute(cpu);
-		if (cpu->waits != cpu->jit->waits)
+		if (cpu->bus_gen != cpu->jit->bus_gen)
 			cpu->jit_limit = 0;
 		return;
 	}
@@ -634,11 +634,12 @@ static void decode(decoder_t *d, insn_t *i)
 static void time_insn(const h8500_t *cpu, insn_t *i)
 {
 	int w = cpu->waits;
+	int fa = h8500_fetch_area(cpu, i->addr);
 	uint16_t target = (uint16_t)(i->next + i->disp);
 	int count = 0, n;
-#define F(jk, adj) h8500_fetch_states(cpu, i->addr, (jk), (adj), w)
+#define F(jk, adj) h8500_fetch_states(fa, (jk), (adj), w)
 
-	i->adj = h8500_fetch_states(cpu, i->addr, 0, 1, w) == 1;
+	i->adj = h8500_fetch_states(fa, 0, 1, w) == 1;
 	switch (i->kind)
 	{
 	case K_FALLBACK:
@@ -2283,7 +2284,7 @@ static void build_pages(h8500_t *cpu)
 	const h8500_variant_t *v = cpu->var;
 	uint32_t p;
 	j->costed = false;
-	j->waits = cpu->waits;
+	j->bus_gen = cpu->bus_gen;
 	for (p = 0; p < PAGE_COUNT; p++)
 	{
 		uint32_t addr = (p << PAGE_SHIFT) & v->addr_mask;
@@ -2295,6 +2296,10 @@ static void build_pages(h8500_t *cpu)
 		j->cost16[p] = (uint8_t)h8500_access_states(cpu, addr, 1);
 		if (j->cost8[p] | j->cost16[p])
 			j->costed = true;
+		/* the H8/510's 8-bit area starts one address into ARBT's page, which
+		   is the slow path's */
+		if (v->arbt_reg >= 0 && cpu->byte_top >= 0x10000 && (addr >> PAGE_SHIFT) == (cpu->byte_top >> PAGE_SHIFT))
+			continue;
 		if (v->ram_size && addr + (1u << PAGE_SHIFT) > v->ram_base && addr < v->io_base)
 			continue;
 		for (n = 0; n < cpu->region_count; n++)

@@ -28,7 +28,8 @@ int h8500_general_states(uint8_t op, int mode, int sz);
 int h8500_divxu_states(int mode, int sz, int outcome);
 int h8500_adjust(int cls, int mode, uint16_t pc);
 int h8500_general_adjust(uint8_t op, int mode, uint16_t pc);
-int h8500_fetch_states(const h8500_t *cpu, uint32_t addr, int jk, int adj, int waits);
+int h8500_fetch_area(const h8500_t *cpu, uint32_t addr);
+int h8500_fetch_states(int fetch_area, int jk, int adj, int waits);
 uint32_t h8500_access_states(const h8500_t *cpu, uint32_t addr, int word);
 
 int h8500_jit_run(h8500_t *cpu, int cycles);
