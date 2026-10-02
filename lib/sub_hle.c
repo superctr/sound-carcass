@@ -60,6 +60,7 @@ void sub_hle_reset(sub_hle_t *sub)
 	sub->queue_head = sub->queue_count = 0;
 	sub->busy = false;
 	sub->deliver_frames = 0;
+	sub->sem_wait_frames = 0;
 
 	sub->dpram[TX_READ_PTR] = sub->dpram[TX_WRITE_PTR] = TX_RING_START;
 	sub->tx_rd = TX_RING_START;
@@ -196,9 +197,15 @@ static void deliver(sub_hle_t *sub)
 	{
 		if (BIT(sub->sem, src))
 		{
-			sub->deliver_frames = SUB_BLOCK_RETRY_FRAMES;
-			return;
+			if (sub->sem_wait_frames < SUB_BLOCK_TIMEOUT_FRAMES)
+			{
+				sub->sem_wait_frames += SUB_BLOCK_RETRY_FRAMES;
+				sub->deliver_frames = SUB_BLOCK_RETRY_FRAMES;
+				return;
+			}
+			sub->block_drops++;
 		}
+		sub->sem_wait_frames = 0;
 		memcpy(&sub->dpram[0], m->block, m->block_size);
 		sub->sem |= (uint8_t)(1u << src);
 	}
@@ -446,8 +453,10 @@ void sub_hle_state(sub_hle_t *sub, state_registry_t *reg)
 	state_var(reg, sub->queue_count);
 	state_bool(reg, sub->busy);
 	state_var(reg, sub->deliver_frames);
+	state_var(reg, sub->sem_wait_frames);
 	state_var(reg, sub->queue_drops);
 	state_var(reg, sub->sysex_drops);
+	state_var(reg, sub->block_drops);
 	state_var(reg, sub->tx_rd);
 	state_var(reg, sub->tx_left);
 	state_var(reg, sub->tx_end);

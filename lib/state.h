@@ -14,7 +14,7 @@
    ring saved from its head — registers a pair of callbacks instead.  Unknown chunks are skipped,
    missing ones refused. */
 
-#define STATE_MAGIC "SCEMUST2"
+#define STATE_MAGIC "SCEMUST3"
 
 #define STATE_TAG(a, b, c, d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) | ((uint32_t)(d) << 24))
 

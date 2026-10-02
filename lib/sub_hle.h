@@ -17,6 +17,7 @@
 /* one 31.25 us frame per sub_hle_frame() call */
 #define SUB_DELIVER_FRAMES 1
 #define SUB_BLOCK_RETRY_FRAMES 3
+#define SUB_BLOCK_TIMEOUT_FRAMES 32
 #define SUB_TX_BYTE_FRAMES 10
 
 typedef struct sub_message
@@ -53,8 +54,10 @@ typedef struct sub_hle
 	uint8_t queue_head, queue_count;
 	bool busy;
 	uint32_t deliver_frames;
+	uint32_t sem_wait_frames;
 	uint32_t queue_drops;
 	uint32_t sysex_drops;
+	uint32_t block_drops;
 
 	uint8_t tx_rd, tx_left, tx_end;
 	bool tx_running;
