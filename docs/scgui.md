@@ -63,7 +63,7 @@ alone instead (below), and Start brings up the panel once a set is there.
 - **The logotype** at the bottom left opens a menu where the pointer is: the playlist,
   the Settings window on its Audio or its System tab, a **Send** submenu, and About.  Send puts a message on both of
   the machine's inputs at once (and on the song outputs, for a unit playing along): GM System On, GS
-  Reset, GM2 System On, the SC-88 mode sets, or a bank select and program change that puts every part
+  Reset, GM2 System On, XG System On, the SC-88 mode sets, or a bank select and program change that puts every part
   on the SC-55, SC-88, SC-88Pro or SC-8850 map -- the one-off form of the map override, and the way to reach
   those on a machine with no panel of its own.
 
@@ -98,11 +98,15 @@ business -- the next song after its interval, four seconds by default, and a sto
 unless REPT is on -- and the toolbar's buttons are its keys, previous and next SONG ◀ ▶ (which switch at
 once, playing or not), pause PAUSE (or PLAY when nothing plays), stop STOP, clear the disk out.  Every song
 is preceded by the
-message chosen under "Before each song" (a GS Reset by default; GM or GM2 System On, an SC-88 mode
+message chosen under "Before each song" (a GS Reset by default; GM, GM2 or XG System On, an SC-88 mode
 set, or nothing), a quarter second before its first event, so a song without a reset of its own does
 not inherit the last one's settings; pausing or stopping sends all notes off and all sound off on
 every part first, so nothing hangs.  The title bar of the main window shows the song's title (UTF-8
 or Shift-JIS, as in scplay).
+
+Only the SC-88Pro and the SC-8850 take XG System On; the SC-88, the SC-88VL and the SC-55s ignore
+it.  What they follow then is about XGLite: songs written for an MU80 or smaller play, but ones
+written for an MU100 or later lose their variation and insertion effects and their MU voices.
 
 Files dragged onto the window from a file manager are added where they are dropped: on a row they go
 in above it, past the last row or anywhere else in the window they go on the end, and if the list was

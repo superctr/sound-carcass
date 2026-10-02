@@ -152,11 +152,12 @@ typedef enum machine_reset
 	MACHINE_RESET_GM,          /* GM System On */
 	MACHINE_RESET_GS,          /* GS Reset (the default) */
 	MACHINE_RESET_GM2,         /* GM2 System On */
+	MACHINE_RESET_XG,          /* XG System On */
 	MACHINE_RESET_SC88_SINGLE, /* SC-88 System Mode Set, single module */
 	MACHINE_RESET_SC88_DOUBLE, /* SC-88 System Mode Set, double module */
 	MACHINE_RESET_COUNT
 } machine_reset_t;
-extern const char *const machine_reset_names[MACHINE_RESET_COUNT];
+extern const char *const machine_reset_names[MACHINE_RESET_COUNT + 1];   /* NULL terminated */
 
 void machine_set_reset(machine_t *mc, machine_reset_t reset);
 /* the message a reset kind stands for; NULL and 0 for MACHINE_RESET_NONE */

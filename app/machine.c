@@ -304,6 +304,7 @@ const uint8_t *machine_reset_message(machine_reset_t reset, size_t *size)
 {
 	static const uint8_t gm_on[] = { 0xf0, 0x7e, 0x7f, 0x09, 0x01, 0xf7 };
 	static const uint8_t gm2_on[] = { 0xf0, 0x7e, 0x7f, 0x09, 0x03, 0xf7 };
+	static const uint8_t xg_on[] = { 0xf0, 0x43, 0x10, 0x4c, 0x00, 0x00, 0x7e, 0x00, 0xf7 };
 	static const uint8_t gs_reset[] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7f, 0x00, 0x41, 0xf7 };
 	static const uint8_t mode_single[] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x00, 0x00, 0x7f, 0x00, 0x01, 0xf7 };
 	static const uint8_t mode_double[] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x00, 0x00, 0x7f, 0x01, 0x00, 0xf7 };
@@ -312,6 +313,7 @@ const uint8_t *machine_reset_message(machine_reset_t reset, size_t *size)
 	case MACHINE_RESET_GM: *size = sizeof(gm_on); return gm_on;
 	case MACHINE_RESET_GS: *size = sizeof(gs_reset); return gs_reset;
 	case MACHINE_RESET_GM2: *size = sizeof(gm2_on); return gm2_on;
+	case MACHINE_RESET_XG: *size = sizeof(xg_on); return xg_on;
 	case MACHINE_RESET_SC88_SINGLE: *size = sizeof(mode_single); return mode_single;
 	case MACHINE_RESET_SC88_DOUBLE: *size = sizeof(mode_double); return mode_double;
 	default: *size = 0; return NULL;
@@ -1237,8 +1239,8 @@ void machine_set_computer_switch(machine_t *mc, scemu_computer_switch_t sw)
 }
 
 
-const char *const machine_reset_names[MACHINE_RESET_COUNT] = {
-	"nothing", "GM System On", "GS Reset", "GM2 System On", "SC-88 Mode Set, single module", "SC-88 Mode Set, double module"
+const char *const machine_reset_names[MACHINE_RESET_COUNT + 1] = {
+	"nothing", "GM System On", "GS Reset", "GM2 System On", "XG System On", "SC-88 Mode Set, single module", "SC-88 Mode Set, double module", NULL
 };
 
 void machine_set_reset(machine_t *mc, machine_reset_t reset)

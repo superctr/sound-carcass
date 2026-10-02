@@ -226,7 +226,7 @@ static int parse_options(int argc, char **argv, options_t *o, GPtrArray *songs)
 
 /* ---------------------------------------------------------------- the settings file */
 
-static const char *const reset_words[MACHINE_RESET_COUNT] = { "none", "gm", "gs", "gm2", "sc88-single", "sc88-double" };
+static const char *const reset_words[MACHINE_RESET_COUNT] = { "none", "gm", "gs", "gm2", "xg", "sc88-single", "sc88-double" };
 static const char *const map_words[] = { "native", "sc55", "sc88", "sc88pro", "sc8850" };
 #define MAP_WORDS ((int)(sizeof(map_words) / sizeof(map_words[0])))
 

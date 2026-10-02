@@ -76,7 +76,7 @@ typedef struct scgui_config
 	int audio_rate;          /* the rate to ask the device for: 0 the machine's own, or 32000, 44100, 48000 */
 	int audio_block;         /* frames per device buffer: 64..1024 */
 	char midi[9][80];        /* host MIDI device names tied to MIDI IN A-D, MIDI OUT, Song to A-D; "" = none */
-	char reset[24];          /* what precedes each song: "none", "gm", "gs", "gm2", "sc88-single", "sc88-double" */
+	char reset[24];          /* what precedes each song: "none", "gm", "gs", "gm2", "xg", "sc88-single", "sc88-double" */
 	char map[16];            /* instrument map override: "native", "sc55", "sc88", "sc88pro" */
 	int midi_rate;           /* baud of the MIDI input: 31250, 38400, 0 */
 	char computer[CONFIG_SYSTEMS][8];  /* the rear switch of each system: "midi", "pc1", "pc2", "mac" ("usb" on the SC-8850 and the SC-8820, whose pc2 is its Mac position) */
