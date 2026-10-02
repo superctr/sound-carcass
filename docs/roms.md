@@ -156,15 +156,11 @@ the two wave ROMs, 16 MB and 8 MB.
 
 | image | size | CRC32 |
 |---|---|---|
-| CPU ROM, IC1 | 64 KiB | by content, see below |
-| program flash 1.00, IC5 | 2 MiB | `352ad418` |
+| CPU ROM, IC1 | 64 KiB | `11b3f772` |
+| program flash 1.03, IC5 | 2 MiB | `352ad418` |
 | wave ROM IC7 | 16 MiB | `2cfe5aa2` (the SC-8850's IC53, the same chip) |
 | wave ROM IC8 | 8 MiB | `38908222` |
 
-The CPU ROM has never been dumped.  What stands in for it is a reconstruction: the
-SC-8850's ROM carried over to this machine's addresses.
-This reconstruction is part of the MAME .290 ROM set, once a proper dump has been made,
-this program will need to be updated.
 The USB controller's ROM is not dumped either and is not needed, as on the SC-8850.
 
 ## The sub-CPU
