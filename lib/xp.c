@@ -989,28 +989,30 @@ static int32_t ring(int32_t modulator, int32_t carrier) { return clamp24(((int64
 static void run_pair(xp_t *xp, int n)
 {
 	const int m = n + 1;
-	set_page(xp, m, XP_PAGE_OUTPUT, 0);
-
-	if (!running(xp, n) || !sounding(xp, n) || (running(xp, m) && !sounding(xp, m)))
+	const bool sounding1 = running(xp, n) && sounding(xp, n);
+	const bool sounding2 = running(xp, m) && sounding(xp, m);
+	if (!sounding1 && !sounding2)
 		return;
+
+	set_page(xp, m, XP_PAGE_OUTPUT, 0);
 
 	const uint32_t control = page(xp, n, XP_PAGE_FILTER);
 	const int booster = (control >> 6) & 3;
 	const int mode1 = (control >> 10) & 3;
 	const int mode2 = (control >> 8) & 3;
-	const int32_t w1 = xp->voices[n].sample;
-	const int32_t w2 = running(xp, m) ? xp->voices[m].sample : 0;
+	const int32_t w1 = sounding1 ? xp->voices[n].sample : 0;
+	const int32_t w2 = sounding2 ? xp->voices[m].sample : 0;
 
 	int32_t out, modulator, carrier;
 	switch ((control >> 12) & 15)
 	{
-	case 1: out = filter(xp, m, mode2, filter(xp, n, mode1, clamp16((int64_t)amplify(xp, n, w1) + w2))); break;
-	case 2: out = filter(xp, m, mode2, boost(booster, filter(xp, n, mode1, clamp16((int64_t)amplify(xp, n, w1) + w2)))); break;
-	case 3: out = filter(xp, m, mode2, filter(xp, n, mode1, boost(booster, clamp16((int64_t)amplify(xp, n, w1) + w2)))); break;
+	case 1: out = filter(xp, m, mode2, filter(xp, n, mode1, clamp24((int64_t)amplify(xp, n, w1) + w2))); break;
+	case 2: out = filter(xp, m, mode2, boost(booster, filter(xp, n, mode1, clamp24((int64_t)amplify(xp, n, w1) + w2)))); break;
+	case 3: out = filter(xp, m, mode2, filter(xp, n, mode1, boost(booster, clamp24((int64_t)amplify(xp, n, w1) + w2)))); break;
 	case 4: out = filter(xp, m, mode2, filter(xp, n, mode1, ring(amplify(xp, n, w1), w2))); break;
-	case 5: out = filter(xp, m, mode2, filter(xp, n, mode1, clamp16((int64_t)ring(amplify(xp, n, w1), w2) + w2))); break;
+	case 5: out = filter(xp, m, mode2, filter(xp, n, mode1, clamp24((int64_t)ring(amplify(xp, n, w1), w2) + w2))); break;
 	case 6: out = filter(xp, m, mode2, ring(amplify(xp, n, filter(xp, n, mode1, w1)), w2)); break;
-	case 7: out = filter(xp, m, mode2, clamp16((int64_t)ring(amplify(xp, n, filter(xp, n, mode1, w1)), w2) + w2)); break;
+	case 7: out = filter(xp, m, mode2, clamp24((int64_t)ring(amplify(xp, n, filter(xp, n, mode1, w1)), w2) + w2)); break;
 	case 8:
 		modulator = amplify(xp, n, filter(xp, n, mode1, w1));
 		out = ring(modulator, filter(xp, m, mode2, w2));
@@ -1018,7 +1020,7 @@ static void run_pair(xp_t *xp, int n)
 	default:
 		modulator = amplify(xp, n, filter(xp, n, mode1, w1));
 		carrier = filter(xp, m, mode2, w2);
-		out = clamp16((int64_t)ring(modulator, carrier) + carrier);
+		out = clamp24((int64_t)ring(modulator, carrier) + carrier);
 		break;
 	}
 
