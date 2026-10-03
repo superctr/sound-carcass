@@ -1,18 +1,18 @@
 [submodule "sljit"]
-	path = sljit
+	path = thirdparty/sljit
 	url = https://github.com/zherczeg/sljit
 [submodule "portmidi"]
-	path = portmidi
+	path = thirdparty/portmidi
 	url = https://github.com/portmidi/portmidi
 [submodule "portaudio"]
-	path = portaudio
+	path = thirdparty/portaudio
 	url = https://github.com/PortAudio/portaudio
 [submodule "libsamplerate"]
-	path = libsamplerate
+	path = thirdparty/libsamplerate
 	url = https://github.com/libsndfile/libsamplerate
 [submodule "clap"]
-	path = clap
+	path = thirdparty/clap
 	url = https://github.com/free-audio/clap
 [submodule "pugl"]
-	path = pugl
+	path = thirdparty/pugl
 	url = https://github.com/lv2/pugl

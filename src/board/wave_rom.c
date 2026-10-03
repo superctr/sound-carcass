@@ -1,5 +1,5 @@
 #include <string.h>
-#include "wave_rom.h"
+#include "board/wave_rom.h"
 
 size_t wave_rom_size(scemu_model_t model)
 {

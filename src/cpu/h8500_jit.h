@@ -1,7 +1,7 @@
 #ifndef SCEMU_H8500_JIT_H
 #define SCEMU_H8500_JIT_H
 
-#include "h8500.h"
+#include "cpu/h8500.h"
 
 /* The core's internals the translator drives: the bus, one instruction of
  * the interpreter, the interrupt controller and the peripheral clock. */

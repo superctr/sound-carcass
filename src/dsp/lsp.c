@@ -1,7 +1,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#include "lsp.h"
+#include "dsp/lsp.h"
 #include "state.h"
 
 static const int32_t IMMEDIATE[5] = { 0, 1 << 7, 1 << 12, 1 << 17, 1 << 22 };

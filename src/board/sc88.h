@@ -5,11 +5,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "scemu.h"
-#include "h8500.h"
-#include "xp.h"
-#include "lsp.h"
-#include "lcd.h"
-#include "sub_hle.h"
+#include "cpu/h8500.h"
+#include "dsp/xp.h"
+#include "dsp/lsp.h"
+#include "periph/lcd.h"
+#include "board/sub_hle.h"
 #include "midi_queue.h"
 #include "jit.h"
 

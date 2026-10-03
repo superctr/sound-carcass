@@ -1,5 +1,5 @@
 #include <string.h>
-#include "sub_hle.h"
+#include "board/sub_hle.h"
 #include "state.h"
 
 #define BIT(x, n) (((x) >> (n)) & 1)

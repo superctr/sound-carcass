@@ -5,10 +5,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "scemu.h"
-#include "h8500.h"
-#include "gp.h"
-#include "lcd.h"
-#include "i8251.h"
+#include "cpu/h8500.h"
+#include "dsp/gp.h"
+#include "periph/lcd.h"
+#include "periph/i8251.h"
 #include "midi_queue.h"
 #include "jit.h"
 

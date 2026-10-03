@@ -1,5 +1,5 @@
 #include <string.h>
-#include "uipc.h"
+#include "periph/uipc.h"
 #include "state.h"
 
 #define UIPC_STATUS_RX 0x01

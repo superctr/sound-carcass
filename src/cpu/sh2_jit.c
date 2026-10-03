@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stddef.h>
-#include "sh2_jit.h"
+#include "cpu/sh2_jit.h"
 #include "jit.h"
 
 #if SLJIT_64BIT_ARCHITECTURE

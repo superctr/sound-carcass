@@ -19,8 +19,8 @@ option(SCEMU_BUILD_PLUGIN "Build the CLAP plugin" ON)
 # ---------------------------------------------------------------------------
 # sljit, built from the submodule as a static library
 
-add_library(sljit STATIC sljit/sljit_src/sljitLir.c)
-target_include_directories(sljit PUBLIC sljit/sljit_src)
+add_library(sljit STATIC thirdparty/sljit/sljit_src/sljitLir.c)
+target_include_directories(sljit PUBLIC thirdparty/sljit/sljit_src)
 target_compile_definitions(sljit PUBLIC SLJIT_CONFIG_AUTO=1)
 if(SCEMU_EXTERNAL_EXEC_ALLOCATOR)
 	target_compile_definitions(sljit PUBLIC SLJIT_EXECUTABLE_ALLOCATOR=0)
@@ -33,36 +33,36 @@ endif()
 # the library
 
 add_library(scemu STATIC
-	lib/scemu.c
-	lib/h8500.c
-	lib/sh2.c
-	lib/sh2_jit.c
-	lib/xp.c
-	lib/gp.c
-	lib/lsp.c
-	lib/sc88.c
-	lib/sc8850.c
-	lib/sc8820.c
-	lib/uipc.c
-	lib/sc55.c
-	lib/sc55mk2.c
-	lib/i8251.c
-	lib/state.c
-	lib/midi_queue.c
-	lib/sub_hle.c
-	lib/sub55_hle.c
-	lib/lcd.c
-	lib/glcd.c
-	lib/flash.c
-	lib/wave_rom.c
-	lib/jit.c
-	lib/midi_map.c
+	src/scemu.c
+	src/cpu/h8500.c
+	src/cpu/sh2.c
+	src/cpu/sh2_jit.c
+	src/dsp/xp.c
+	src/dsp/gp.c
+	src/dsp/lsp.c
+	src/board/sc88.c
+	src/board/sc8850.c
+	src/board/sc8820.c
+	src/periph/uipc.c
+	src/board/sc55.c
+	src/board/sc55mk2.c
+	src/periph/i8251.c
+	src/state.c
+	src/midi_queue.c
+	src/board/sub_hle.c
+	src/board/sub55_hle.c
+	src/periph/lcd.c
+	src/periph/glcd.c
+	src/periph/flash.c
+	src/board/wave_rom.c
+	src/jit.c
+	src/midi_map.c
 )
 if(SCEMU_H8500_JIT)
-	target_sources(scemu PRIVATE lib/h8500_jit.c)
+	target_sources(scemu PRIVATE src/cpu/h8500_jit.c)
 	target_compile_definitions(scemu PUBLIC SCEMU_H8500_JIT=1)
 endif()
-target_include_directories(scemu PUBLIC lib)
+target_include_directories(scemu PUBLIC src)
 target_link_libraries(scemu PRIVATE sljit)
 if(NOT MSVC)
 	target_link_libraries(scemu PUBLIC m)
@@ -80,11 +80,11 @@ if(RE2C)
 		COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/play
 		COMMAND ${RE2C} -W --no-generation-date
 		        -o ${CMAKE_CURRENT_BINARY_DIR}/play/config.c
-		        ${CMAKE_CURRENT_SOURCE_DIR}/play/config.re
-		DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/play/config.re
-		COMMENT "re2c play/config.re")
+		        ${CMAKE_CURRENT_SOURCE_DIR}/src/play/config.re
+		DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/play/config.re
+		COMMENT "re2c src/play/config.re")
 	add_library(scemu_config STATIC ${CMAKE_CURRENT_BINARY_DIR}/play/config.c)
-	target_include_directories(scemu_config PUBLIC play)
+	target_include_directories(scemu_config PUBLIC src/play)
 	if(NOT MSVC)
 		target_compile_options(scemu_config PRIVATE -Wall -Wextra)
 	endif()
@@ -96,7 +96,7 @@ endif()
 # tools
 
 if(SCEMU_BUILD_TOOLS)
-	add_executable(scemu-cli cli/scemu_cli.c)
+	add_executable(scemu-cli src/cli/scemu_cli.c)
 	target_link_libraries(scemu-cli PRIVATE scemu)
 endif()
 
@@ -121,19 +121,19 @@ if(ZLIB_FOUND)
 		list(APPEND PANEL_ART panel_sb55_base_p${pitch} panel_sb55_atlas_p${pitch})
 	endforeach()
 	foreach(art ${PANEL_ART})
-		set(src ${CMAKE_CURRENT_SOURCE_DIR}/gui/${art}.png)
+		set(src ${CMAKE_CURRENT_SOURCE_DIR}/src/gui/${art}.png)
 		set(dst ${CMAKE_CURRENT_BINARY_DIR}/gui/${art}_png.c)
 		add_custom_command(OUTPUT ${dst}
 			COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/gui
 			COMMAND ${CMAKE_COMMAND} -DINPUT=${src} -DOUTPUT=${dst} -DSYMBOL=${art}_png
-			        -P ${CMAKE_CURRENT_SOURCE_DIR}/gui/embed.cmake
-			DEPENDS ${src} ${CMAKE_CURRENT_SOURCE_DIR}/gui/embed.cmake
+			        -P ${CMAKE_CURRENT_SOURCE_DIR}/src/gui/embed.cmake
+			DEPENDS ${src} ${CMAKE_CURRENT_SOURCE_DIR}/src/gui/embed.cmake
 			COMMENT "embedding ${art}.png")
 		list(APPEND PANEL_EMBEDS ${dst})
 	endforeach()
-	add_library(scemu_gui STATIC gui/panel.c gui/png.c gui/lcd_font.c gui/combos.c gui/controls.c gui/text.c gui/menu.c
-		gui/brush.c ${PANEL_EMBEDS})
-	target_include_directories(scemu_gui PUBLIC gui)
+	add_library(scemu_gui STATIC src/gui/panel.c src/gui/png.c src/gui/lcd_font.c src/gui/combos.c src/gui/controls.c src/gui/text.c src/gui/menu.c
+		src/gui/brush.c ${PANEL_EMBEDS})
+	target_include_directories(scemu_gui PUBLIC src/gui)
 	target_link_libraries(scemu_gui PUBLIC scemu PRIVATE ZLIB::ZLIB)
 	if(NOT MSVC)
 		target_compile_options(scemu_gui PRIVATE -Wall -Wextra -Wno-unused-parameter)
@@ -157,10 +157,10 @@ if(SCEMU_BUILD_TOOLS)
 	set(LIBSAMPLERATE_EXAMPLES OFF)     # they want libsndfile
 	set(LIBSAMPLERATE_INSTALL OFF)
 	set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-	add_subdirectory(portaudio EXCLUDE_FROM_ALL)
-	add_subdirectory(portmidi EXCLUDE_FROM_ALL)
+	add_subdirectory(thirdparty/portaudio EXCLUDE_FROM_ALL)
+	add_subdirectory(thirdparty/portmidi EXCLUDE_FROM_ALL)
 	set(CMAKE_POLICY_VERSION_MINIMUM 3.5)   # libsamplerate asks for 3.1
-	add_subdirectory(libsamplerate EXCLUDE_FROM_ALL)
+	add_subdirectory(thirdparty/libsamplerate EXCLUDE_FROM_ALL)
 	unset(CMAKE_POLICY_VERSION_MINIMUM)
 	set_target_properties(portaudio portmidi PROPERTIES C_EXTENSIONS ON)
 	if(NOT MSVC)
@@ -174,8 +174,8 @@ endif()
 # boot cache and settings memory, a unit short of a clock, MIDI files, the
 # resampler (zlib reads ROM zips)
 if(ZLIB_FOUND)
-	add_library(scemu_play STATIC play/roms.c play/session.c play/unit.c play/smf.c play/sjis.c play/resample.c)
-	target_include_directories(scemu_play PUBLIC play)
+	add_library(scemu_play STATIC src/play/roms.c src/play/session.c src/play/unit.c src/play/smf.c src/play/sjis.c src/play/resample.c)
+	target_include_directories(scemu_play PUBLIC src/play)
 	target_link_libraries(scemu_play PUBLIC scemu ZLIB::ZLIB samplerate)
 	if(NOT MSVC)
 		target_compile_options(scemu_play PRIVATE -Wall -Wextra -Wno-unused-parameter)
@@ -187,12 +187,12 @@ if(SCEMU_BUILD_PLUGIN AND TARGET scemu_play AND TARGET scemu_gui)
 	# PUGL, from the submodule: the plugin's window, drawn with OpenGL
 	find_package(OpenGL QUIET)
 	if(WIN32)
-		set(PUGL_PLATFORM pugl/src/win.c pugl/src/win_gl.c)
+		set(PUGL_PLATFORM thirdparty/pugl/src/win.c thirdparty/pugl/src/win_gl.c)
 		set(PUGL_LIBS gdi32 user32 shlwapi dwmapi)
 		set(PUGL_FOUND ${OpenGL_FOUND})
 	else()
 		find_package(X11 QUIET)
-		set(PUGL_PLATFORM pugl/src/x11.c pugl/src/x11_gl.c)
+		set(PUGL_PLATFORM thirdparty/pugl/src/x11.c thirdparty/pugl/src/x11_gl.c)
 		set(PUGL_LIBS ${X11_LIBRARIES} ${X11_Xext_LIB})
 		set(PUGL_FOUND ${OpenGL_FOUND})
 		if(NOT X11_FOUND OR NOT X11_Xext_FOUND)
@@ -200,8 +200,8 @@ if(SCEMU_BUILD_PLUGIN AND TARGET scemu_play AND TARGET scemu_gui)
 		endif()
 	endif()
 	if(PUGL_FOUND)
-		add_library(pugl STATIC pugl/src/common.c pugl/src/internal.c ${PUGL_PLATFORM})
-		target_include_directories(pugl PUBLIC pugl/include)
+		add_library(pugl STATIC thirdparty/pugl/src/common.c thirdparty/pugl/src/internal.c ${PUGL_PLATFORM})
+		target_include_directories(pugl PUBLIC thirdparty/pugl/include)
 		target_compile_definitions(pugl PUBLIC PUGL_STATIC PRIVATE PUGL_INTERNAL USE_XRANDR=0 USE_XCURSOR=0)
 		if(NOT WIN32)
 			target_compile_definitions(pugl PRIVATE _POSIX_C_SOURCE=200809L)
@@ -210,10 +210,10 @@ if(SCEMU_BUILD_PLUGIN AND TARGET scemu_play AND TARGET scemu_gui)
 		if(NOT MSVC)
 			target_compile_options(pugl PRIVATE -w)
 		endif()
-		add_library(scemu_clap MODULE plugin/scemu_clap.c plugin/window.c)
+		add_library(scemu_clap MODULE src/plugin/scemu_clap.c src/plugin/window.c)
 		set_target_properties(scemu_clap PROPERTIES OUTPUT_NAME scemu PREFIX "" SUFFIX ".clap"
 			C_VISIBILITY_PRESET hidden)
-		target_include_directories(scemu_clap PRIVATE clap/include)
+		target_include_directories(scemu_clap PRIVATE thirdparty/clap/include)
 		target_link_libraries(scemu_clap PRIVATE scemu_play scemu_gui scemu pugl pthread)
 		if(TARGET scemu_config)   # ROM path and overrides from scgui's settings file
 			target_link_libraries(scemu_clap PRIVATE scemu_config)
@@ -238,7 +238,7 @@ if(PkgConfig_FOUND)
 	pkg_check_modules(GTK4 QUIET IMPORTED_TARGET gtk4)
 endif()
 if(SCEMU_BUILD_TOOLS AND TARGET scemu_gui AND TARGET scemu_config AND GTK4_FOUND)
-	add_executable(scgui app/scgui.c app/machine.c app/midi_io.c play/audio.c)
+	add_executable(scgui src/app/scgui.c src/app/machine.c src/app/midi_io.c src/play/audio.c)
 	add_custom_target(git_version
 		COMMAND ${CMAKE_COMMAND} -DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}
 		        -DOUTPUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/app/git_version.h
@@ -246,7 +246,7 @@ if(SCEMU_BUILD_TOOLS AND TARGET scemu_gui AND TARGET scemu_config AND GTK4_FOUND
 		BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/app/git_version.h
 		COMMENT "the build's git version")
 	add_dependencies(scgui git_version)
-	target_include_directories(scgui PRIVATE play ${CMAKE_CURRENT_BINARY_DIR}/app)
+	target_include_directories(scgui PRIVATE src/play ${CMAKE_CURRENT_BINARY_DIR}/app)
 	target_link_libraries(scgui PRIVATE scemu_gui scemu_play scemu scemu_config ZLIB::ZLIB PkgConfig::GTK4 portaudio
 		portmidi samplerate pthread)
 	if(NOT MSVC)
@@ -261,7 +261,7 @@ endif()
 if(SCEMU_BUILD_TOOLS)
 	find_package(ZLIB QUIET)
 	if(ZLIB_FOUND)
-		add_executable(scplay play/scplay.c play/tui.c play/audio.c)
+		add_executable(scplay src/play/scplay.c src/play/tui.c src/play/audio.c)
 		target_link_libraries(scplay PRIVATE scemu_play scemu ZLIB::ZLIB portaudio samplerate)
 		if(NOT MSVC)
 			target_compile_options(scplay PRIVATE -Wall -Wextra -Wno-unused-parameter)

@@ -5,11 +5,11 @@
 #include "state.h"
 #include "midi_queue.h"
 #include "midi_map.h"
-#include "sc88.h"
-#include "sc8850.h"
-#include "sc8820.h"
-#include "sc55mk2.h"
-#include "sc55.h"
+#include "board/sc88.h"
+#include "board/sc8850.h"
+#include "board/sc8820.h"
+#include "board/sc55mk2.h"
+#include "board/sc55.h"
 
 /* What a board owes the API.  A board is one machine family's glue: its CPU, its memory map, its
  * gate array and display, wired to the chips; the API dispatches to whichever the model names. */

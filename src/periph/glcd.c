@@ -1,5 +1,5 @@
 #include <string.h>
-#include "glcd.h"
+#include "periph/glcd.h"
 #include "state.h"
 
 #define GLCD_LINES 64

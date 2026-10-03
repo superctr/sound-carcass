@@ -1,5 +1,5 @@
 #include <string.h>
-#include "lcd.h"
+#include "periph/lcd.h"
 #include "state.h"
 
 void lcd_init(lcd_t *lcd)

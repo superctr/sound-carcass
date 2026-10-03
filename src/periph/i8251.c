@@ -1,4 +1,4 @@
-#include "i8251.h"
+#include "periph/i8251.h"
 #include "state.h"
 
 void i8251_reset(i8251_t *u)

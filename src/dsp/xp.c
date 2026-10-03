@@ -2,7 +2,7 @@
 #include <string.h>
 #include <math.h>
 #include <stddef.h>
-#include "xp.h"
+#include "dsp/xp.h"
 #include "state.h"
 
 static const int16_t interp_weights[3][128] = {

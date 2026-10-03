@@ -1,5 +1,5 @@
 #include <string.h>
-#include "gp.h"
+#include "dsp/gp.h"
 #include "state.h"
 
 static const int16_t interp_weights[3][128] = {

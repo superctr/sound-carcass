@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "scemu_internal.h"
-#include "wave_rom.h"
+#include "board/wave_rom.h"
 
 #define PE_MUTE_RELEASE 0x0200
 #define PE_POWER_LAMP 0x0010

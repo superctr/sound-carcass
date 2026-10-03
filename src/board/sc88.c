@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "scemu_internal.h"
-#include "wave_rom.h"
+#include "board/wave_rom.h"
 
 typedef struct rom_layout
 {

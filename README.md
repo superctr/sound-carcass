@@ -14,11 +14,11 @@ cmake --build build
 ```
 
 Options: `-DSCEMU_BUILD_TOOLS=OFF` builds the library alone; `-DSCEMU_EXTERNAL_EXEC_ALLOCATOR=ON` leaves
-executable memory to the integrator (see `scemu_config` in `lib/scemu.h`).
+executable memory to the integrator (see `scemu_config` in `src/scemu.h`).
 
 ## Using the library
 
-`lib/scemu.h` is the whole interface.  Create an instance from the ROM images, boot it, feed it MIDI bytes
+`src/scemu.h` is the whole interface.  Create an instance from the ROM images, boot it, feed it MIDI bytes
 and render frames at the machine's own rate — 32 kHz, the SC-55mkII's own 66206 Hz and the SC-55's
 64000 Hz, which `scemu_sample_rate` reports:
 
@@ -42,7 +42,7 @@ renders a song to a WAV file. This tool is mainly used for debugging.
 `scplay song.mid` plays a Standard MIDI File to the speakers with the front panel drawn in the terminal.
 See [docs/scplay.md](docs/scplay.md).
 
-`scgui` is the same player as a desktop window: the front panel drawn from `gui/`'s artwork, its
+`scgui` is the same player as a desktop window: the front panel drawn from `src/gui/`'s artwork, its
 buttons under the mouse, the volume knob and the SC-8850's value dial under the wheel, a playlist in a
 second window.  It needs GTK 4 besides zlib.  See [docs/scgui.md](docs/scgui.md).
 

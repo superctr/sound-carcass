@@ -1,6 +1,6 @@
 #include <string.h>
-#include "h8500.h"
-#include "h8500_jit.h"
+#include "cpu/h8500.h"
+#include "cpu/h8500_jit.h"
 #include "state.h"
 
 #define FLAG_C 0x0001u

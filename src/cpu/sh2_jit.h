@@ -1,7 +1,7 @@
 #ifndef SCEMU_SH2_JIT_H
 #define SCEMU_SH2_JIT_H
 
-#include "sh2.h"
+#include "cpu/sh2.h"
 
 /* The core's internals a translator drives: the bus, one instruction of the
  * interpreter, the interrupt controller and the peripheral clock. */

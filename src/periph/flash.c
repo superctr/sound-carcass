@@ -1,5 +1,5 @@
 #include <string.h>
-#include "flash.h"
+#include "periph/flash.h"
 #include "state.h"
 
 #define STATUS_READY 0x80

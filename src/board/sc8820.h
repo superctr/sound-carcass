@@ -5,11 +5,11 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include "scemu.h"
-#include "sh2.h"
-#include "xp.h"
-#include "lsp.h"
-#include "flash.h"
-#include "uipc.h"
+#include "cpu/sh2.h"
+#include "dsp/xp.h"
+#include "dsp/lsp.h"
+#include "periph/flash.h"
+#include "periph/uipc.h"
 #include "midi_queue.h"
 #include "jit.h"
 

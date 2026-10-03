@@ -1,7 +1,7 @@
 #include <string.h>
-#include "sh2.h"
+#include "cpu/sh2.h"
 #include "state.h"
-#include "sh2_jit.h"
+#include "cpu/sh2_jit.h"
 
 #define SR_T 0x00000001u
 #define SR_S 0x00000002u

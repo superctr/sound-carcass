@@ -1,5 +1,5 @@
 #include <string.h>
-#include "sub55_hle.h"
+#include "board/sub55_hle.h"
 #include "state.h"
 
 #define DP_TX_BLOCK 0x00

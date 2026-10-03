@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "scemu_internal.h"
-#include "wave_rom.h"
+#include "board/wave_rom.h"
 
 const char *sc55mk2_validate_roms(scemu_model_t model, const scemu_roms_t *roms)
 {
